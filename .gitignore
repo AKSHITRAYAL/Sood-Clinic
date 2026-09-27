@@ -6,6 +6,7 @@ Frontend/.vite/
 # Local development data and logs
 .mongodb/
 .runtime/
+.npm-cache/
 *.log
 
 # Secrets and editor files

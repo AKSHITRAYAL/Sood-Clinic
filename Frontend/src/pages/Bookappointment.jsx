@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import Navbar from '../components/Navbar';
 import axios from 'axios'
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:3001';
+
 const Bookappointment = () => {
     const [filteredDoctors, setFilteredDoctors] = useState([]);
     const [profile, setProfile] = useState('')
@@ -25,19 +27,19 @@ const Bookappointment = () => {
     const [branchId, setBranchId] = useState('')
 
     useEffect(() => {
-        axios.get('http://127.0.0.1:3001/api/v1/public/booking/branches')
+        axios.get(`${API_BASE_URL}/api/v1/public/booking/branches`)
             .then((res) => setBranchId(res.data.data[0]?._id || ''))
             .catch(() => setProfile('Booking is temporarily unavailable. Please try again later.'));
     }, [])
     useEffect(() => {
         if (!branchId) return;
-        axios.get(`http://127.0.0.1:3001/api/v1/public/booking/branches/${branchId}/departments`)
+        axios.get(`${API_BASE_URL}/api/v1/public/booking/branches/${branchId}/departments`)
             .then((res) => setData(res.data.data))
             .catch(() => setProfile('Unable to load available departments.'));
     }, [branchId]);
     useEffect(() => {
         if (!branchId || !formData.department) { setFilteredDoctors([]); return; }
-        axios.get(`http://127.0.0.1:3001/api/v1/public/booking/branches/${branchId}/departments/${formData.department}/doctors`)
+        axios.get(`${API_BASE_URL}/api/v1/public/booking/branches/${branchId}/departments/${formData.department}/doctors`)
             .then((res) => { setDocData(res.data.data); setFilteredDoctors(res.data.data); })
             .catch(() => { setDocData([]); setFilteredDoctors([]); setProfile('Unable to load doctors for this department.'); });
     }, [branchId, formData.department]);
@@ -54,7 +56,7 @@ const Bookappointment = () => {
         if (!schedule) { setProfile('This doctor is not available on the selected day.'); return; }
         const startsAt = new Date(`${formData.appointmentDate}T${formData.appointmentTime}:00`);
         const endsAt = new Date(startsAt.getTime() + schedule.slotMinutes * 60000);
-        axios.post('http://127.0.0.1:3001/api/v1/public/booking/appointments', {
+        axios.post(`${API_BASE_URL}/api/v1/public/booking/appointments`, {
           branchId,
           departmentId: formData.department,
           doctorId: formData.doctor,

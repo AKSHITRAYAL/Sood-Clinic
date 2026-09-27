@@ -4,7 +4,9 @@ import './index.css'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App.jsx'
 import { ThemeProvider } from "./components/theme-provider.jsx"
+import { initializeAnalytics } from './lib/firebase.js'
 
+void initializeAnalytics();
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
