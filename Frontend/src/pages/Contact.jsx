@@ -1,114 +1,31 @@
-import React from 'react'
-import { ContactForm, ContactCards } from '../components/rev'
-import Navbar from '../components/Navbar'
-import { useState,useEffect } from 'react'
-import axios from 'axios'
+import Navbar from '../components/Navbar';
+import Footer from '../components/Footer';
 
+const clinicAddress = 'House No. 398, Sector 10, Panchkula, Haryana 134109, India';
 
-const Contact = () => {
-  const doctorImageURL = "https://images.pexels.com/photos/5215024/pexels-photo-5215024.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1";
-  const [name, setName] = useState('')
-  const [profile, setProfile] = useState('')
-
-  const [email, setEmail] = useState('')
-  const [message, setMessage] = useState('')
-  const [title, setTitle] = useState('')
-
-
-  const handelsubmit = (e) =>{
-    e.preventDefault();
-    
-    axios.post('http://localhost:3001/message', { name,email,message,title })
-    .then((res)=>{console.log(res)
-      setProfile('Message Sended Successfully!')
-      setTimeout(() => {
-        setProfile('')
-      }, 3000);
-
-    })
-    .catch((err)=>{console.log(err)})
-  }
-  return (
-
-    <div>
-      <Navbar />
-
-      <ContactCards />
-      <div className="flex flex-col md:flex-row md:gap-2 h-auto lg:flex-row items-center p-6  ">
-        {/* Left Side: Doctor Image */}
-        <div className="w-full h-[90vh] lg:w-1/2 mb-6 lg:mb-0 ">
-          <img
-            src={doctorImageURL}
-            alt="Doctor"
-            className="w-full rounded-lg shadow-md object-cover h-full"
-          />
-        </div>
-
-        {/* Right Side: Contact Form */}
-
-        <div className="w-full h-full lg:w-1/2 lg:pl-8">
-
-          <h4 className="text-green-500 font-semibold">CONTACT US</h4>
-          <h1 className=" text-3xl lg:text-4xl font-bold mt-2 mb-6">
-            Send a Message <br /> & apply for treatments
-          </h1>
-
-          <form onSubmit={handelsubmit} className="space-y-4">
-            <label htmlFor="" className="text-xl text-red-600">{profile}</label>
-            <div className="flex flex-col lg:flex-row gap-4">
-              <input
-                type="text"
-                placeholder="Your Name *"
-                onChange={(e)=>setName(e.target.value)}
-                className="w-full p-3 border border-gray-300 rounded-md text-lg"
-              />
-              <input
-                type="email"
-                placeholder="Your Email *"
-                onChange={(e)=>setEmail(e.target.value)}
-                className="w-full p-3 border border-gray-300 rounded-md text-lg"
-              />
-            </div>
-
-            <div className="flex flex-col lg:flex-row gap-4">
-
-              <input
-                type="text"
-                placeholder="Subject *"
-                onChange={(e)=>setTitle(e.target.value)}
-                className="w-full p-3 border border-gray-300 rounded-md text-lg"
-              />
-            </div>
-
-            <textarea
-            required
-            onChange={(e)=>setMessage(e.target.value)}
-              placeholder="Message"
-              className="w-full p-3 border border-gray-300 rounded-md text-lg h-32"
-            />
-
-            <button
-              type="submit"
-              className="w-full lg:w-auto bg-green-500 text-white font-semibold py-3 px-6 rounded-md flex items-center justify-center space-x-2 hover:bg-green-600"
-            >
-              <span>SUBMIT NOW</span>
-              <span className="transform ">✈️</span>
-            </button>
-          </form>
-        </div>
+const Contact = () => (
+  <>
+    <Navbar />
+    <main className="container mx-auto max-w-6xl px-5 py-12">
+      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-700">Visit Sood Clinic</p>
+      <h1 className="mt-3 text-4xl font-bold">Contact &amp; clinic information</h1>
+      <div className="mt-8 grid gap-8 md:grid-cols-2">
+        <section className="rounded-2xl border bg-white p-7 shadow-sm">
+          <h2 className="text-2xl font-semibold">Sood Clinic</h2>
+          <p className="mt-4 leading-7">{clinicAddress}</p>
+          <h3 className="mt-7 text-lg font-semibold">Consultation hours</h3>
+          <p className="mt-2">Monday–Saturday</p>
+          <p>8:00 AM–10:00 AM · 5:00 PM–6:30 PM</p>
+          <p className="mt-5 text-sm text-slate-500">Hours are published from the doctor’s profile and should be confirmed before visiting.</p>
+          <a className="mt-6 inline-flex rounded-lg bg-[#4d8cc6] px-5 py-3 font-medium text-white hover:bg-[#3775ad]" href="https://maps.google.com/?q=House+No+398+Sector+10+Panchkula+Haryana+134109" target="_blank" rel="noreferrer">Get directions</a>
+        </section>
+        <section className="overflow-hidden rounded-2xl border shadow-sm">
+          <iframe title="Sood Clinic location" className="h-[420px] w-full border-0" src="https://www.google.com/maps?q=House%20No%20398%2C%20Sector%2010%2C%20Panchkula%2C%20Haryana%20134109&output=embed" allowFullScreen loading="lazy" />
+        </section>
       </div>
-      <div className="overflow-hidden max-w-full w-full h-[500px]">
-        <div id="google-maps-canvas" className="h-full w-full max-w-full">
-          <iframe
-            title="Google Maps"
-            className="h-full w-full border-0"
-            src="https://www.google.com/maps/embed/v1/place?q=Statue+Of+Liberty&key=AIzaSyBFw0Qbyq9zTFTd-tUY6dZWTgaQzuU17R8"
-            allowFullScreen
-          ></iframe>
-        </div>
-      </div>
-    </div>
-  )
-}
+    </main>
+    <Footer />
+  </>
+);
 
-export default Contact
+export default Contact;

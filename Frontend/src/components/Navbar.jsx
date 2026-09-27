@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import menu from '../assets/svgs/menu.svg';
 import cross from '../assets/images/cross.png';
-import soodClinicLogo from '../assets/images/sood-clinic-logo.png';
+import SoodClinicMark from './SoodClinicMark';
 import { ModeToggle } from './ModeToggle';
 
 const navClass = ({ isActive }) => (isActive
@@ -26,12 +26,7 @@ const Navbar = () => {
   return (
     <nav className="relative w-full bg-gg text-white">
       <div className="container mx-auto flex h-[90px] w-full items-center justify-between px-2">
-        <Link to="/" className="flex h-full items-center gap-3 rounded-br-[42px] border bg-white px-3 text-slate-900" aria-label="Sood Clinic home">
-          <span className="h-[66px] w-[90px] overflow-hidden rounded-xl bg-black">
-            <img className="h-[180px] w-full max-w-none object-cover object-[center_52%]" src={soodClinicLogo} alt="Sood Clinic logo" />
-          </span>
-          <span className="hidden text-lg font-bold sm:inline">Sood Clinic</span>
-        </Link>
+        <Link to="/" className="flex h-full items-center rounded-br-[42px] border bg-white px-4" aria-label="Sood Clinic home"><SoodClinicMark /></Link>
 
         <button type="button" onClick={() => setMenuOpen((open) => !open)} className="h-10 w-10 lg:hidden md:hidden" aria-label="Toggle navigation">
           <img src={menuOpen ? cross : menu} width={25} height={25} className="transition-all duration-75" alt="" />

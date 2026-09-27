@@ -52,7 +52,12 @@ const Bookappointment = () => {
         e.preventDefault();
         const doctor = docdata.find((item) => item.id === formData.doctor);
         const appointmentDay = new Date(`${formData.appointmentDate}T00:00:00`).getDay();
-        const schedule = doctor?.schedule?.find((rule) => rule.weekday === appointmentDay);
+        const selectedMinutes = Number(formData.appointmentTime.split(':')[0]) * 60 + Number(formData.appointmentTime.split(':')[1]);
+        const schedule = doctor?.schedule?.find((rule) => {
+          const [startHour, startMinute] = rule.startTime.split(':').map(Number);
+          const [endHour, endMinute] = rule.endTime.split(':').map(Number);
+          return rule.weekday === appointmentDay && selectedMinutes >= startHour * 60 + startMinute && selectedMinutes < endHour * 60 + endMinute;
+        });
         if (!schedule) { setProfile('This doctor is not available on the selected day.'); return; }
         const startsAt = new Date(`${formData.appointmentDate}T${formData.appointmentTime}:00`);
         const endsAt = new Date(startsAt.getTime() + schedule.slotMinutes * 60000);

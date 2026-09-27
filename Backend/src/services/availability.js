@@ -26,12 +26,16 @@ async function validateBooking({ branchId, departmentId, doctorId, startsAt, end
   const weekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(parts.find((part) => part.type === 'weekday')?.value);
   const hour = Number(parts.find((part) => part.type === 'hour')?.value); const minute = Number(parts.find((part) => part.type === 'minute')?.value);
   const startMinutes = hour * 60 + minute; const durationMinutes = (end - start) / 60000;
-  const schedule = doctor.weeklySchedule.find((rule) => rule.weekday === weekday);
-  if (!schedule) throw new AppError(422, 'The doctor does not accept appointments on the selected day.');
-  const [scheduleStartHour, scheduleStartMinute] = schedule.startTime.split(':').map(Number);
-  const [scheduleEndHour, scheduleEndMinute] = schedule.endTime.split(':').map(Number);
-  const scheduleStart = scheduleStartHour * 60 + scheduleStartMinute; const scheduleEnd = scheduleEndHour * 60 + scheduleEndMinute;
-  if (durationMinutes !== schedule.slotMinutes || startMinutes < scheduleStart || startMinutes + durationMinutes > scheduleEnd || (startMinutes - scheduleStart) % schedule.slotMinutes !== 0) throw new AppError(422, 'The selected time is outside the doctor’s published appointment slots.');
+  const schedules = doctor.weeklySchedule.filter((rule) => rule.weekday === weekday);
+  if (!schedules.length) throw new AppError(422, 'The doctor does not accept appointments on the selected day.');
+  const schedule = schedules.find((rule) => {
+    const [scheduleStartHour, scheduleStartMinute] = rule.startTime.split(':').map(Number);
+    const [scheduleEndHour, scheduleEndMinute] = rule.endTime.split(':').map(Number);
+    const scheduleStart = scheduleStartHour * 60 + scheduleStartMinute;
+    const scheduleEnd = scheduleEndHour * 60 + scheduleEndMinute;
+    return durationMinutes === rule.slotMinutes && startMinutes >= scheduleStart && startMinutes + durationMinutes <= scheduleEnd && (startMinutes - scheduleStart) % rule.slotMinutes === 0;
+  });
+  if (!schedule) throw new AppError(422, 'The selected time is outside the doctor’s published appointment slots.');
   const onLeave = doctor.leavePeriods.some((leave) => leave.startAt <= start && leave.endAt >= end);
   if (onLeave) throw new AppError(422, 'The doctor is unavailable during that time.');
   const conflict = await Appointment.exists({ doctor: doctorId, status: { $in: ['booked', 'checked_in', 'triage', 'in_consultation'] }, startsAt: { $lt: end }, endsAt: { $gt: start } });
