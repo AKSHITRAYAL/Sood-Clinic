@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Navbar from '../components/Navbar';
+import Footer from '../components/Footer';
 import axios from 'axios'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:3001';
@@ -100,11 +101,17 @@ const Bookappointment = () => {
 
         <>
             <Navbar />
-            <div className="max-w-lg mx-auto p-6  shadow-lg rounded-lg">
-                <h2 className="text-2xl font-bold text-center mb-4">Book an Appointment</h2>
+            <main className="booking-page">
+              <section className="booking-page__intro">
+                <p>SOOD CLINIC · PANCHKULA</p>
+                <h1>Book your consultation</h1>
+                <span>Choose a department and doctor, then select a convenient time for your visit.</span>
+              </section>
+            <div className="booking-card">
+                <h2>Appointment details</h2>
 
-                <form onSubmit={handleSubmit} className="space-y-4">
-                <label htmlFor="" className="text-xl text-red-600">{profile}</label>
+                <form onSubmit={handleSubmit} className="booking-form">
+                {profile && <p className="booking-message" role="status">{profile}</p>}
 
                     {/* Name */}
                     <div>
@@ -281,6 +288,8 @@ const Bookappointment = () => {
                     </div>
                 </form>
             </div>
+            </main>
+            <Footer />
         </>
 
     );

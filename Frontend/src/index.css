@@ -1,8 +1,10 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #152a4b; background: #f7fbff; }
+:root { font-family: Manrope, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #152a4b; background: #f7fbff; font-synthesis: none; }
 * { box-sizing: border-box; }
 body, .dark { margin: 0; min-width: 320px; background: #f7fbff !important; color: #152a4b !important; }
 a { text-decoration: none; }
@@ -44,3 +46,50 @@ a { text-decoration: none; }
 .clinic-feature p { margin: 0; color: #5b6d85; font-size: .82rem; line-height: 1.45; }
 
 @media (max-width: 900px) { .site-nav__inner { min-height: 70px; } .notice-carousel { min-height: 520px; height: 72vh; } .notice-carousel__image { object-position: 62% center; } .notice-carousel::after { background: linear-gradient(180deg, rgba(247,251,255,.9), rgba(247,251,255,.54) 55%, rgba(7,42,83,.45)); } .notice-carousel__overlay { top: auto; bottom: 3.5rem; left: 1.25rem; width: calc(100% - 2.5rem); transform: none; } .notice-carousel__overlay h1 { color: #112c56; font-size: clamp(2.35rem, 11vw, 3.2rem); } .notice-carousel__overlay h1::after { margin-top: 1rem; font-size: 1rem; } .hero-appointment-button { margin-top: 1.35rem; padding: .82rem 1rem; } .brand-logo__name { display: none; } .clinic-feature-section { width: 100%; margin-top: 1.5rem; } .clinic-feature-bar { display: flex; overflow-x: auto; border-radius: 0; scroll-snap-type: x mandatory; scrollbar-width: none; } .clinic-feature-bar::-webkit-scrollbar { display: none; } .clinic-feature { flex: 0 0 86%; padding: 1.15rem 1.25rem 1.25rem; scroll-snap-align: start; border-right: 1px solid #e2edf8; } .clinic-feature h3 { font-size: 1.05rem; } .clinic-feature p { font-size: .88rem; } }
+
+/* Shared clinic interface: a single responsive type and spacing scale. */
+.site-nav { position: sticky; top: 0; }
+.site-nav__inner { max-width: 1180px; min-height: 76px; }
+.brand-logo__crop { width: 94px; height: 54px; border-radius: 0; }
+.brand-logo__crop img { width: 147px; left: -25px; top: -101px; }
+.brand-logo__name { font-size: 1rem; font-weight: 800; }
+.nav-link { padding: .7rem .65rem; font-size: .82rem; font-weight: 700; }
+.nav-cta { padding: .75rem 1rem; font-size: .82rem; }
+
+.home-feature-strip { position: relative; z-index: 3; display: grid; grid-template-columns: repeat(4, 1fr); width: min(1120px, calc(100% - 2rem)); margin: -3.2rem auto 0; overflow: hidden; border: 1px solid #dce8f5; border-radius: 1rem; background: #fff; box-shadow: 0 14px 32px rgba(23,63,118,.14); }
+.home-feature { display: flex; gap: .8rem; min-width: 0; padding: 1.25rem 1.15rem; border-right: 1px solid #e5eef7; }
+.home-feature:last-child { border-right: 0; }
+.home-feature > span { display: grid; flex: 0 0 auto; width: 2.2rem; height: 2.2rem; place-items: center; border: 1.5px solid #2380df; border-radius: 50%; color: #1975d2; font-size: 1.2rem; line-height: 1; }
+.home-feature h2 { margin: .05rem 0 .22rem; color: #163f78; font-size: .9rem; font-weight: 800; letter-spacing: -.02em; line-height: 1.2; }
+.home-feature p { margin: 0; color: #6a7c96; font-size: .74rem; font-weight: 500; line-height: 1.4; }
+
+.site-footer { margin-top: 4rem; border-top: 1px solid #dce8f5; background: #fff; }
+.site-footer__inner { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; width: min(1120px, calc(100% - 2rem)); margin: 0 auto; padding: 1.5rem 0; }
+.site-footer__brand .brand-logo__crop { width: 70px; height: 40px; }
+.site-footer__brand .brand-logo__crop img { width: 110px; left: -19px; top: -76px; }
+.site-footer__address { margin: 0; color: #536883; font-size: .78rem; font-weight: 600; }
+.site-footer__links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 1.15rem; }
+.site-footer__links a { color: #365273; font-size: .78rem; font-weight: 700; }
+.site-footer__links a:hover { color: #176dcc; }
+
+.booking-page { min-height: calc(100vh - 76px); padding: 4.75rem 1.25rem 5rem; background: radial-gradient(circle at 85% 12%, #dceeff 0, transparent 34rem), #f7fbff; }
+.booking-page__intro { width: min(760px, 100%); margin: 0 auto 2rem; text-align: center; }
+.booking-page__intro p { margin: 0 0 .7rem; color: #1a72d2; font-size: .72rem; font-weight: 800; letter-spacing: .16em; }
+.booking-page__intro h1 { margin: 0; color: #143b70; font-size: clamp(2rem, 5vw, 3rem); font-weight: 800; letter-spacing: -.055em; line-height: 1.1; }
+.booking-page__intro span { display: block; max-width: 520px; margin: 1rem auto 0; color: #61728b; font-size: .95rem; line-height: 1.6; }
+.booking-card { width: min(760px, 100%); margin: 0 auto; padding: clamp(1.3rem, 4vw, 2.5rem); border: 1px solid #dce8f5; border-radius: 1.25rem; background: #fff; box-shadow: 0 18px 45px rgba(22,63,112,.10); }
+.booking-card h2 { margin: 0 0 1.5rem; color: #173f76; font-size: 1.25rem; font-weight: 800; letter-spacing: -.03em; }
+.booking-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.15rem; }
+.booking-form > div { min-width: 0; }
+.booking-form label { display: block; margin: 0 0 .42rem; color: #29496e; font-size: .78rem; font-weight: 800; }
+.booking-form input, .booking-form select { width: 100%; min-height: 46px; border: 1px solid #cddded !important; border-radius: .55rem; background: #fff; color: #19395f; padding: .7rem .8rem; font: inherit; font-size: .88rem; outline: none; transition: border-color .2s, box-shadow .2s; }
+.booking-form input:focus, .booking-form select:focus { border-color: #2780df !important; box-shadow: 0 0 0 3px rgba(39,128,223,.13); }
+.booking-form > label { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: .6rem; margin: .15rem 0; color: #5b6d85; font-size: .78rem; font-weight: 600; line-height: 1.45; }
+.booking-form > label input { width: 1rem; min-height: 1rem; margin-top: .1rem; padding: 0; }
+.booking-form .text-center { grid-column: 1 / -1; margin-top: .25rem; }
+.booking-form button { width: 100%; min-height: 48px; border: 0; border-radius: .6rem; background: #176dcc !important; color: #fff; font: inherit; font-size: .9rem; font-weight: 800; box-shadow: 0 10px 20px rgba(23,109,204,.18); }
+.booking-form button:hover { background: #0f5bad !important; }
+.booking-message { grid-column: 1 / -1; margin: 0; border-radius: .55rem; background: #eef6ff; color: #175fae; padding: .85rem 1rem; font-size: .86rem; font-weight: 700; }
+
+@media (max-width: 900px) { .brand-logo__name { display: inline; } .home-feature-strip { margin-top: -2rem; } }
+@media (max-width: 680px) { .site-nav__inner { min-height: 68px; padding-left: 1rem; padding-right: 1rem; } .brand-logo { gap: .35rem; } .brand-logo__crop { width: 75px; height: 43px; } .brand-logo__crop img { width: 118px; left: -20px; top: -81px; } .brand-logo__name { font-size: .88rem; } .mobile-nav { padding: .75rem 1rem 1rem; } .mobile-nav .nav-link { padding: .82rem .4rem; } .home-feature-strip { display: flex; width: calc(100% - 2rem); margin-top: -2rem; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; } .home-feature-strip::-webkit-scrollbar { display: none; } .home-feature { flex: 0 0 88%; padding: 1rem; scroll-snap-align: start; border-right: 1px solid #e5eef7; } .site-footer { margin-top: 2.5rem; } .site-footer__inner { flex-direction: column; gap: .85rem; padding: 1.5rem 0; text-align: center; } .site-footer__links { justify-content: center; gap: .75rem 1rem; } .booking-page { padding: 3rem 1rem; } .booking-card { border-radius: .9rem; padding: 1.25rem; } .booking-form { grid-template-columns: 1fr; gap: 1rem; } .booking-form > label, .booking-form .text-center { grid-column: auto; } }

@@ -1,6 +1,5 @@
 import Navbar from '../components/Navbar';
 import NoticeSlider from '../components/Slider';
-import { ServicesSection } from '../components/rev';
 import Footer from '../components/Footer';
 import SoodClinicMark from '../components/SoodClinicMark';
 
@@ -9,10 +8,9 @@ const Home = () => (
     <Navbar />
     <main>
       <NoticeSlider />
-      <section className="relative z-10 mx-auto -mt-10 grid w-[min(1120px,calc(100%-2rem))] grid-cols-2 gap-px overflow-hidden rounded-2xl border border-slate-100 bg-slate-100 shadow-xl md:grid-cols-4">
-        {[['Specialist care', 'Gastroenterology expertise'], ['Flexible consultations', 'In-clinic & video visits'], ['Convenient hours', 'Monday to Saturday'], ['Patient-first', 'Clear, personal support']].map(([title, detail]) => <div key={title} className="bg-white px-5 py-6"><p className="font-bold text-[#173f76]">{title}</p><p className="mt-1 text-sm text-slate-500">{detail}</p></div>)}
+      <section className="home-feature-strip" aria-label="Sood Clinic benefits">
+        {[['Specialist care', 'Gastroenterology expertise', '✦'], ['Flexible consultations', 'In-clinic & video visits', '◌'], ['Convenient hours', 'Monday to Saturday', '◷'], ['Patient-first', 'Clear, personal support', '♡']].map(([title, detail, icon]) => <article key={title} className="home-feature"><span aria-hidden="true">{icon}</span><div><h2>{title}</h2><p>{detail}</p></div></article>)}
       </section>
-      <ServicesSection />
       <section className="container mx-auto my-12 max-w-4xl px-5 text-center">
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-700">Sood Clinic leadership</p>
         <h1 className="mt-3 text-3xl font-semibold md:text-5xl">Dr. Brig. A. K. Sood VSM (Retd)</h1>
