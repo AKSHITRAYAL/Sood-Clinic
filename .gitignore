@@ -7,6 +7,7 @@ Frontend/.vite/
 .mongodb/
 .runtime/
 .npm-cache/
+.firebase-config/
 *.log
 
 # Secrets and editor files
