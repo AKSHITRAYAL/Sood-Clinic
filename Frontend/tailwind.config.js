@@ -8,8 +8,8 @@ export default {
   theme: {
     extend: {
       colors: {
-        'gg': '#4CAF50', 
-        'bb': '#2196F3'
+        'gg': '#ffffff',
+        'bb': '#126bca'
       },
     },
   },

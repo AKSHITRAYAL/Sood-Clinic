@@ -2,62 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
+:root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #152a4b; background: #f7fbff; }
+* { box-sizing: border-box; }
+body, .dark { margin: 0; min-width: 320px; background: #f7fbff !important; color: #152a4b !important; }
+a { text-decoration: none; }
 
-[class='dark'] {
-    background-color:  #1E1E1E;
-    color: #ffffff; /* Dark mode text color */
-  }
+.site-nav { position: relative; z-index: 20; border-bottom: 1px solid #e0edf8; background: rgba(255,255,255,.96); color: #18345e; box-shadow: 0 8px 24px rgba(23,74,128,.06); }
+.site-nav__inner { min-height: 82px; }
+.brand-logo { display: inline-flex; align-items: center; gap: .72rem; color: #173f76; }
+.brand-logo__crop { position: relative; display: block; width: 122px; height: 66px; overflow: hidden; border-radius: 12px; background: #fff; }
+.brand-logo__crop img { position: absolute; width: 186px; max-width: none; height: auto; left: -32px; top: -127px; }
+.brand-logo__name { font-size: 1.1rem; font-weight: 750; letter-spacing: -.02em; white-space: nowrap; }
+.nav-link { border-bottom: 2px solid transparent; padding: .65rem .75rem; font-size: .94rem; font-weight: 600; color: #334b70; transition: .2s ease; }
+.nav-link:hover, .nav-link--active { border-color: #1c75d8; color: #135fae; }
+.nav-cta { border-radius: .55rem; background: #176dcc; padding: .78rem 1.15rem; color: #fff; font-size: .9rem; font-weight: 700; box-shadow: 0 9px 18px rgba(23,109,204,.22); transition: .2s ease; }
+.nav-cta:hover { background: #0f5bad; transform: translateY(-1px); }
+.mobile-nav { background: #fff; color: #18345e; box-shadow: 0 18px 24px rgba(23,74,128,.13); }
 
+.notice-carousel { position: relative; height: min(68vh, 660px); min-height: 420px; overflow: hidden; background: #dceefe; }
+.notice-carousel__image { width: 100%; height: 100%; object-fit: cover; object-position: center; animation: notice-fade .35s ease-out; }
+.notice-carousel::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(247,251,255,.98) 0%, rgba(247,251,255,.83) 31%, rgba(247,251,255,.08) 64%, rgba(7,42,83,.1)); }
+.notice-carousel__overlay { position: absolute; z-index: 1; top: 50%; left: max(2rem, calc((100% - 1140px)/2)); width: min(520px, 46vw); transform: translateY(-50%); color: #112c56; }
+.notice-carousel__overlay p { margin: 0 0 1rem; color: #1b72d2; font-size: .78rem; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+.notice-carousel__overlay h1 { margin: 0; font-size: clamp(2.8rem, 5vw, 5rem); line-height: .98; font-weight: 800; letter-spacing: -.055em; }
+.notice-carousel__overlay h1::after { content: 'Compassionate specialist care, built around you.'; display: block; max-width: 380px; margin-top: 1.3rem; color: #53647d; font-size: clamp(1rem, 1.5vw, 1.18rem); font-weight: 500; letter-spacing: 0; line-height: 1.55; }
+.notice-carousel__dots { position: absolute; z-index: 2; display: flex; gap: .5rem; right: 2rem; bottom: 2rem; }
+.notice-carousel__dots button { width: .65rem; height: .65rem; border: 0; border-radius: 50%; padding: 0; background: rgba(255,255,255,.7); cursor: pointer; }
+.notice-carousel__dots button.active { width: 1.9rem; border-radius: 2rem; background: #176dcc; }
+@keyframes notice-fade { from { opacity: .65; transform: scale(1.015); } to { opacity: 1; transform: scale(1); } }
 
-  body {
-    transition: background-color 0.3s, color 0.3s;
-  }
-
-
-  .notice-slider {
-    max-width: 80%;
-    margin: auto;
-    
-    margin-top: 20px;
-  }
-  
-  .notice-slide img {
-    width: 100%;
-    height: 70vh;
-  }
-
-  .notice-carousel {
-    position: relative;
-    height: min(70vh, 680px);
-    min-height: 360px;
-    overflow: hidden;
-    border-radius: 1rem;
-    margin: .25rem auto 0;
-    width: min(100%, 1440px);
-    background: #123;
-  }
-
-  .notice-carousel__image {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    animation: notice-fade .35s ease-out;
-  }
-
-  .notice-carousel__overlay {
-    position: absolute;
-    inset: auto 0 0;
-    padding: clamp(1.5rem, 4vw, 4rem);
-    color: white;
-    background: linear-gradient(transparent, rgba(3, 18, 25, .82));
-  }
-
-  .notice-carousel__overlay p { margin: 0 0 .5rem; font-size: .85rem; letter-spacing: .1em; text-transform: uppercase; }
-  .notice-carousel__overlay h1 { max-width: 760px; margin: 0; font-size: clamp(1.75rem, 4vw, 3.8rem); line-height: 1.1; font-weight: 700; }
-  .notice-carousel__dots { position: absolute; display: flex; gap: .5rem; right: 1.5rem; bottom: 1.5rem; }
-  .notice-carousel__dots button { width: .6rem; height: .6rem; border: 0; border-radius: 50%; padding: 0; background: rgba(255,255,255,.55); cursor: pointer; }
-  .notice-carousel__dots button.active { width: 1.75rem; border-radius: 2rem; background: white; }
-  @keyframes notice-fade { from { opacity: .65; transform: scale(1.015); } to { opacity: 1; transform: scale(1); } }
-  
-
-  
+@media (max-width: 760px) { .notice-carousel { min-height: 500px; height: 68vh; } .notice-carousel::after { background: linear-gradient(180deg, rgba(247,251,255,.86), rgba(247,251,255,.42) 55%, rgba(7,42,83,.48)); } .notice-carousel__overlay { top: auto; bottom: 3.5rem; left: 1.5rem; width: calc(100% - 3rem); transform: none; } .notice-carousel__overlay h1 { color: #112c56; font-size: 2.8rem; } .brand-logo__name { display: none; } }
