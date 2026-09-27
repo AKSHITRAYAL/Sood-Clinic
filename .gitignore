@@ -1,0 +1,16 @@
+# Dependencies and generated application output
+**/node_modules/
+Frontend/dist/
+Frontend/.vite/
+
+# Local development data and logs
+.mongodb/
+.runtime/
+*.log
+
+# Secrets and editor files
+.env
+.env.*
+!.env.example
+.DS_Store
+.vscode/

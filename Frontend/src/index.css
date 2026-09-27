@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+[class='dark'] {
+    background-color:  #1E1E1E;
+    color: #ffffff; /* Dark mode text color */
+  }
+
+
+  body {
+    transition: background-color 0.3s, color 0.3s;
+  }
+
+
+  .notice-slider {
+    max-width: 80%;
+    margin: auto;
+    
+    margin-top: 20px;
+  }
+  
+  .notice-slide img {
+    width: 100%;
+    height: 70vh;
+  }
+
+  .notice-carousel {
+    position: relative;
+    height: min(70vh, 680px);
+    min-height: 360px;
+    overflow: hidden;
+    border-radius: 1rem;
+    margin: .25rem auto 0;
+    width: min(100%, 1440px);
+    background: #123;
+  }
+
+  .notice-carousel__image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    animation: notice-fade .35s ease-out;
+  }
+
+  .notice-carousel__overlay {
+    position: absolute;
+    inset: auto 0 0;
+    padding: clamp(1.5rem, 4vw, 4rem);
+    color: white;
+    background: linear-gradient(transparent, rgba(3, 18, 25, .82));
+  }
+
+  .notice-carousel__overlay p { margin: 0 0 .5rem; font-size: .85rem; letter-spacing: .1em; text-transform: uppercase; }
+  .notice-carousel__overlay h1 { max-width: 760px; margin: 0; font-size: clamp(1.75rem, 4vw, 3.8rem); line-height: 1.1; font-weight: 700; }
+  .notice-carousel__dots { position: absolute; display: flex; gap: .5rem; right: 1.5rem; bottom: 1.5rem; }
+  .notice-carousel__dots button { width: .6rem; height: .6rem; border: 0; border-radius: 50%; padding: 0; background: rgba(255,255,255,.55); cursor: pointer; }
+  .notice-carousel__dots button.active { width: 1.75rem; border-radius: 2rem; background: white; }
+  @keyframes notice-fade { from { opacity: .65; transform: scale(1.015); } to { opacity: 1; transform: scale(1); } }
+  
+
+  
