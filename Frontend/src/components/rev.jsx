@@ -42,20 +42,19 @@ const items = [
 ];
 
 const ServiceCard = ({ title, description, color, Icon }) => (
-  <div style={{ maxWidth: '190px', margin: '10px' } } className=''>
-    <div style={{ color, fontSize: '40px' }}>
+  <article className="clinic-feature">
+    <div className="clinic-feature__icon" style={{ color, fontSize: '40px' }}>
       <Icon />
     </div>
     <div>
-
-    <h3 className='text-3xl' >{title}</h3>
+    <h3>{title}</h3>
     <p>{description}</p>
     </div>
-  </div>
+  </article>
 );
 
 const ServicesSection = () => (
-  <div style={{ display: 'flex', justifyContent: 'space-around', padding: '20px' }} className=' flex-wrap'>
+  <section className="clinic-feature-section" aria-label="Why choose Sood Clinic"><div className="clinic-feature-bar">
     {items.map((item, index) => (
       <ServiceCard
         key={index}
@@ -65,7 +64,7 @@ const ServicesSection = () => (
         Icon={item.Icon}
       />
     ))}
-  </div>
+  </div></section>
 );
 
 

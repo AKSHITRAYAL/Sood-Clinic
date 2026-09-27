@@ -26,9 +26,21 @@ a { text-decoration: none; }
 .notice-carousel__overlay p { margin: 0 0 1rem; color: #1b72d2; font-size: .78rem; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
 .notice-carousel__overlay h1 { margin: 0; font-size: clamp(2.8rem, 5vw, 5rem); line-height: .98; font-weight: 800; letter-spacing: -.055em; }
 .notice-carousel__overlay h1::after { content: 'Compassionate specialist care, built around you.'; display: block; max-width: 380px; margin-top: 1.3rem; color: #53647d; font-size: clamp(1rem, 1.5vw, 1.18rem); font-weight: 500; letter-spacing: 0; line-height: 1.55; }
+.hero-appointment-button { display: inline-flex; align-items: center; gap: .55rem; margin-top: 1.85rem; border-radius: .6rem; background: #176dcc; padding: .88rem 1.15rem; color: #fff; font-size: .94rem; font-weight: 750; box-shadow: 0 10px 22px rgba(23,109,204,.26); transition: transform .2s ease, background .2s ease; }
+.hero-appointment-button span { display: grid; width: 1.15rem; height: 1.15rem; place-items: center; border: 1.5px solid currentColor; border-radius: .25rem; line-height: 1; }
+.hero-appointment-button:hover { background: #0f5bad; color: #fff; transform: translateY(-2px); }
 .notice-carousel__dots { position: absolute; z-index: 2; display: flex; gap: .5rem; right: 2rem; bottom: 2rem; }
 .notice-carousel__dots button { width: .65rem; height: .65rem; border: 0; border-radius: 50%; padding: 0; background: rgba(255,255,255,.7); cursor: pointer; }
 .notice-carousel__dots button.active { width: 1.9rem; border-radius: 2rem; background: #176dcc; }
 @keyframes notice-fade { from { opacity: .65; transform: scale(1.015); } to { opacity: 1; transform: scale(1); } }
 
-@media (max-width: 760px) { .notice-carousel { min-height: 500px; height: 68vh; } .notice-carousel::after { background: linear-gradient(180deg, rgba(247,251,255,.86), rgba(247,251,255,.42) 55%, rgba(7,42,83,.48)); } .notice-carousel__overlay { top: auto; bottom: 3.5rem; left: 1.5rem; width: calc(100% - 3rem); transform: none; } .notice-carousel__overlay h1 { color: #112c56; font-size: 2.8rem; } .brand-logo__name { display: none; } }
+.clinic-feature-section { width: min(1120px, calc(100% - 2rem)); margin: 2.75rem auto 0; }
+.clinic-feature-bar { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: hidden; border: 1px solid #dceafa; border-radius: 1rem; background: #fff; box-shadow: 0 16px 40px rgba(25,72,122,.10); }
+.clinic-feature { display: flex; min-width: 0; gap: .9rem; padding: 1.4rem 1.25rem; border-right: 1px solid #e2edf8; }
+.clinic-feature:last-child { border-right: 0; }
+.clinic-feature__icon { display: grid; flex: 0 0 auto; width: 2.55rem; height: 2.55rem; place-items: center; overflow: hidden; border-radius: .7rem; background: #eaf4ff; color: #176dcc; }
+.clinic-feature__icon img { width: 1.45rem !important; height: 1.45rem !important; object-fit: contain; filter: grayscale(1) sepia(.55) saturate(3) hue-rotate(170deg); }
+.clinic-feature h3 { margin: .08rem 0 .3rem; color: #173f76; font-size: 1rem; font-weight: 750; line-height: 1.25; }
+.clinic-feature p { margin: 0; color: #5b6d85; font-size: .82rem; line-height: 1.45; }
+
+@media (max-width: 760px) { .site-nav__inner { min-height: 70px; } .notice-carousel { min-height: 520px; height: 72vh; } .notice-carousel__image { object-position: 62% center; } .notice-carousel::after { background: linear-gradient(180deg, rgba(247,251,255,.9), rgba(247,251,255,.54) 55%, rgba(7,42,83,.45)); } .notice-carousel__overlay { top: auto; bottom: 3.5rem; left: 1.25rem; width: calc(100% - 2.5rem); transform: none; } .notice-carousel__overlay h1 { color: #112c56; font-size: clamp(2.35rem, 11vw, 3.2rem); } .notice-carousel__overlay h1::after { margin-top: 1rem; font-size: 1rem; } .hero-appointment-button { margin-top: 1.35rem; padding: .82rem 1rem; } .brand-logo__name { display: none; } .clinic-feature-section { width: 100%; margin-top: 1.5rem; } .clinic-feature-bar { display: flex; overflow-x: auto; border-radius: 0; scroll-snap-type: x mandatory; scrollbar-width: none; } .clinic-feature-bar::-webkit-scrollbar { display: none; } .clinic-feature { flex: 0 0 86%; padding: 1.15rem 1.25rem 1.25rem; scroll-snap-align: start; border-right: 1px solid #e2edf8; } .clinic-feature h3 { font-size: 1.05rem; } .clinic-feature p { font-size: .88rem; } }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 const notices = [
   { id: 1, image: 'https://images.pexels.com/photos/7089010/pexels-photo-7089010.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1', title: 'Thoughtful care, close to home' },
@@ -17,7 +18,11 @@ const NoticeSlider = () => {
   return (
     <section className="notice-carousel" aria-label="Hospital highlights">
       <img src={notice.image} alt="" className="notice-carousel__image" />
-      <div className="notice-carousel__overlay"><p>Sood Clinic</p><h1>{notice.title}</h1></div>
+      <div className="notice-carousel__overlay">
+        <p>Sood Clinic</p>
+        <h1>{notice.title}</h1>
+        <Link to="/Booknow" className="hero-appointment-button"><span aria-hidden="true">+</span> Book appointment</Link>
+      </div>
       <div className="notice-carousel__dots" role="tablist" aria-label="Hospital highlights">
         {notices.map((item, index) => <button key={item.id} type="button" aria-label={`Show highlight ${index + 1}`} aria-selected={activeIndex === index} className={activeIndex === index ? 'active' : ''} onClick={() => setActiveIndex(index)} />)}
       </div>
