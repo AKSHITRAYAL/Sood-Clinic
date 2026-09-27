@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import axios from 'axios'
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+import { addDoc, collection, getDocs } from 'firebase/firestore';
+import { firestore } from '../lib/firebase';
 
 const Bookappointment = () => {
     const [filteredDoctors, setFilteredDoctors] = useState([]);
@@ -28,20 +27,23 @@ const Bookappointment = () => {
     const [branchId, setBranchId] = useState('')
 
     useEffect(() => {
-        axios.get(`${API_BASE_URL}/api/v1/public/booking/branches`)
-            .then((res) => setBranchId(res.data.data[0]?._id || ''))
+        getDocs(collection(firestore, 'branches'))
+            .then((snapshot) => setBranchId(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).find((branch) => branch.active)?.id || ''))
             .catch(() => setProfile('Booking is temporarily unavailable. Please try again later.'));
     }, [])
     useEffect(() => {
         if (!branchId) return;
-        axios.get(`${API_BASE_URL}/api/v1/public/booking/branches/${branchId}/departments`)
-            .then((res) => setData(res.data.data))
+        getDocs(collection(firestore, 'departments'))
+            .then((snapshot) => setData(snapshot.docs.map((doc) => ({ _id: doc.id, ...doc.data() })).filter((department) => department.branchId === branchId && department.active && department.publicBookingEnabled)))
             .catch(() => setProfile('Unable to load available departments.'));
     }, [branchId]);
     useEffect(() => {
         if (!branchId || !formData.department) { setFilteredDoctors([]); return; }
-        axios.get(`${API_BASE_URL}/api/v1/public/booking/branches/${branchId}/departments/${formData.department}/doctors`)
-            .then((res) => { setDocData(res.data.data); setFilteredDoctors(res.data.data); })
+        getDocs(collection(firestore, 'doctors'))
+            .then((snapshot) => {
+              const doctors = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).filter((doctor) => doctor.branchId === branchId && doctor.active && doctor.bookingEnabled && doctor.departmentIds?.includes(formData.department));
+              setDocData(doctors); setFilteredDoctors(doctors);
+            })
             .catch(() => { setDocData([]); setFilteredDoctors([]); setProfile('Unable to load doctors for this department.'); });
     }, [branchId, formData.department]);
     const handleChange = (e) => {
@@ -62,19 +64,21 @@ const Bookappointment = () => {
         if (!schedule) { setProfile('This doctor is not available on the selected day.'); return; }
         const startsAt = new Date(`${formData.appointmentDate}T${formData.appointmentTime}:00`);
         const endsAt = new Date(startsAt.getTime() + schedule.slotMinutes * 60000);
-        axios.post(`${API_BASE_URL}/api/v1/public/booking/appointments`, {
+        addDoc(collection(firestore, 'appointments'), {
           branchId,
           departmentId: formData.department,
           doctorId: formData.doctor,
           startsAt: startsAt.toISOString(),
           endsAt: endsAt.toISOString(),
-          reason: formData.reason,
-          patient: { name: formData.name, phone: formData.phoneNumber, gender: formData.gender.toLowerCase(), consentToTreatment: true }
+          reason: '',
+          status: 'scheduled',
+          source: 'patient_portal',
+          patient: { name: formData.name, phone: formData.phoneNumber, gender: formData.gender.toLowerCase(), consentToTreatment: true },
         })
-        .then((res)=>{
-            setProfile(`Appointment booked successfully. Reference: ${res.data.data.reference}`)
+        .then((appointment)=>{
+            setProfile(`Appointment request received. Reference: SC-${appointment.id.slice(0, 8).toUpperCase()}`)
         })
-        .catch((err) => { setProfile(err.response?.data?.error?.message || 'Unable to book the appointment.') })
+        .catch(() => { setProfile('Unable to book the appointment. Please try again.') })
     };
     useEffect(() => {
         if (profile !== '') {
@@ -91,7 +95,7 @@ const Bookappointment = () => {
                     age: '',
                     department: '',
                     doctor: '',
-                    appointmentDate: null,
+                    appointmentDate: '',
                     appointmentTime: ''
                 })
             }, 2000);

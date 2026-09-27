@@ -1,5 +1,6 @@
 import { getAnalytics, isSupported } from 'firebase/analytics';
 import { initializeApp } from 'firebase/app';
+import { getFirestore } from 'firebase/firestore';
 
 // Firebase web configuration identifies this public web app; it is not a server secret.
 const firebaseConfig = {
@@ -13,6 +14,7 @@ const firebaseConfig = {
 };
 
 export const firebaseApp = initializeApp(firebaseConfig);
+export const firestore = getFirestore(firebaseApp);
 
 export async function initializeAnalytics() {
   if (typeof window === 'undefined' || !(await isSupported())) return null;
