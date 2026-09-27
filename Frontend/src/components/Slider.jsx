@@ -19,8 +19,9 @@ const NoticeSlider = () => {
     <section className="notice-carousel" aria-label="Hospital highlights">
       <img src={notice.image} alt="" className="notice-carousel__image" />
       <div className="notice-carousel__overlay">
-        <p>Sood Clinic</p>
+        <p className="notice-carousel__eyebrow">Sood Clinic</p>
         <h1>{notice.title}</h1>
+        <p className="notice-carousel__description">Compassionate specialist care, built around you.</p>
         <Link to="/Booknow" className="hero-appointment-button"><span aria-hidden="true">+</span> Book appointment</Link>
       </div>
       <div className="notice-carousel__dots" role="tablist" aria-label="Hospital highlights">
