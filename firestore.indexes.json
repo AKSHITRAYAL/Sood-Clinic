@@ -1,0 +1,15 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "doctors",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "branchId", "order": "ASCENDING" },
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "bookingEnabled", "order": "ASCENDING" },
+        { "fieldPath": "departmentIds", "arrayConfig": "CONTAINS" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

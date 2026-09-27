@@ -1,0 +1,11 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // All clinical and personally identifiable data is accessed only through
+    // the authenticated server-side Functions API. Never expose it directly
+    // to a browser client.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
