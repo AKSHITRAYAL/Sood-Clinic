@@ -14,14 +14,14 @@ const About = () => {
         />
       </div>
       <div className="md:w-1/2 p-4">
-        <h1 className="text-3xl font-bold mb-4">Welcome to Health Care</h1>
+        <h1 className="text-3xl font-bold mb-4">Welcome to Sood Clinic</h1>
         <h2 className="text-xl font-semibold mb-2">Our Mission</h2>
         <p className="mb-4">
-          Our mission is to provide exceptional pediatric healthcare that promotes the physical, emotional, and developmental well-being of every child. We strive to create a nurturing environment where children feel comfortable and parents feel confident in the care their children receive.
+          Our mission is to provide thoughtful, dependable healthcare in an environment where every patient feels heard, respected, and supported.
         </p>
         <h2 className="text-xl font-semibold mb-2">Our Vision</h2>
         <p className="mb-4">
-          We envision a community where every child has access to the highest quality healthcare, enabling them to lead healthy and fulfilling lives. Through continuous education, advanced treatments, and compassionate care, we aim to be a trusted partner in your child's health journey.
+          We aim to be a trusted local clinic, using clear communication and well-organized care to make every visit simpler for patients and families.
         </p>
 
       </div>

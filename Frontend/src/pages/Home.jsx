@@ -1,56 +1,27 @@
-import React from 'react'
-import Navbar from '../components/Navbar'
-import NoticeSlider from '../components/Slider'
-import Card from '../components/card'
-import{ ReviewSection,ServicesSection} from '../components/rev'
-import Contact from './Contact'
-import Footer from '../components/Footer'
-import { useState, useEffect } from 'react'
-import axios from 'axios'
+import Navbar from '../components/Navbar';
+import NoticeSlider from '../components/Slider';
+import { ServicesSection } from '../components/rev';
+import Footer from '../components/Footer';
+import soodClinicLogo from '../assets/images/sood-clinic-logo.png';
 
+const Home = () => (
+  <>
+    <Navbar />
+    <main>
+      <NoticeSlider />
+      <ServicesSection />
+      <section className="container mx-auto my-12 max-w-4xl px-5 text-center">
+        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-700">Sood Clinic leadership</p>
+        <h1 className="mt-3 text-3xl font-semibold md:text-5xl">Brig. A. K. Sood</h1>
+        <p className="mt-3 text-lg text-slate-600">Clinic Owner &amp; Lead Physician</p>
+        <div className="mx-auto mt-7 flex max-w-xl flex-col items-center gap-5 rounded-2xl border bg-white p-6 shadow-sm sm:flex-row sm:text-left">
+          <span className="h-28 w-32 shrink-0 overflow-hidden rounded-2xl bg-black"><img className="h-[250px] w-full max-w-none object-cover object-[center_52%]" src={soodClinicLogo} alt="Sood Clinic logo" /></span>
+          <p className="leading-7 text-slate-600">Sood Clinic is built around personal attention, clear communication, and a dependable experience from booking through follow-up care.</p>
+        </div>
+      </section>
+    </main>
+    <Footer />
+  </>
+);
 
-const Home = () => {
-  const [data, setData] = useState([])
-
-  const getdata = () => {
-    axios.get('http://localhost:3001/getdoctor')
-      .then((res) => {
-        console.log(res)
-        setData(res.data)
-      })
-      .catch((er) => { console.log(err) })
-  }
-  useEffect(() => {
-
-    getdata()
-  }, [])
-  return (
-    <>
-    <Navbar/>
-      
-    <div>
-      
-      <NoticeSlider
-      
-      
-      
-      />
-
-      <div className='my-5 border-b-2 lg:block hidden'></div>
-    <ServicesSection/>
-      <h1 className='md:text-4xl text-2xl text-center lg:text-6xl container mx-auto w-full font-semibold'>
-      Our  Doctors
-      </h1>
-      <Card
-      notices ={data}
-      
-      />
-      <ReviewSection/>
-
-    </div>
-    <Footer/>
-    </>
-  )
-}
-
-export default Home
+export default Home;

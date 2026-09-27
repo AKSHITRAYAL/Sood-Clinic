@@ -5,8 +5,8 @@
 // Sample data for the items
 const items = [
   {
-    title: 'Professional',
-    description: 'Our clinic is staffed with highly qualified professionals...',
+    title: 'Patient-first care',
+    description: 'A respectful, personal experience at every visit.',
     color: '#FF007F',
     Icon: () => (
       // Example SVG for Professional
@@ -14,16 +14,16 @@ const items = [
     ),
   },
   {
-    title: 'Qualified',
-    description: 'Highly qualified doctors and nurses...',
+    title: 'Owner-led clinic',
+    description: 'Care guided directly by Brig. A. K. Sood.',
     color: '#FFA500',
     Icon: () => (
       <img width="48" height="48" src="https://img.icons8.com/fluency/48/worker-male.png" alt="worker-male" />
     ),
   },
   {
-    title: 'Emergency',
-    description: 'Specialized treatments, we offer ...',
+    title: 'Clear appointments',
+    description: 'Book a visit and receive timely clinic updates.',
     color: '#000000',
     Icon: () => (
       // SVG for Emergency (ambulance icon)
@@ -31,8 +31,8 @@ const items = [
     ),
   },
   {
-    title: 'Available 24/7',
-    description: 'Regular check-ups to monitor your child\'s...',
+    title: 'Continuity of care',
+    description: 'Your clinic information stays connected and organized.',
     color: '#FF007F',
     Icon: () => (
       // SVG for Available 24/7 (clock icon)

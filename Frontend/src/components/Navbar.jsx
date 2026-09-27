@@ -1,174 +1,65 @@
-import React, { useRef, useState, useEffect } from 'react';
-import menu from '../assets/svgs/menu.svg';
-
-import axios from 'axios'
-
-import cross from '../assets/images/cross.png'
+import { useEffect, useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
-import { ModeToggle } from './ModeToggle'
+import menu from '../assets/svgs/menu.svg';
+import cross from '../assets/images/cross.png';
+import soodClinicLogo from '../assets/images/sood-clinic-logo.png';
+import { ModeToggle } from './ModeToggle';
 
+const navClass = ({ isActive }) => (isActive
+  ? 'bg-bb px-4 py-2 rounded-sm'
+  : 'transition-all duration-300 ease-in-out hover:bg-bb px-4 py-2');
 
 const Navbar = () => {
-
-  const [data, setData] = useState([])
-  const [status, setStatus] = useState()
-
-  const [profile1, setProfile1] = useState({ display: 'none' });
-  const token = localStorage.getItem('admintoken')
-  const [menuico, setMenuico] = useState(menu);
-  const getdata = () => {
-    axios.get('http://localhost:3001/getadmin')
-      .then((res) => {
-        console.log('fuck')
-        console.log(res)
-        if (res.data.length === 0) {
-          setStatus(true)
-
-        } else {
-          setStatus(false)
-
-        }
-      })
-       .catch((er) => { console.error(er) })
-  }
-  useEffect(() => {
-    getdata()
-  }, [])
-
-
-
+  const [menuOpen, setMenuOpen] = useState(false);
+  const token = localStorage.getItem('admintoken');
 
   useEffect(() => {
-    if (profile1.display == 'flex') {
+    document.body.style.overflow = menuOpen ? 'hidden' : 'auto';
+    return () => { document.body.style.overflow = 'auto'; };
+  }, [menuOpen]);
 
-      document.body.style.overflow = 'hidden';
-
-    } else {
-      document.body.style.overflow = 'auto';
-
-    }
-
-    // Cleanup the scroll style when component unmounts or popup closes
-    return () => {
-      document.body.style.overflow = 'auto';
-    };
-  }, [profile1]);
-
-  const handelmenu = () => {
-    if (profile1.display == 'none') {
-
-      setProfile1({ display: 'flex' })
-
-
-      setMenuico(cross)
-
-    } else {
-      setMenuico(menu)
-
-      setProfile1({ display: 'none' })
-
-    }
-  }
-
-  const handellogout = () => {
+  const logout = () => {
     localStorage.removeItem('admintoken');
-    window.location.reload(true);
-
-
-
-  }
+    window.location.reload();
+  };
 
   return (
-    <>
+    <nav className="relative w-full bg-gg text-white">
+      <div className="container mx-auto flex h-[90px] w-full items-center justify-between px-2">
+        <Link to="/" className="flex h-full items-center gap-3 rounded-br-[42px] border bg-white px-3 text-slate-900" aria-label="Sood Clinic home">
+          <span className="h-[66px] w-[90px] overflow-hidden rounded-xl bg-black">
+            <img className="h-[180px] w-full max-w-none object-cover object-[center_52%]" src={soodClinicLogo} alt="Sood Clinic logo" />
+          </span>
+          <span className="hidden text-lg font-bold sm:inline">Sood Clinic</span>
+        </Link>
 
+        <button type="button" onClick={() => setMenuOpen((open) => !open)} className="h-10 w-10 lg:hidden md:hidden" aria-label="Toggle navigation">
+          <img src={menuOpen ? cross : menu} width={25} height={25} className="transition-all duration-75" alt="" />
+        </button>
 
-      <nav className='  relative  bg-gg  w-full text-white '>
-
-        <div className='h-[90px]  px-2 container mx-auto z-50  w-full  bg-gg  flex items-center justify-between   '>
-          <Link to="/" className=' bg-white md:px-10 px-0 lg:px-10 border rounded-br-[42px] h-full'>
-            <img className='h-full object-cover rounded-br-[42px]' src="https://img.freepik.com/premium-vector/health-care-medical-logo-vector-design_990473-2554.jpg" alt="" />
-
-          </Link>
-          <button onClick={handelmenu} className='w-10 h-10 lg:hidden md:hidden' ><img src={menuico} width={25} height={25} className='active:rotate-180 duration-75 transition-all ease-in' alt="Menu Icon" /></button>
-          <div className=' hidden md:flex lg:flex items-center gap-5'>
-
-            <div className='hidden  lg:block md:block'>
-              <ul className='hidden lg:flex  md:flex  gap-1 text-lg items-center '>
-                <NavLink to="/" className={(e) => { return e.isActive ? " bg-bb px-4 py-2 rounded-sm" : "transition-all duration-300 ease-in-out hover:bg-bb px-4 py-2" }} >Home</NavLink  >
-                <NavLink to="/About" className={(e) => { return e.isActive ? " bg-bb px-4 py-2 rounded-sm" : "transition-all duration-300 ease-in-out  hover:bg-bb px-4 py-2" }} >About</NavLink  >
-                <NavLink to="/contact" className={(e) => { return e.isActive ? " bg-bb px-4 py-2 rounded-sm" : "transition-all duration-300 ease-in-out  hover:bg-bb px-4 py-2 " }} >Contact Us</NavLink  >
-                <NavLink to="/Booknow" className={(e) => { return e.isActive ? " bg-bb px-4 py-2 rounded-sm" : "transition-all duration-300 ease-in-out  hover:bg-bb px-4 py-2 " }} >Book Meeting</NavLink  >
-                |
-
-              </ul>
-            </div>
-            {
-              token ? (
-
-                <div className=' hidden lg:block md:block'>
-
-                  <button onClick={handellogout} className='px-5 flex py-6 w-full bg-[rgb(13,12,67)] hover:bg-[#0098ac]'> Logout</button>
-
-                </div>
-
-              ) : (
-                <div className=' hidden lg:block md:block'>
-
-                  <ul className='hidden items-center  lg:flex md:flex gap-2'>
-                    <Link to='/login' className='py-2 px-6  border-2  rounded-3xl hover:border-bb transition-all duration-500 hover:bg-bb cursor-pointer'>Login</Link>
-                    {status ?
-
-                      <Link to='/rigister' className='py-2 px-6  border-2  rounded-3xl hover:border-bb transition-all duration-500 hover:bg-bb cursor-pointer'>Rigister Admin</Link>
-                      : ''
-                    }
-
-                    <div className='h-1/2 '>
-                      <ModeToggle />
-
-                    </div>
-                  </ul>
-                </div>
-
-              )}
-          </div>
+        <div className="hidden items-center gap-5 md:flex lg:flex">
+          <ul className="flex items-center gap-1 text-lg">
+            <NavLink to="/" className={navClass}>Home</NavLink>
+            <NavLink to="/About" className={navClass}>About</NavLink>
+            <NavLink to="/contact" className={navClass}>Contact</NavLink>
+            <NavLink to="/Booknow" className={navClass}>Book Appointment</NavLink>
+          </ul>
+          {token ? <button type="button" onClick={logout} className="rounded-full border px-5 py-2 hover:bg-bb">Log out</button> : <Link to="/login" className="rounded-3xl border-2 px-6 py-2 transition-all hover:border-bb hover:bg-bb">Staff login</Link>}
+          <ModeToggle />
         </div>
-        <div style={profile1} className='w-full lg:hidden md:hidden border-t transition-all duration-500 ease-in-out absolute  top-[100%] left-0 flex-col z-10 rounded-b-lg'>
-          <NavLink to='/' className='px-5 flex py-6 w-full bg-gg hover:bg-[#0098ac]' >Home  </NavLink>
-          <NavLink to='/About' className='px-5 flex py-6 w-full bg-gg hover:bg-[#0098ac]' >About </NavLink>
-          <NavLink to='/contact' className='px-5 flex py-6 w-full bg-gg hover:bg-[#0098ac]' >Cantact Us </NavLink>
-          <NavLink to='/Booknow' className='px-5 flex py-6 w-full bg-gg hover:bg-[#0098ac]' >Book Appointment</NavLink>
+      </div>
 
-          {
-            token ? (
-
-              <div className=''>
-                <button onClick={handellogout} className='px-5 flex py-6 w-full border-t-2 bg-[rgb(13,12,67)] hover:bg-[#0098ac]'> Logout</button>
-
-              </div>
-            ) : (
-
-              <div className='w-full flex flex-col'>
-
-                <NavLink to={'/login'} className='px-5 py-4  bg-gg border-t-2 hover:bg-[#0098ac]' href="">Log in</NavLink>
-              </div>
-            )
-          }
-
-
-
-
-
+      {menuOpen && (
+        <div className="absolute left-0 top-full z-10 flex w-full flex-col border-t bg-gg md:hidden lg:hidden">
+          <NavLink onClick={() => setMenuOpen(false)} to="/" className="px-5 py-5 hover:bg-[#0098ac]">Home</NavLink>
+          <NavLink onClick={() => setMenuOpen(false)} to="/About" className="px-5 py-5 hover:bg-[#0098ac]">About</NavLink>
+          <NavLink onClick={() => setMenuOpen(false)} to="/contact" className="px-5 py-5 hover:bg-[#0098ac]">Contact</NavLink>
+          <NavLink onClick={() => setMenuOpen(false)} to="/Booknow" className="px-5 py-5 hover:bg-[#0098ac]">Book Appointment</NavLink>
+          {token ? <button type="button" onClick={logout} className="border-t px-5 py-5 text-left hover:bg-[#0098ac]">Log out</button> : <NavLink onClick={() => setMenuOpen(false)} to="/login" className="border-t px-5 py-5 hover:bg-[#0098ac]">Staff login</NavLink>}
         </div>
+      )}
+    </nav>
+  );
+};
 
-
-
-
-      </nav>
-
-
-    </>
-
-  )
-}
-
-export default Navbar
+export default Navbar;
