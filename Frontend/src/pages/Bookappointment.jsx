@@ -1,11 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { addDoc, collection, getDocs } from 'firebase/firestore';
+import { addDoc, collection } from 'firebase/firestore';
 import { firestore } from '../lib/firebase';
 
+const SOOD_CLINIC_BRANCH_ID = 'sood-clinic';
+const GASTROENTEROLOGY_ID = 'gastroenterology';
+const AK_SOOD_ID = 'brig-ak-sood';
+const AK_SOOD_SCHEDULE = [1, 2, 3, 4, 5, 6].flatMap((weekday) => [
+  { weekday, startTime: '08:00', endTime: '10:00', slotMinutes: 20 },
+  { weekday, startTime: '17:00', endTime: '18:30', slotMinutes: 20 },
+]);
+
 const Bookappointment = () => {
-    const [filteredDoctors, setFilteredDoctors] = useState([]);
     const [profile, setProfile] = useState('')
 
 
@@ -17,46 +24,19 @@ const Bookappointment = () => {
         gender: '',
         bloodGroup: '',
         age: '',
-        department: '',
-        doctor: '',
         appointmentDate: '',
         appointmentTime: '',
     });
-    const [data, setData] = useState([])
-    const [docdata, setDocData] = useState([])
-    const [branchId, setBranchId] = useState('')
-
-    useEffect(() => {
-        getDocs(collection(firestore, 'branches'))
-            .then((snapshot) => setBranchId(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).find((branch) => branch.active)?.id || ''))
-            .catch(() => setProfile('Booking is temporarily unavailable. Please try again later.'));
-    }, [])
-    useEffect(() => {
-        if (!branchId) return;
-        getDocs(collection(firestore, 'departments'))
-            .then((snapshot) => setData(snapshot.docs.map((doc) => ({ _id: doc.id, ...doc.data() })).filter((department) => department.branchId === branchId && department.active && department.publicBookingEnabled)))
-            .catch(() => setProfile('Unable to load available departments.'));
-    }, [branchId]);
-    useEffect(() => {
-        if (!branchId || !formData.department) { setFilteredDoctors([]); return; }
-        getDocs(collection(firestore, 'doctors'))
-            .then((snapshot) => {
-              const doctors = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).filter((doctor) => doctor.branchId === branchId && doctor.active && doctor.bookingEnabled && doctor.departmentIds?.includes(formData.department));
-              setDocData(doctors); setFilteredDoctors(doctors);
-            })
-            .catch(() => { setDocData([]); setFilteredDoctors([]); setProfile('Unable to load doctors for this department.'); });
-    }, [branchId, formData.department]);
     const handleChange = (e) => {
         const { name, value } = e.target;
-        setFormData((current) => ({ ...current, [name]: value, ...(name === 'department' ? { doctor: '' } : {}) }));
+        setFormData((current) => ({ ...current, [name]: value }));
     };
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        const doctor = docdata.find((item) => item.id === formData.doctor);
         const appointmentDay = new Date(`${formData.appointmentDate}T00:00:00`).getDay();
         const selectedMinutes = Number(formData.appointmentTime.split(':')[0]) * 60 + Number(formData.appointmentTime.split(':')[1]);
-        const schedule = doctor?.schedule?.find((rule) => {
+        const schedule = AK_SOOD_SCHEDULE.find((rule) => {
           const [startHour, startMinute] = rule.startTime.split(':').map(Number);
           const [endHour, endMinute] = rule.endTime.split(':').map(Number);
           return rule.weekday === appointmentDay && selectedMinutes >= startHour * 60 + startMinute && selectedMinutes < endHour * 60 + endMinute;
@@ -65,9 +45,9 @@ const Bookappointment = () => {
         const startsAt = new Date(`${formData.appointmentDate}T${formData.appointmentTime}:00`);
         const endsAt = new Date(startsAt.getTime() + schedule.slotMinutes * 60000);
         addDoc(collection(firestore, 'appointments'), {
-          branchId,
-          departmentId: formData.department,
-          doctorId: formData.doctor,
+          branchId: SOOD_CLINIC_BRANCH_ID,
+          departmentId: GASTROENTEROLOGY_ID,
+          doctorId: AK_SOOD_ID,
           startsAt: startsAt.toISOString(),
           endsAt: endsAt.toISOString(),
           reason: '',
@@ -93,8 +73,6 @@ const Bookappointment = () => {
                     gender: '',
                     bloodGroup: '',
                     age: '',
-                    department: '',
-                    doctor: '',
                     appointmentDate: '',
                     appointmentTime: ''
                 })
@@ -113,6 +91,7 @@ const Bookappointment = () => {
               </section>
             <div className="booking-card">
                 <h2>Appointment details</h2>
+                <p className="mb-6 rounded-lg bg-sky-50 px-4 py-3 text-sm font-semibold text-[#1b5c9d]">Consultation with Dr. Brig. A. K. Sood VSM (Retd) · Gastroenterology</p>
 
                 <form onSubmit={handleSubmit} className="booking-form">
                 {profile && <p className="booking-message" role="status">{profile}</p>}
@@ -227,29 +206,6 @@ const Bookappointment = () => {
                             className="w-full border dark:border-none px-4 py-2 rounded"
                             placeholder="Enter age"
                         />
-                    </div>
-
-                    {/* Department */}
-                    <div>
-                        <label className="block text-sm font-medium">Department</label>
-                        <select name="department" value={formData.department} onChange={handleChange} className="p-3 border dark:border-none w-full dark:border dark:border-none-none rounded-lg" required>
-                            <option value="">Select Department</option>
-                            {!data.length && <option value="" disabled>No departments currently available</option>}
-                            {data.map((department) => <option key={department._id} value={department._id}>{department.name}</option>)}
-                        </select>
-                    </div>
-
-                    {/* Doctor */}
-                    <div>
-                        <label className="block text-sm font-medium">Doctor</label>
-                        <select name="doctor" value={formData.doctor} onChange={handleChange} className="p-3 w-full border dark:border-none dark:border dark:border-none-none rounded-lg" required>
-
-                            {!formData.department ? <option value="">Choose Department First</option> : <option value="">Select Doctor</option>}
-                            {formData.department && !filteredDoctors.length && <option value="" disabled>No doctors currently available</option>}
-                            {filteredDoctors.map((doctor) => (
-                                <option key={doctor.id} value={doctor.id}>{doctor.name}{doctor.qualification ? ` — ${doctor.qualification}` : ''}</option>
-                            ))}
-                        </select>
                     </div>
 
                     {/* Appointment Date */}
