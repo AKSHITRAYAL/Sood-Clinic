@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "sood-clinic",
     "public": "Frontend/dist",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [{ "source": "**", "destination": "/index.html" }],
