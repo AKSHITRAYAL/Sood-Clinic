@@ -9,6 +9,13 @@ Firebase-backed appointment and clinic operations application for Sood Clinic, P
 - `firebase.json` — Firebase Hosting, Firestore, and Functions configuration.
 - `firestore.rules` and `firestore.indexes.json` — Firestore access controls and indexes.
 
+## Continuation guides
+
+- [Architecture](docs/ARCHITECTURE.md) explains the routes, Firebase data model, roles, and deployment model.
+- [Current status](docs/STATUS.md) records what is live, what is demo-only, and the known deployment limitation.
+- [Runbook](docs/RUNBOOK.md) contains local development, Firebase, role-assignment, and Git commands.
+- [Recommended next steps](docs/NEXT-STEPS.md) is the ordered continuation plan.
+
 ## Local development
 
 ```bash
