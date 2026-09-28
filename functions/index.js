@@ -1,4 +1,4 @@
-const { onRequest } = require('firebase-functions/v2/https');
+const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
 const { setGlobalOptions } = require('firebase-functions/v2');
 const admin = require('firebase-admin');
 const express = require('express');
@@ -76,3 +76,45 @@ app.post('/api/v1/public/booking/appointments', async (req, res, next) => {
 
 app.use((error, _req, res, _next) => { console.error(error); fail(res, error.status || 500, error.status ? error.message : 'Unable to process this request. Please try again later.'); });
 exports.clinicApi = onRequest({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, app);
+
+const validStaffRoles = new Set(['admin', 'doctor', 'receptionist']);
+const requireAdmin = (request) => {
+  if (!request.auth || request.auth.token.role !== 'admin') throw new HttpsError('permission-denied', 'Administrator access is required.');
+};
+
+// Privileged staff lifecycle operations. This endpoint is deliberately callable only by
+// Firebase users carrying the trusted admin custom claim; the browser never sets roles.
+exports.manageStaffAccount = onCall({ region: 'asia-south1', enforceAppCheck: false }, async (request) => {
+  requireAdmin(request);
+  const { action, email, password, displayName = '', role, disabled } = request.data || {};
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!normalizedEmail) throw new HttpsError('invalid-argument', 'A staff email is required.');
+  if (action === 'provision') {
+    if (!validStaffRoles.has(role) || String(password || '').length < 6) throw new HttpsError('invalid-argument', 'Choose a valid role and a temporary password of at least six characters.');
+    let user;
+    try { user = await admin.auth().getUserByEmail(normalizedEmail); await admin.auth().updateUser(user.uid, { displayName: String(displayName).trim() || undefined, password: String(password) }); }
+    catch (error) { if (error.code !== 'auth/user-not-found') throw error; user = await admin.auth().createUser({ email: normalizedEmail, password: String(password), displayName: String(displayName).trim() || undefined }); }
+    const claims = role === 'doctor' ? { role, doctorId: 'brig-ak-sood' } : { role };
+    await admin.auth().setCustomUserClaims(user.uid, claims);
+    await db.collection('staffProfiles').doc(user.uid).set({ uid: user.uid, email: normalizedEmail, name: String(displayName).trim(), role, active: true, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
+    return { uid: user.uid, message: 'Staff account provisioned. Ask the user to sign in with the temporary password and change it.' };
+  }
+  const user = await admin.auth().getUserByEmail(normalizedEmail);
+  if (action === 'role') {
+    if (!validStaffRoles.has(role)) throw new HttpsError('invalid-argument', 'Choose a valid staff role.');
+    await admin.auth().setCustomUserClaims(user.uid, role === 'doctor' ? { role, doctorId: 'brig-ak-sood' } : { role });
+    await db.collection('staffProfiles').doc(user.uid).set({ uid: user.uid, email: normalizedEmail, role, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
+    return { message: 'Staff role updated. The user must sign out and in again.' };
+  }
+  if (action === 'temporaryPassword') {
+    if (String(password || '').length < 6) throw new HttpsError('invalid-argument', 'Temporary password must be at least six characters.');
+    await admin.auth().updateUser(user.uid, { password: String(password) });
+    return { message: 'Temporary password updated. Give it to the staff member through a secure channel.' };
+  }
+  if (action === 'disable') {
+    await admin.auth().updateUser(user.uid, { disabled: Boolean(disabled) });
+    await db.collection('staffProfiles').doc(user.uid).set({ active: !Boolean(disabled), updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
+    return { message: Boolean(disabled) ? 'Staff account disabled.' : 'Staff account enabled.' };
+  }
+  throw new HttpsError('invalid-argument', 'Unsupported staff account action.');
+});

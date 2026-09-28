@@ -3,7 +3,7 @@
   "private": true,
   "engines": { "node": "20" },
   "main": "index.js",
-  "scripts": { "lint": "node --check index.js", "seed": "node seed.js" },
+  "scripts": { "lint": "node --check index.js && node --check assign-staff-role.js", "seed": "node seed.js", "assign-staff-role": "node assign-staff-role.js" },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.21.2",

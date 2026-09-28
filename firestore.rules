@@ -1,6 +1,19 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isDoctor() {
+      return request.auth != null
+        && request.auth.token.role == 'doctor'
+        && request.auth.token.doctorId == 'brig-ak-sood';
+    }
+    function isClinicAdmin() {
+      return request.auth != null && request.auth.token.role == 'admin';
+    }
+    function isReception() {
+      return request.auth != null && request.auth.token.role == 'receptionist';
+    }
+    function isClinicTeam() { return isDoctor() || isClinicAdmin(); }
+    function isClinicStaff() { return isClinicTeam() || isReception(); }
     // Public catalog records contain no patient data and power the demo booking flow.
     match /branches/{branchId} {
       // This collection is deliberately limited to public clinic details.
@@ -15,9 +28,28 @@ service cloud.firestore {
       allow read: if true;
       allow write: if false;
     }
-    // Visitors can submit, but can never read, alter, or delete appointments.
+    // A separate public slot index contains no patient data. It powers the booking calendar.
+    match /appointmentSlots/{slotId} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['doctorId', 'appointmentId', 'startsAt', 'status', 'createdAt'])
+        && request.resource.data.doctorId == 'brig-ak-sood'
+        && request.resource.data.status == 'booked'
+        && request.resource.data.appointmentId is string
+        && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.slotId == slotId;
+      // A cancelled slot is retained as a public, non-sensitive availability record.
+      // It can be atomically re-reserved only together with its matching appointment document.
+      allow update: if isClinicStaff()
+        || (resource.data.status == 'available'
+          && request.resource.data.doctorId == 'brig-ak-sood'
+          && request.resource.data.status == 'booked'
+          && request.resource.data.appointmentId is string
+          && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.slotId == slotId);
+      allow delete: if isClinicTeam();
+    }
+    // Visitors can submit, but only clinic staff can view or alter patient data.
     match /appointments/{appointmentId} {
-      allow create: if request.resource.data.keys().hasOnly(['branchId', 'departmentId', 'doctorId', 'startsAt', 'endsAt', 'reason', 'status', 'source', 'patient'])
+      allow create: if request.resource.data.keys().hasOnly(['slotId', 'branchId', 'departmentId', 'doctorId', 'startsAt', 'endsAt', 'reason', 'status', 'source', 'patient', 'patientId', 'createdAt'])
+        && request.resource.data.slotId is string
         && request.resource.data.branchId is string
         && request.resource.data.departmentId is string
         && request.resource.data.doctorId is string
@@ -25,10 +57,52 @@ service cloud.firestore {
         && request.resource.data.endsAt is string
         && request.resource.data.status == 'scheduled'
         && request.resource.data.source == 'patient_portal'
+        && request.resource.data.patientId is string
+        && (request.resource.data.patientId == '' || (request.auth != null && request.resource.data.patientId == request.auth.uid))
         && request.resource.data.patient.name is string
         && request.resource.data.patient.phone is string
         && request.resource.data.patient.consentToTreatment == true;
-      allow read, update, delete: if false;
+      allow read: if isClinicStaff()
+        || (request.auth != null && resource.data.patientId == request.auth.uid);
+      allow update: if isClinicStaff() && request.resource.data.doctorId == 'brig-ak-sood';
+      allow delete: if false;
+    }
+    // Public read enables the date picker to show doctor-declared special hours.
+    match /availabilityOverrides/{overrideId} {
+      allow read: if true;
+      // Doctors can manage their own calendar; an administrator can manage clinic-wide availability.
+      allow create, update, delete: if isClinicAdmin()
+        || (isDoctor() && request.resource.data.doctorId == 'brig-ak-sood');
+    }
+    // The public booking calendar reads the doctor-declared recurring hours.
+    match /clinicSchedules/{doctorId} {
+      allow read: if true;
+      allow create, update, delete: if isClinicAdmin()
+        || (isDoctor() && doctorId == 'brig-ak-sood');
+    }
+    // This is an administrative directory only. It does not grant Firebase Authentication
+    // access or custom claims; those remain a trusted server-side responsibility.
+    match /staffProfiles/{userId} {
+      allow read: if isClinicAdmin() || (request.auth != null && request.auth.uid == userId);
+      allow create, update, delete: if isClinicAdmin();
+    }
+    // Operational clinic preferences are deliberately private to the administrator.
+    match /clinicSettings/{settingId} {
+      allow read, write: if isClinicAdmin();
+    }
+    // Patient-owned data is private to the signed-in patient. Clinic staff may access it
+    // only when clinically required; public visitors cannot read any of it.
+    match /patients/{patientId} {
+      allow read: if isClinicStaff() || (request.auth != null && request.auth.uid == patientId);
+      allow create, update, delete: if request.auth != null && request.auth.uid == patientId;
+      match /medicalHistory/{entryId} {
+        allow read: if isClinicStaff() || (request.auth != null && request.auth.uid == patientId);
+        allow create, update, delete: if request.auth != null && request.auth.uid == patientId;
+      }
+      match /medicalDocuments/{documentId} {
+        allow read: if isClinicStaff() || (request.auth != null && request.auth.uid == patientId);
+        allow create, update, delete: if request.auth != null && request.auth.uid == patientId;
+      }
     }
     match /{document=**} {
       allow read, write: if false;

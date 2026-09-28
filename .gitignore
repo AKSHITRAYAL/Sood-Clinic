@@ -9,6 +9,8 @@ Frontend/.vite/
 .npm-cache/
 .firebase-config/
 .firebase/
+service-account*.json
+*-service-account.json
 *.log
 
 # Secrets and editor files
@@ -17,3 +19,6 @@ Frontend/.vite/
 !.env.example
 .DS_Store
 .vscode/
+
+.agents/
+.codex/

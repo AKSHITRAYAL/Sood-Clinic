@@ -6,9 +6,7 @@ const navClass = ({ isActive }) => `nav-link${isActive ? ' nav-link--active' : '
 
 const Navbar = () => {
   const [menuOpen, setMenuOpen] = useState(false);
-  const token = localStorage.getItem('admintoken');
   useEffect(() => { document.body.style.overflow = menuOpen ? 'hidden' : 'auto'; return () => { document.body.style.overflow = 'auto'; }; }, [menuOpen]);
-  const logout = () => { localStorage.removeItem('admintoken'); window.location.reload(); };
 
   return (
     <nav className="site-nav">
@@ -19,7 +17,7 @@ const Navbar = () => {
           <NavLink to="/" className={navClass}>Home</NavLink>
           <NavLink to="/About" className={navClass}>About us</NavLink>
           <NavLink to="/contact" className={navClass}>Contact</NavLink>
-          {token ? <button type="button" onClick={logout} className="nav-cta">Log out</button> : <Link to="/login" className="nav-link">Staff login</Link>}
+          <Link to="/login" className="nav-link">Sign in</Link>
           <NavLink to="/Booknow" className="nav-cta">Book appointment</NavLink>
         </div>
       </div>
@@ -29,7 +27,7 @@ const Navbar = () => {
           <NavLink onClick={() => setMenuOpen(false)} to="/" className={navClass}>Home</NavLink>
           <NavLink onClick={() => setMenuOpen(false)} to="/About" className={navClass}>About us</NavLink>
           <NavLink onClick={() => setMenuOpen(false)} to="/contact" className={navClass}>Contact</NavLink>
-          {!token && <Link onClick={() => setMenuOpen(false)} to="/login" className="nav-link">Staff login</Link>}
+          <Link onClick={() => setMenuOpen(false)} to="/login" className="nav-link">Sign in</Link>
         </div>
         <NavLink onClick={() => setMenuOpen(false)} to="/Booknow" className="mobile-nav__cta">Book appointment <span aria-hidden="true">→</span></NavLink>
       </div>}

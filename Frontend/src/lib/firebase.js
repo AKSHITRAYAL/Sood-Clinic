@@ -1,6 +1,8 @@
 import { getAnalytics, isSupported } from 'firebase/analytics';
+import { browserLocalPersistence, getAuth, setPersistence } from 'firebase/auth';
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
+import { getFunctions } from 'firebase/functions';
 
 // Firebase web configuration identifies this public web app; it is not a server secret.
 const firebaseConfig = {
@@ -15,6 +17,12 @@ const firebaseConfig = {
 
 export const firebaseApp = initializeApp(firebaseConfig);
 export const firestore = getFirestore(firebaseApp);
+export const functions = getFunctions(firebaseApp, 'asia-south1');
+export const auth = getAuth(firebaseApp);
+// Explicit local persistence prevents staff/patient sessions from disappearing on refresh.
+export const authReady = setPersistence(auth, browserLocalPersistence).catch((error) => {
+  console.error('Unable to configure authentication persistence.', error);
+});
 
 export async function initializeAnalytics() {
   if (typeof window === 'undefined' || !(await isSupported())) return null;
