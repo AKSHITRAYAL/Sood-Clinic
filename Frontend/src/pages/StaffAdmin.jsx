@@ -4,11 +4,12 @@ import { collection, doc, onSnapshot, orderBy, query, setDoc, writeBatch } from 
 import { Link, Navigate } from 'react-router-dom';
 import { httpsCallable } from 'firebase/functions';
 import { auth, firestore, functions } from '../lib/firebase';
+import { istDateKey, toIstParts } from '../lib/ist';
 
 const DOCTOR_ID = 'brig-ak-sood';
-const dateKey = (date = new Date()) => date.toISOString().slice(0, 10);
+const dateKey = (date = new Date()) => istDateKey(date);
 const formatDateTime = (value) => new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
-const greeting = () => new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening';
+const greeting = () => { const { hour } = toIstParts(new Date()); return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'; };
 
 const StaffAdmin = () => {
   const [state, setState] = useState('checking');
@@ -61,9 +62,9 @@ const StaffAdmin = () => {
     event.preventDefault();
     if (override.status === 'available' && override.start >= override.end) { setNotice('The end time must be after the start time.'); return; }
     try {
-      await setDoc(doc(firestore, 'availabilityOverrides', `${DOCTOR_ID}_${override.date}`), {
-        doctorId: DOCTOR_ID, date: override.date, status: override.status,
-        windows: override.status === 'available' ? [[override.start, override.end]] : [],
+      await setDoc(doc(firestore, 'scheduleExceptions', `${DOCTOR_ID}_${override.date}`), {
+        doctorId: DOCTOR_ID, dateKey: override.date, type: override.status === 'available' ? 'extra' : 'closed',
+        sessions: override.status === 'available' ? [{ start: override.start, end: override.end }] : [],
         updatedAt: new Date().toISOString(), updatedBy: auth.currentUser.uid,
       });
       setNotice(override.status === 'available' ? `Special clinic hours saved for ${override.date}.` : `Clinic marked unavailable for ${override.date}.`);

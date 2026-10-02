@@ -7,6 +7,7 @@ Frontend/.vite/
 .mongodb/
 .runtime/
 .npm-cache/
+.emulator-seed/
 .firebase-config/
 .firebase/
 service-account*.json
@@ -17,6 +18,7 @@ service-account*.json
 .env
 .env.*
 !.env.example
+*.md
 .DS_Store
 .vscode/
 

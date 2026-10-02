@@ -3,8 +3,9 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { addDoc, collection, doc, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore';
 import { Link, Navigate } from 'react-router-dom';
 import { auth, firestore } from '../lib/firebase';
+import { toIstParts } from '../lib/ist';
 
-const greeting = () => new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening';
+const greeting = () => { const { hour } = toIstParts(new Date()); return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'; };
 const PatientPortal = () => {
   const [user, setUser] = useState(undefined); const [profile, setProfile] = useState({}); const [appointments, setAppointments] = useState([]); const [history, setHistory] = useState([]); const [documents, setDocuments] = useState([]); const [notice, setNotice] = useState('');
   const [historyForm, setHistoryForm] = useState({ title: '', details: '' }); const [documentForm, setDocumentForm] = useState({ title: '', category: 'Prescription', details: '' });

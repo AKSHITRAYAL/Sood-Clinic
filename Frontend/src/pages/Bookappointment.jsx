@@ -3,19 +3,22 @@ import { doc, getDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { auth, firestore } from '../lib/firebase';
+import { addIstDays, istDateKey, istInstant, weekdayIst } from '../lib/ist';
+import { normalizeException, normalizeSchedule, sessionsForWeekday } from '../lib/schedule';
 
 const DOCTOR_ID = 'brig-ak-sood';
 const BRANCH_ID = 'sood-clinic';
 const DEPARTMENT_ID = 'gastroenterology';
 const HOURS = { 0: [], 1: [['08:00', '10:00'], ['17:00', '18:30']], 2: [['08:00', '10:00'], ['17:00', '18:30']], 3: [['08:00', '10:00'], ['17:00', '18:30']], 4: [['08:00', '10:00'], ['17:00', '18:30']], 5: [['08:00', '10:00'], ['17:00', '18:30']], 6: [['08:00', '10:00'], ['17:00', '18:30']] };
 const pad = (value) => String(value).padStart(2, '0');
-const dateKey = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-const slotId = (date, time) => `${DOCTOR_ID}_${dateKey(date)}_${time.replace(':', '-')}`;
-const labelDate = (date) => date.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+const dateKey = istDateKey;
+const slotId = (date, time) => `${DOCTOR_ID}_${istDateKey(date)}_${time.replace(':', '-')}`;
+const labelDate = (date) => date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short' });
 const slotsFor = (date, override, weekly) => {
-  const regular = weekly?.[date.getDay()]?.enabled ? weekly[date.getDay()].windows : (weekly ? [] : HOURS[date.getDay()] || []);
-  const windows = override?.status === 'unavailable' ? [] : (override?.windows || regular);
-  return windows.flatMap(([start, end]) => {
+  const weekday = weekdayIst(istDateKey(date));
+  const regular = weekly ? sessionsForWeekday(weekly, weekday) : (HOURS[weekday] || []).map(([start, end]) => ({ start, end }));
+  const windows = override?.type === 'closed' ? [] : (override?.sessions || regular);
+  return windows.flatMap(({ start, end }) => {
     const [sh, sm] = start.split(':').map(Number); const [eh, em] = end.split(':').map(Number); const slots = [];
     for (let value = sh * 60 + sm; value + 20 <= eh * 60 + em; value += 20) slots.push(`${pad(Math.floor(value / 60))}:${pad(value % 60)}`);
     return slots;
@@ -23,7 +26,7 @@ const slotsFor = (date, override, weekly) => {
 };
 
 const Bookappointment = () => {
-  const days = useMemo(() => Array.from({ length: 14 }, (_, index) => { const date = new Date(); date.setHours(0, 0, 0, 0); date.setDate(date.getDate() + index); return date; }), []);
+  const days = useMemo(() => { const today = istDateKey(); return Array.from({ length: 14 }, (_, index) => istInstant(addIstDays(today, index))); }, []);
   const [selectedDate, setSelectedDate] = useState(days[0]); const [override, setOverride] = useState(null); const [weekly, setWeekly] = useState(null); const [booked, setBooked] = useState(new Set());
   const [selectedTime, setSelectedTime] = useState(''); const [message, setMessage] = useState(''); const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ name: '', phone: '', reason: '', consent: false });
@@ -31,8 +34,17 @@ const Bookappointment = () => {
 
   useEffect(() => {
     let active = true; setSelectedTime(''); setMessage('');
-    Promise.all([getDoc(doc(firestore, 'availabilityOverrides', `${DOCTOR_ID}_${dateKey(selectedDate)}`)), getDoc(doc(firestore, 'clinicSchedules', DOCTOR_ID))]).then(([overrideSnapshot, scheduleSnapshot]) => {
-      if (!active) return; const next = overrideSnapshot.exists() ? overrideSnapshot.data() : null; const schedule = scheduleSnapshot.exists() ? scheduleSnapshot.data().weekly : null; setOverride(next); setWeekly(schedule);
+    Promise.all([
+      getDoc(doc(firestore, 'scheduleExceptions', `${DOCTOR_ID}_${istDateKey(selectedDate)}`)),
+      getDoc(doc(firestore, 'doctorSchedules', DOCTOR_ID)),
+      getDoc(doc(firestore, 'availabilityOverrides', `${DOCTOR_ID}_${istDateKey(selectedDate)}`)),
+      getDoc(doc(firestore, 'clinicSchedules', DOCTOR_ID)),
+    ]).then(([nextException, nextSchedule, legacyException, legacySchedule]) => {
+      if (!active) return undefined;
+      const next = normalizeException(nextException.exists() ? nextException.data() : (legacyException.exists() ? legacyException.data() : null));
+      const rawSchedule = nextSchedule.exists() ? nextSchedule.data() : (legacySchedule.exists() ? legacySchedule.data() : null);
+      const schedule = rawSchedule ? normalizeSchedule(rawSchedule) : null;
+      setOverride(next); setWeekly(schedule);
       return Promise.all(slotsFor(selectedDate, next, schedule).map((time) => getDoc(doc(firestore, 'appointmentSlots', slotId(selectedDate, time)))));
     }).then((snapshots) => { if (active && snapshots) setBooked(new Set(snapshots.filter((item) => item.exists() && item.data().status === 'booked').map((item) => item.id))); }).catch(() => active && setMessage('Availability could not be loaded. Please refresh and try again.'));
     return () => { active = false; };
@@ -41,7 +53,7 @@ const Bookappointment = () => {
   const submit = async (event) => {
     event.preventDefault(); if (!selectedTime) return setMessage('Select an available consultation time.'); if (!form.consent) return setMessage('Please provide consent before booking.');
     const id = slotId(selectedDate, selectedTime); if (booked.has(id)) return setMessage('That time was just booked. Please choose another time.');
-    setSaving(true); setMessage(''); const startsAt = new Date(`${dateKey(selectedDate)}T${selectedTime}:00`); const endsAt = new Date(startsAt.getTime() + 20 * 60000);
+    setSaving(true); setMessage(''); const startsAt = istInstant(istDateKey(selectedDate), selectedTime); const endsAt = new Date(startsAt.getTime() + 20 * 60000);
     try {
       const batch = writeBatch(firestore); const appointment = doc(firestore, 'appointments', id); const slot = doc(firestore, 'appointmentSlots', id);
       batch.set(appointment, { slotId: id, branchId: BRANCH_ID, departmentId: DEPARTMENT_ID, doctorId: DOCTOR_ID, startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(), reason: form.reason.trim().slice(0, 500), status: 'scheduled', source: 'patient_portal', patientId: auth.currentUser?.uid || '', createdAt: serverTimestamp(), patient: { name: form.name.trim(), phone: form.phone.trim(), consentToTreatment: true } });

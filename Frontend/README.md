@@ -5,7 +5,7 @@ React/Vite application for the public clinic website, patient portal, and staff 
 ## Commands
 
 ```bash
-npm install
+npm ci
 npm run dev
 npm run build
 ```

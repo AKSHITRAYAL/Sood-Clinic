@@ -4,6 +4,7 @@ const admin = require('firebase-admin');
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
+const { istDateKey, toIstParts, weekdayIst } = require('./lib/ist');
 
 admin.initializeApp();
 setGlobalOptions({ region: 'asia-south1', maxInstances: 10 });
@@ -60,7 +61,11 @@ app.post('/api/v1/public/booking/appointments', async (req, res, next) => {
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start || start <= new Date()) return fail(res, 422, 'Choose a future appointment time.');
     const [branch, department, doctor] = await Promise.all([db.collection('branches').doc(branchId).get(), db.collection('departments').doc(departmentId).get(), db.collection('doctors').doc(doctorId).get()]);
     if (!branch.exists || !branch.get('active') || !department.exists || department.get('branchId') !== branchId || !department.get('active') || !department.get('publicBookingEnabled') || !doctor.exists || doctor.get('branchId') !== branchId || !doctor.get('active') || !doctor.get('bookingEnabled') || !(doctor.get('departmentIds') || []).includes(departmentId)) return fail(res, 422, 'The selected clinic service is no longer available.');
-    const schedule = (doctor.get('weeklySchedule') || []).find((rule) => rule.weekday === start.getDay() && minutes(rule.startTime) <= start.getHours() * 60 + start.getMinutes() && minutes(rule.endTime) >= end.getHours() * 60 + end.getMinutes());
+    const startParts = toIstParts(start);
+    const endParts = toIstParts(end);
+    const startMinutes = startParts.hour * 60 + startParts.minute;
+    const endMinutes = endParts.hour * 60 + endParts.minute;
+    const schedule = (doctor.get('weeklySchedule') || []).find((rule) => rule.weekday === weekdayIst(istDateKey(start)) && minutes(rule.startTime) <= startMinutes && minutes(rule.endTime) >= endMinutes);
     if (!schedule) return fail(res, 422, 'This doctor is not available at the selected time.');
     const appointmentRef = db.collection('appointments').doc();
     const slotRef = db.collection('appointmentSlots').doc(`${doctorId}_${start.toISOString()}`);

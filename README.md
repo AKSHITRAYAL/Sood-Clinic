@@ -20,11 +20,17 @@ Firebase-backed appointment and clinic operations application for Sood Clinic, P
 
 ```bash
 cd Frontend
-npm install
+npm ci
 npm run dev
 ```
 
 Build the hosted application with `npm run build`. Firebase Hosting serves `Frontend/dist`.
+
+## Local Firebase checks
+
+From the repository root, run `npm ci` once, then `npm run test:rules`. It launches the
+Firestore emulator against the deliberately fake `demo-sood-clinic` project and verifies
+that unknown Firestore collections remain inaccessible. It never contacts production.
 
 ## Deployment
 

@@ -1,0 +1,17 @@
+{
+  "name": "sood-clinic-tooling",
+  "private": true,
+  "scripts": {
+    "emulators": "FIREBASE_DEBUG_PATH=/tmp/sood-clinic-firebase-debug.log firebase emulators:start --project demo-sood-clinic",
+    "test:rules": "FIREBASE_DEBUG_PATH=/tmp/sood-clinic-firebase-debug.log firebase emulators:exec --only firestore --project demo-sood-clinic \"vitest run tests/rules\"",
+    "test:functions": "FIREBASE_DEBUG_PATH=/tmp/sood-clinic-firebase-debug.log firebase emulators:exec --only auth,firestore,functions --project demo-sood-clinic \"vitest run functions/test\"",
+    "test:time": "vitest run tests/time",
+    "test": "npm run test:rules && npm run test:functions"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
+    "firebase": "^12.19.0",
+    "firebase-tools": "^15.32.1",
+    "vitest": "^5.0.3"
+  }
+}

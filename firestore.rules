@@ -14,6 +14,44 @@ service cloud.firestore {
     }
     function isClinicTeam() { return isDoctor() || isClinicAdmin(); }
     function isClinicStaff() { return isClinicTeam() || isReception(); }
+    function isTime(value) {
+      return value is string && value.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+    }
+    function isScheduleSession(value) {
+      return value is map
+        && value.keys().hasOnly(['weekday', 'start', 'end'])
+        && value.weekday is int && value.weekday >= 0 && value.weekday <= 6
+        && isTime(value.start) && isTime(value.end) && value.start < value.end;
+    }
+    function isExceptionSession(value) {
+      return value is map
+        && value.keys().hasOnly(['start', 'end'])
+        && isTime(value.start) && isTime(value.end) && value.start < value.end;
+    }
+    function validScheduleSessions(value) {
+      return value is list && value.size() <= 14
+        && (value.size() < 1 || isScheduleSession(value[0]))
+        && (value.size() < 2 || isScheduleSession(value[1]))
+        && (value.size() < 3 || isScheduleSession(value[2]))
+        && (value.size() < 4 || isScheduleSession(value[3]))
+        && (value.size() < 5 || isScheduleSession(value[4]))
+        && (value.size() < 6 || isScheduleSession(value[5]))
+        && (value.size() < 7 || isScheduleSession(value[6]))
+        && (value.size() < 8 || isScheduleSession(value[7]))
+        && (value.size() < 9 || isScheduleSession(value[8]))
+        && (value.size() < 10 || isScheduleSession(value[9]))
+        && (value.size() < 11 || isScheduleSession(value[10]))
+        && (value.size() < 12 || isScheduleSession(value[11]))
+        && (value.size() < 13 || isScheduleSession(value[12]))
+        && (value.size() < 14 || isScheduleSession(value[13]));
+    }
+    function validExceptionSessions(value) {
+      return value is list && value.size() <= 4
+        && (value.size() < 1 || isExceptionSession(value[0]))
+        && (value.size() < 2 || isExceptionSession(value[1]))
+        && (value.size() < 3 || isExceptionSession(value[2]))
+        && (value.size() < 4 || isExceptionSession(value[3]));
+    }
     // Public catalog records contain no patient data and power the demo booking flow.
     match /branches/{branchId} {
       // This collection is deliberately limited to public clinic details.
@@ -27,6 +65,26 @@ service cloud.firestore {
     match /doctors/{doctorId} {
       allow read: if true;
       allow write: if false;
+    }
+    match /doctorSchedules/{doctorId} {
+      allow read: if true;
+      allow create, update: if (isClinicAdmin() || (isDoctor() && doctorId == 'brig-ak-sood'))
+        && request.resource.data.keys().hasOnly(['doctorId', 'slotMinutes', 'sessions', 'updatedAt', 'updatedBy'])
+        && request.resource.data.keys().hasAll(['doctorId', 'sessions', 'updatedAt', 'updatedBy'])
+        && request.resource.data.doctorId == doctorId
+        && validScheduleSessions(request.resource.data.sessions);
+      allow delete: if isClinicAdmin() || (isDoctor() && doctorId == 'brig-ak-sood');
+    }
+    match /scheduleExceptions/{exceptionId} {
+      allow read: if true;
+      allow create, update: if (isClinicAdmin() || (isDoctor() && request.resource.data.doctorId == 'brig-ak-sood'))
+        && request.resource.data.keys().hasOnly(['doctorId', 'dateKey', 'type', 'sessions', 'note', 'createdBy', 'createdAt', 'updatedAt', 'updatedBy'])
+        && request.resource.data.keys().hasAll(['doctorId', 'dateKey', 'type', 'sessions', 'updatedAt', 'updatedBy'])
+        && exceptionId == request.resource.data.doctorId + '_' + request.resource.data.dateKey
+        && request.resource.data.dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.type in ['closed', 'extra', 'replace']
+        && validExceptionSessions(request.resource.data.sessions);
+      allow delete: if isClinicAdmin() || (isDoctor() && resource.data.doctorId == 'brig-ak-sood');
     }
     // A separate public slot index contains no patient data. It powers the booking calendar.
     match /appointmentSlots/{slotId} {
@@ -94,14 +152,15 @@ service cloud.firestore {
     // only when clinically required; public visitors cannot read any of it.
     match /patients/{patientId} {
       allow read: if isClinicStaff() || (request.auth != null && request.auth.uid == patientId);
-      allow create, update, delete: if request.auth != null && request.auth.uid == patientId;
+      // Only receptionists and admins can write patient records (including in emergencies)
+      allow create, update, delete: if isReception() || isClinicAdmin();
       match /medicalHistory/{entryId} {
         allow read: if isClinicStaff() || (request.auth != null && request.auth.uid == patientId);
-        allow create, update, delete: if request.auth != null && request.auth.uid == patientId;
+        allow create, update, delete: if isReception() || isClinicAdmin();
       }
       match /medicalDocuments/{documentId} {
         allow read: if isClinicStaff() || (request.auth != null && request.auth.uid == patientId);
-        allow create, update, delete: if request.auth != null && request.auth.uid == patientId;
+        allow create, update, delete: if isReception() || isClinicAdmin();
       }
     }
     match /{document=**} {

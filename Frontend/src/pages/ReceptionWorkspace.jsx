@@ -3,8 +3,9 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, doc, onSnapshot, orderBy, query, updateDoc, writeBatch } from 'firebase/firestore';
 import { Link, Navigate } from 'react-router-dom';
 import { auth, firestore } from '../lib/firebase';
+import { toIstParts } from '../lib/ist';
 
-const greeting = () => new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening';
+const greeting = () => { const { hour } = toIstParts(new Date()); return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'; };
 const ReceptionWorkspace = () => {
   const [state, setState] = useState('checking'); const [user, setUser] = useState(null); const [appointments, setAppointments] = useState([]); const [notice, setNotice] = useState('');
   useEffect(() => onAuthStateChanged(auth, async (next) => { if (!next) { setState('signed-out'); return; } const token = await next.getIdTokenResult(); setUser(next); setState(token.claims.role === 'receptionist' ? 'allowed' : 'denied'); }), []);
