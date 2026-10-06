@@ -6,6 +6,7 @@ import { httpsCallable } from 'firebase/functions';
 import { auth, firestore, functions } from '../lib/firebase';
 import { istDateKey, toIstParts } from '../lib/ist';
 import NotificationMenu from '../components/NotificationMenu';
+import { publicUrl } from '../lib/portals';
 
 const DOCTOR_ID = 'brig-ak-sood';
 const dateKey = (date = new Date()) => istDateKey(date);
@@ -84,14 +85,14 @@ const StaffAdmin = () => {
   };
   const changeStaffAccess = async (member, action) => { const password = action === 'temporaryPassword' ? window.prompt(`Set a new temporary password for ${member.email} (minimum 6 characters):`) : ''; if (action === 'temporaryPassword' && !password) return; try { await httpsCallable(functions, 'manageStaffAccount')({ action, email: member.email, password, disabled: action === 'disable' ? member.active !== false : undefined }); setNotice(action === 'disable' ? 'Staff account status updated.' : 'Temporary password updated.'); } catch (error) { setNotice(error?.code === 'functions/unavailable' ? 'Secure account management needs Firebase Functions on the Blaze plan before it can be enabled.' : error?.message || 'Unable to update staff access.'); } };
 
-  if (state === 'signed-out') return <Navigate to="/login" replace />;
+  if (state === 'signed-out') return <Navigate to="/staff/login" replace />;
   if (state === 'denied') return <main className="staff-shell"><section className="workspace-gate"><p>SOOD CLINIC STAFF</p><h1>Administrator access required</h1><span>Your account is signed in, but it is not assigned the <code>admin</code> role. A project administrator must grant that role with the trusted Firebase Admin command.</span><button type="button" className="staff-secondary-button" onClick={() => signOut(auth)}>Sign out</button></section></main>;
   if (state === 'checking') return <main className="staff-shell"><p className="workspace-status">Verifying secure administrator access…</p></main>;
 
   return <main className="staff-shell">
     <header className="staff-topbar">
       <Link to="/" className="staff-wordmark">SOOD CLINIC</Link>
-      <nav><Link to="/staff/admin" className="is-active">Overview</Link><NotificationMenu /><Link to="/staff/account">My account</Link><Link to="/">View public site</Link><button type="button" onClick={() => signOut(auth)}>Sign out</button></nav>
+      <nav><Link to="/staff/admin" className="is-active">Overview</Link><NotificationMenu /><Link to="/staff/account">My account</Link><a href={publicUrl('/')}>View public site</a><button type="button" onClick={() => signOut(auth)}>Sign out</button></nav>
     </header>
     <div className="staff-admin">
       <header className="staff-admin__heading"><div><p className="section-kicker">Clinic operations</p><h1>{greeting()}, {auth.currentUser?.displayName || 'Administrator'}</h1><span>Monitor appointments, manage clinic availability, and maintain the internal staff directory.</span></div><div className="staff-admin__identity"><strong>{auth.currentUser?.displayName || 'Administrator'}</strong><span>Clinic administrator</span></div></header>

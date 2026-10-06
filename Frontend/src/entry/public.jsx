@@ -1,15 +1,14 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import About from '../pages/About';
-import AccountSettings from '../pages/AccountSettings';
 import Bookappointment from '../pages/Bookappointment';
 import Contact from '../pages/Contact';
 import Home from '../pages/Home';
 import Login from '../pages/Login';
 import PasswordReset from '../pages/PasswordReset';
 import PatientPortal from '../pages/PatientPortal';
+import { staffUrl } from '../lib/portals';
 
-const STAFF_ORIGIN = import.meta.env.VITE_STAFF_ORIGIN || 'https://sood-clinic-staff.web.app';
-const StaffRedirect = () => { window.location.replace(`${STAFF_ORIGIN}/staff/login`); return null; };
+const StaffRedirect = () => { window.location.replace(staffUrl('/staff')); return null; };
 
 const PublicApp = () => <BrowserRouter><Routes>
   <Route path="/" element={<Home />} />
@@ -18,10 +17,14 @@ const PublicApp = () => <BrowserRouter><Routes>
   <Route path="/Booknow" element={<Bookappointment />} />
   <Route path="/login" element={<Login />} />
   <Route path="/reset-password" element={<PasswordReset />} />
-  <Route path="/patient" element={<PatientPortal />} />
-  <Route path="/patient/account" element={<AccountSettings />} />
+  <Route path="/patient" element={<PatientPortal view="overview" />} />
+  <Route path="/patient/appointments" element={<PatientPortal view="appointments" />} />
+  <Route path="/patient/documents" element={<PatientPortal view="documents" />} />
+  <Route path="/patient/health" element={<PatientPortal view="health" />} />
+  <Route path="/patient/account" element={<PatientPortal view="profile" />} />
+  <Route path="/patient/security" element={<PatientPortal view="security" />} />
   <Route path="/staff/*" element={<StaffRedirect />} />
-  <Route path="/doctor/schedule" element={<Navigate to="/staff/login" replace />} />
+  <Route path="/doctor/schedule" element={<StaffRedirect />} />
   <Route path="*" element={<Navigate to="/" replace />} />
 </Routes></BrowserRouter>;
 

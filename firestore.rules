@@ -52,6 +52,18 @@ service cloud.firestore {
         && (value.size() < 3 || isExceptionSession(value[2]))
         && (value.size() < 4 || isExceptionSession(value[3]));
     }
+    function patientProfileFieldsAreSafe(data) {
+      return data.keys().hasOnly([
+        'displayName', 'email', 'title', 'phone', 'dateOfBirth', 'gender',
+        'maritalStatus', 'bloodGroup', 'addressLine1', 'city', 'state',
+        'postalCode', 'emergencyContactName', 'emergencyContactPhone',
+        'allergies', 'currentMedications', 'healthNotes', 'createdAt', 'updatedAt'
+      ])
+        && data.displayName is string
+        && data.email is string
+        && data.createdAt is string
+        && data.updatedAt is string;
+    }
     // Public catalog records contain no patient data and power the demo booking flow.
     match /branches/{branchId} {
       // This collection is deliberately limited to public clinic details.
@@ -152,8 +164,18 @@ service cloud.firestore {
     // only when clinically required; public visitors cannot read any of it.
     match /patients/{patientId} {
       allow read: if isClinicStaff() || (request.auth != null && request.auth.uid == patientId);
-      // Only receptionists and admins can write patient records (including in emergencies)
-      allow create, update, delete: if isReception() || isClinicAdmin();
+      // Patients may update only their own non-clinical profile and self-reported information.
+      // Staff retain access for registration and operational corrections; clinic records stay staff-only.
+      allow create: if isReception() || isClinicAdmin()
+        || (request.auth != null && request.auth.uid == patientId
+          && patientProfileFieldsAreSafe(request.resource.data)
+          && request.resource.data.email == request.auth.token.email);
+      allow update: if isReception() || isClinicAdmin()
+        || (request.auth != null && request.auth.uid == patientId
+          && patientProfileFieldsAreSafe(request.resource.data)
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.createdAt == resource.data.createdAt);
+      allow delete: if isReception() || isClinicAdmin();
       match /medicalHistory/{entryId} {
         allow read: if isClinicStaff() || (request.auth != null && request.auth.uid == patientId);
         allow create, update, delete: if isReception() || isClinicAdmin();
