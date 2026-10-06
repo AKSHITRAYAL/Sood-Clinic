@@ -1,15 +1,21 @@
 const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
 const { setGlobalOptions } = require('firebase-functions/v2');
+const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
 const { istDateKey, toIstParts, weekdayIst } = require('./lib/ist');
+const { buildAvailability, makeSlotId } = require('./lib/availability');
+const { buildAuthorizationUrl, createEvent, decrypt, encrypt, exchangeAuthorizationCode, freeBusy, refreshAccessToken } = require('./lib/googleCalendar');
 
 admin.initializeApp();
 setGlobalOptions({ region: 'asia-south1', maxInstances: 10 });
 
 const db = admin.firestore();
+const GOOGLE_CALENDAR_CLIENT_ID = defineSecret('GOOGLE_CALENDAR_CLIENT_ID');
+const GOOGLE_CALENDAR_CLIENT_SECRET = defineSecret('GOOGLE_CALENDAR_CLIENT_SECRET');
+const GOOGLE_CALENDAR_TOKEN_KEY = defineSecret('GOOGLE_CALENDAR_TOKEN_KEY');
 const app = express();
 const allowedOrigins = ['https://sood-clinic.web.app', 'https://sood-clinic.firebaseapp.com', 'http://localhost:5174'];
 app.disable('x-powered-by');
@@ -122,4 +128,248 @@ exports.manageStaffAccount = onCall({ region: 'asia-south1', enforceAppCheck: fa
     return { message: Boolean(disabled) ? 'Staff account disabled.' : 'Staff account enabled.' };
   }
   throw new HttpsError('invalid-argument', 'Unsupported staff account action.');
+});
+
+// --- Appointment engine ----------------------------------------------------
+// Firestore is the sole appointment authority. Google Calendar is deliberately
+// an external busy-time source and best-effort event mirror, never a replacement
+// for the transaction below.
+const DEFAULT_BOOKING_CONFIG = Object.freeze({
+  timezone: 'Asia/Kolkata',
+  bookingWindowDays: 14,
+  leadMinutes: 30,
+  slotMinutes: 20,
+  intervalMinutes: 20,
+  bufferBeforeMinutes: 0,
+  bufferAfterMinutes: 0,
+  autoConfirm: false,
+});
+
+const asDate = (value) => {
+  if (!value) return null;
+  if (typeof value.toDate === 'function') return value.toDate();
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+const publicError = (code, message) => new HttpsError(code, message);
+const roleFor = (authContext) => authContext?.token?.role || 'patient';
+const trimmed = (value, max) => String(value || '').trim().slice(0, max);
+const validPhone = (value) => /^\+?[0-9][0-9\s-]{6,18}$/.test(String(value || '').trim());
+const validClientRequestId = (value) => /^[a-zA-Z0-9_-]{16,128}$/.test(String(value || ''));
+const isActiveAppointment = (status) => !['cancelled', 'completed', 'no_show'].includes(status);
+const appointmentReference = () => `SC-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+const functionsProject = () => process.env.GCLOUD_PROJECT || 'sood-clinic';
+const googleCallbackUrl = () => `https://asia-south1-${functionsProject()}.cloudfunctions.net/googleCalendarCallback`;
+
+const bookingConfig = (data) => {
+  const configured = data?.data() || {};
+  const number = (name, fallback, min, max) => Number.isInteger(configured[name]) && configured[name] >= min && configured[name] <= max ? configured[name] : fallback;
+  return {
+    ...DEFAULT_BOOKING_CONFIG,
+    bookingWindowDays: number('bookingWindowDays', DEFAULT_BOOKING_CONFIG.bookingWindowDays, 1, 90),
+    leadMinutes: number('leadMinutes', DEFAULT_BOOKING_CONFIG.leadMinutes, 0, 24 * 60),
+    slotMinutes: number('slotMinutes', DEFAULT_BOOKING_CONFIG.slotMinutes, 5, 240),
+    intervalMinutes: number('intervalMinutes', DEFAULT_BOOKING_CONFIG.intervalMinutes, 5, 240),
+    bufferBeforeMinutes: number('bufferBeforeMinutes', DEFAULT_BOOKING_CONFIG.bufferBeforeMinutes, 0, 120),
+    bufferAfterMinutes: number('bufferAfterMinutes', DEFAULT_BOOKING_CONFIG.bufferAfterMinutes, 0, 120),
+    autoConfirm: configured.autoConfirm === true,
+    visitTypes: Array.isArray(configured.visitTypes) ? configured.visitTypes : [],
+  };
+};
+
+const visitTypeFor = (config, visitTypeId) => {
+  const visitType = config.visitTypes.find((item) => item && item.id === visitTypeId);
+  if (visitType && Number.isInteger(visitType.minutes) && visitType.minutes >= 5 && visitType.minutes <= 240) return visitType;
+  if (visitTypeId && visitTypeId !== 'consultation') throw publicError('invalid-argument', 'The selected visit type is unavailable.');
+  return { id: 'consultation', label: 'Consultation', minutes: config.slotMinutes };
+};
+
+const slotBusyRanges = async (doctorId, dateKey) => {
+  const snapshot = await db.collection('appointmentSlots').where('doctorId', '==', doctorId).get();
+  return snapshot.docs.map((item) => item.data()).filter((item) => {
+    const legacyDateKey = asDate(item.startsAt) ? istDateKey(asDate(item.startsAt)) : null;
+    return (item.dateKey || legacyDateKey) === dateKey && ['booked', 'blocked', 'held'].includes(item.status);
+  })
+    .map((item) => {
+      const startsAt = asDate(item.startsAt);
+      return startsAt ? { startsAt, endsAt: asDate(item.endsAt) || new Date(startsAt.getTime() + 20 * 60 * 1000) } : null;
+    }).filter(Boolean);
+};
+
+const calendarConnection = async (doctorId) => {
+  const snapshot = await db.collection('integrations').doc('googleCalendar').get();
+  const connection = snapshot.data();
+  if (!snapshot.exists || !connection.active || connection.doctorId !== doctorId || !connection.encryptedRefreshToken) return null;
+  return { ref: snapshot.ref, ...connection };
+};
+
+const calendarAccess = async (connection) => {
+  const refreshToken = decrypt(connection.encryptedRefreshToken, GOOGLE_CALENDAR_TOKEN_KEY.value());
+  const token = await refreshAccessToken({ refreshToken, clientId: GOOGLE_CALENDAR_CLIENT_ID.value(), clientSecret: GOOGLE_CALENDAR_CLIENT_SECRET.value() });
+  return { accessToken: token.access_token, calendarId: connection.calendarId || 'primary' };
+};
+
+const externalBusyRanges = async ({ doctorId, dateKey }) => {
+  const connection = await calendarConnection(doctorId);
+  if (!connection) return { ranges: [], calendar: { connected: false } };
+  try {
+    const { accessToken, calendarId } = await calendarAccess(connection);
+    const start = new Date(`${dateKey}T00:00:00+05:30`);
+    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+    const ranges = await freeBusy({ accessToken, calendarId, timeMin: start.toISOString(), timeMax: end.toISOString() });
+    await connection.ref.set({ syncStatus: 'healthy', lastAvailabilitySyncAt: admin.firestore.FieldValue.serverTimestamp(), lastSyncError: admin.firestore.FieldValue.delete() }, { merge: true });
+    return { ranges, calendar: { connected: true, status: 'healthy' } };
+  } catch (_error) {
+    // Do not reveal provider detail or fail the clinic's own booking system if
+    // Google is temporarily unavailable. The server records only a safe status.
+    await connection.ref.set({ syncStatus: 'degraded', lastSyncError: 'Unable to refresh external calendar availability.', lastSyncErrorAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    return { ranges: [], calendar: { connected: true, status: 'degraded' } };
+  }
+};
+
+const availabilityContext = async ({ doctorId, dateKey, visitTypeId }) => {
+  const [doctorSnapshot, scheduleSnapshot, exceptionSnapshot, configSnapshot] = await Promise.all([
+    db.collection('doctors').doc(doctorId).get(),
+    db.collection('doctorSchedules').doc(doctorId).get(),
+    db.collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`).get(),
+    db.collection('clinic').doc('publicConfig').get(),
+  ]);
+  if (!doctorSnapshot.exists || doctorSnapshot.get('active') !== true || doctorSnapshot.get('bookingEnabled') !== true) throw publicError('not-found', 'This doctor is not currently available for online bookings.');
+  const config = bookingConfig(configSnapshot);
+  const visitType = visitTypeFor(config, visitTypeId);
+  const [slots, external] = await Promise.all([slotBusyRanges(doctorId, dateKey), externalBusyRanges({ doctorId, dateKey })]);
+  return {
+    doctor: doctorSnapshot.data(),
+    weeklySessions: (scheduleSnapshot.get('sessions') || doctorSnapshot.get('weeklySchedule') || []).map((session) => ({
+      weekday: session.weekday,
+      start: session.start || session.startTime,
+      end: session.end || session.endTime,
+    })),
+    exception: exceptionSnapshot.exists ? exceptionSnapshot.data() : null,
+    config,
+    visitType,
+    busyRanges: [...slots, ...external.ranges],
+    externalCalendar: external.calendar,
+  };
+};
+
+exports.getAvailability = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+  const { doctorId, dateKey, visitTypeId } = request.data || {};
+  if (!doctorId || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || ''))) throw publicError('invalid-argument', 'Choose a doctor and appointment date.');
+  const context = await availabilityContext({ doctorId, dateKey, visitTypeId });
+  const slots = buildAvailability({ doctorId, dateKey, weeklySessions: context.weeklySessions, exception: context.exception, durationMinutes: context.visitType.minutes, intervalMinutes: context.config.intervalMinutes, bufferBeforeMinutes: context.config.bufferBeforeMinutes, bufferAfterMinutes: context.config.bufferAfterMinutes, leadMinutes: context.config.leadMinutes, bookingWindowDays: context.config.bookingWindowDays, busyRanges: context.busyRanges });
+  return { timezone: context.config.timezone, visitType: { id: context.visitType.id, label: context.visitType.label, minutes: context.visitType.minutes }, calendar: context.externalCalendar, slots: slots.map((slot) => ({ slotId: slot.slotId, startsAt: slot.startsAt.toISOString(), endsAt: slot.endsAt.toISOString(), time: slot.time })) };
+});
+
+const syncAppointmentToGoogle = async (appointmentId) => {
+  const appointmentRef = db.collection('appointments').doc(appointmentId);
+  const appointmentSnapshot = await appointmentRef.get();
+  if (!appointmentSnapshot.exists) return;
+  const appointment = appointmentSnapshot.data();
+  const connection = await calendarConnection(appointment.doctorId);
+  if (!connection) return;
+  try {
+    const { accessToken, calendarId } = await calendarAccess(connection);
+    const event = await createEvent({ accessToken, calendarId, startsAt: asDate(appointment.startsAt).toISOString(), endsAt: asDate(appointment.endsAt).toISOString(), appointmentReference: appointment.reference });
+    await appointmentRef.set({ externalCalendar: { provider: 'google', calendarId, eventId: event.id, syncStatus: 'synced', lastSyncedAt: admin.firestore.FieldValue.serverTimestamp() }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  } catch (_error) {
+    await appointmentRef.set({ externalCalendar: { provider: 'google', syncStatus: 'pending', lastSyncError: 'Calendar event could not be synced.' }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  }
+};
+
+exports.createBooking = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+  const { branchId, departmentId, doctorId, dateKey, time, visitTypeId, patient, reason, consentVersion, clientRequestId } = request.data || {};
+  if (!branchId || !departmentId || !doctorId || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || '')) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(time || ''))) throw publicError('invalid-argument', 'Choose a valid appointment time.');
+  if (!validClientRequestId(clientRequestId)) throw publicError('invalid-argument', 'Please refresh and try booking again.');
+  const name = trimmed(patient?.name, 120);
+  const phone = trimmed(patient?.phone, 30);
+  if (!name || !validPhone(phone) || patient?.consentToTreatment !== true) throw publicError('invalid-argument', 'Enter your name, a valid phone number, and consent to the appointment terms.');
+  const context = await availabilityContext({ doctorId, dateKey, visitTypeId });
+  const appointmentSlots = buildAvailability({ doctorId, dateKey, weeklySessions: context.weeklySessions, exception: context.exception, durationMinutes: context.visitType.minutes, intervalMinutes: context.config.intervalMinutes, bufferBeforeMinutes: context.config.bufferBeforeMinutes, bufferAfterMinutes: context.config.bufferAfterMinutes, leadMinutes: context.config.leadMinutes, bookingWindowDays: context.config.bookingWindowDays, busyRanges: context.busyRanges });
+  const requested = appointmentSlots.find((slot) => slot.time === time);
+  if (!requested) throw publicError('failed-precondition', 'That time is no longer available. Please choose another slot.');
+  const [branchSnapshot, departmentSnapshot, doctorSnapshot] = await Promise.all([db.collection('branches').doc(branchId).get(), db.collection('departments').doc(departmentId).get(), db.collection('doctors').doc(doctorId).get()]);
+  if (!branchSnapshot.exists || branchSnapshot.get('active') !== true || !departmentSnapshot.exists || departmentSnapshot.get('branchId') !== branchId || departmentSnapshot.get('active') !== true || departmentSnapshot.get('publicBookingEnabled') !== true || !doctorSnapshot.exists || doctorSnapshot.get('branchId') !== branchId || !(doctorSnapshot.get('departmentIds') || []).includes(departmentId)) throw publicError('failed-precondition', 'The selected clinic service is not available.');
+
+  const requestRef = db.collection('bookingRequests').doc(clientRequestId);
+  const appointmentRef = db.collection('appointments').doc();
+  const slotRef = db.collection('appointmentSlots').doc(makeSlotId(doctorId, dateKey, time));
+  const reference = appointmentReference();
+  const role = roleFor(request.auth);
+  let result;
+  try {
+    await db.runTransaction(async (transaction) => {
+      const [prior, slot] = await Promise.all([transaction.get(requestRef), transaction.get(slotRef)]);
+      if (prior.exists) {
+        result = { appointmentId: prior.get('appointmentId'), reference: prior.get('reference'), status: prior.get('status'), idempotent: true };
+        return;
+      }
+      if (slot.exists) throw publicError('already-exists', 'That time has just been booked. Please choose another slot.');
+      const status = context.config.autoConfirm ? 'confirmed' : 'scheduled';
+      const createdBy = request.auth ? { uid: request.auth.uid, role } : { uid: null, role: 'public' };
+      transaction.set(slotRef, { doctorId, dateKey, startsAt: admin.firestore.Timestamp.fromDate(requested.startsAt), endsAt: admin.firestore.Timestamp.fromDate(requested.endsAt), appointmentId: appointmentRef.id, status: 'booked', createdAt: admin.firestore.FieldValue.serverTimestamp() });
+      transaction.set(appointmentRef, {
+        reference, branchId, departmentId, doctorId, visitType: context.visitType.id, dateKey,
+        startsAt: admin.firestore.Timestamp.fromDate(requested.startsAt), endsAt: admin.firestore.Timestamp.fromDate(requested.endsAt),
+        status, source: request.auth ? 'patient_portal' : 'web', patientId: request.auth?.uid || null,
+        patientSnapshot: { name, phone }, reason: trimmed(reason, 500) || null,
+        consent: { version: trimmed(consentVersion, 40) || 'booking-v1', acceptedAt: admin.firestore.FieldValue.serverTimestamp() },
+        createdBy, externalCalendar: { provider: 'google', syncStatus: 'not_connected' }, createdAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      transaction.set(appointmentRef.collection('events').doc(), { from: null, to: status, byUid: createdBy.uid, byRole: createdBy.role, at: admin.firestore.FieldValue.serverTimestamp(), meta: { source: request.auth ? 'patient_portal' : 'web' } });
+      transaction.set(db.collection('auditLogs').doc(), { at: admin.firestore.FieldValue.serverTimestamp(), actor: createdBy, action: 'appointment_created', resource: { type: 'appointment', id: appointmentRef.id }, meta: { source: request.auth ? 'patient_portal' : 'web', status } });
+      transaction.set(requestRef, { appointmentId: appointmentRef.id, reference, status, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+      result = { appointmentId: appointmentRef.id, reference, status, idempotent: false };
+    });
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    throw publicError('internal', 'We could not reserve this time. Please try again.');
+  }
+  if (!result.idempotent) await syncAppointmentToGoogle(result.appointmentId);
+  return result;
+});
+
+// --- Google Calendar connection -------------------------------------------
+// This is clinic-admin initiated only. Browser code receives an OAuth URL but
+// never receives a client secret, refresh token, or another calendar's events.
+exports.beginGoogleCalendarConnection = onCall({ region: 'asia-south1', secrets: [GOOGLE_CALENDAR_CLIENT_ID] }, async (request) => {
+  requireAdmin(request);
+  const { doctorId = 'brig-ak-sood', calendarId = 'primary' } = request.data || {};
+  if (!doctorId || !/^[A-Za-z0-9_-]{1,120}$/.test(String(doctorId)) || !/^[A-Za-z0-9@._-]{1,240}$/.test(String(calendarId))) throw publicError('invalid-argument', 'Choose a valid doctor and Google Calendar.');
+  const state = crypto.randomBytes(32).toString('base64url');
+  await db.collection('integrationOAuthStates').doc(state).set({ doctorId, calendarId, requestedBy: request.auth.uid, expiresAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)), createdAt: admin.firestore.FieldValue.serverTimestamp() });
+  return { authorizationUrl: buildAuthorizationUrl({ clientId: GOOGLE_CALENDAR_CLIENT_ID.value(), redirectUri: googleCallbackUrl(), state }) };
+});
+
+exports.googleCalendarCallback = onRequest({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (req, res) => {
+  const code = String(req.query.code || '');
+  const state = String(req.query.state || '');
+  if (!code || !state) return res.status(400).send('Google Calendar connection could not be verified.');
+  const stateRef = db.collection('integrationOAuthStates').doc(state);
+  const stateSnapshot = await stateRef.get();
+  const expiresAt = stateSnapshot.exists ? asDate(stateSnapshot.get('expiresAt')) : null;
+  if (!stateSnapshot.exists || !expiresAt || expiresAt.getTime() < Date.now()) return res.status(400).send('This Google Calendar connection request has expired. Return to the staff portal and try again.');
+  try {
+    const token = await exchangeAuthorizationCode({ code, clientId: GOOGLE_CALENDAR_CLIENT_ID.value(), clientSecret: GOOGLE_CALENDAR_CLIENT_SECRET.value(), redirectUri: googleCallbackUrl() });
+    if (!token.refresh_token) throw new Error('No refresh token received.');
+    await db.collection('integrations').doc('googleCalendar').set({ provider: 'google', doctorId: stateSnapshot.get('doctorId'), calendarId: stateSnapshot.get('calendarId'), active: true, encryptedRefreshToken: encrypt(token.refresh_token, GOOGLE_CALENDAR_TOKEN_KEY.value()), connectedBy: stateSnapshot.get('requestedBy'), connectedAt: admin.firestore.FieldValue.serverTimestamp(), syncStatus: 'healthy', lastSyncError: admin.firestore.FieldValue.delete() }, { merge: true });
+    await stateRef.delete();
+    return res.status(200).type('html').send('<!doctype html><title>Calendar connected</title><p>Google Calendar is connected. You may close this window and return to the staff portal.</p>');
+  } catch (_error) {
+    return res.status(400).type('html').send('<!doctype html><title>Calendar connection failed</title><p>The Google Calendar connection could not be completed. Please return to the staff portal and try again.</p>');
+  }
+});
+
+exports.googleCalendarStatus = onCall({ region: 'asia-south1' }, async (request) => {
+  requireAdmin(request);
+  const snapshot = await db.collection('integrations').doc('googleCalendar').get();
+  if (!snapshot.exists) return { connected: false };
+  const value = snapshot.data();
+  return { connected: value.active === true, doctorId: value.doctorId, calendarId: value.calendarId, syncStatus: value.syncStatus || 'unknown', lastSyncError: value.lastSyncError || null };
+});
+
+exports.disconnectGoogleCalendar = onCall({ region: 'asia-south1' }, async (request) => {
+  requireAdmin(request);
+  await db.collection('integrations').doc('googleCalendar').set({ active: false, disconnectedAt: admin.firestore.FieldValue.serverTimestamp(), disconnectedBy: request.auth.uid, syncStatus: 'disconnected' }, { merge: true });
+  return { disconnected: true };
 });

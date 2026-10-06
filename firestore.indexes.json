@@ -9,6 +9,14 @@
       ]
     },
     {
+      "collectionGroup": "appointmentSlots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "doctorId", "order": "ASCENDING" },
+        { "fieldPath": "dateKey", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "appointments",
       "queryScope": "COLLECTION",
       "fields": [

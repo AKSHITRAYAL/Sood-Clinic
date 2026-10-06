@@ -98,44 +98,18 @@ service cloud.firestore {
         && validExceptionSessions(request.resource.data.sessions);
       allow delete: if isClinicAdmin() || (isDoctor() && resource.data.doctorId == 'brig-ak-sood');
     }
-    // A separate public slot index contains no patient data. It powers the booking calendar.
+    // A separate public slot index contains no patient data. It powers the booking
+    // calendar, but its locks are created only by trusted server transactions.
     match /appointmentSlots/{slotId} {
       allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['doctorId', 'appointmentId', 'startsAt', 'status', 'createdAt'])
-        && request.resource.data.doctorId == 'brig-ak-sood'
-        && request.resource.data.status == 'booked'
-        && request.resource.data.appointmentId is string
-        && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.slotId == slotId;
-      // A cancelled slot is retained as a public, non-sensitive availability record.
-      // It can be atomically re-reserved only together with its matching appointment document.
-      allow update: if isClinicStaff()
-        || (resource.data.status == 'available'
-          && request.resource.data.doctorId == 'brig-ak-sood'
-          && request.resource.data.status == 'booked'
-          && request.resource.data.appointmentId is string
-          && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.slotId == slotId);
-      allow delete: if isClinicTeam();
+      allow create, update, delete: if false;
     }
-    // Visitors can submit, but only clinic staff can view or alter patient data.
+    // Appointment writes—including staff transitions—are callable/Admin-SDK only.
+    // Rules cannot safely enforce a state machine or cross-document lock by themselves.
     match /appointments/{appointmentId} {
-      allow create: if request.resource.data.keys().hasOnly(['slotId', 'branchId', 'departmentId', 'doctorId', 'startsAt', 'endsAt', 'reason', 'status', 'source', 'patient', 'patientId', 'createdAt'])
-        && request.resource.data.slotId is string
-        && request.resource.data.branchId is string
-        && request.resource.data.departmentId is string
-        && request.resource.data.doctorId is string
-        && request.resource.data.startsAt is string
-        && request.resource.data.endsAt is string
-        && request.resource.data.status == 'scheduled'
-        && request.resource.data.source == 'patient_portal'
-        && request.resource.data.patientId is string
-        && (request.resource.data.patientId == '' || (request.auth != null && request.resource.data.patientId == request.auth.uid))
-        && request.resource.data.patient.name is string
-        && request.resource.data.patient.phone is string
-        && request.resource.data.patient.consentToTreatment == true;
       allow read: if isClinicStaff()
         || (request.auth != null && resource.data.patientId == request.auth.uid);
-      allow update: if isClinicStaff() && request.resource.data.doctorId == 'brig-ak-sood';
-      allow delete: if false;
+      allow create, update, delete: if false;
     }
     // Public read enables the date picker to show doctor-declared special hours.
     match /availabilityOverrides/{overrideId} {

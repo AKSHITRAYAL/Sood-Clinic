@@ -56,4 +56,14 @@ describe('Firestore default-deny boundary', () => {
     const db = testEnv.authenticatedContext('patient-one', { email: 'patient@example.com' }).firestore();
     await assertFails(setDoc(doc(db, 'patients', 'patient-one', 'medicalDocuments', 'record-one'), { title: 'Self upload' }));
   });
+
+  it('denies every direct browser write to appointment records and slot locks', async () => {
+    const db = testEnv.authenticatedContext('patient-one', { email: 'patient@example.com' }).firestore();
+    await assertFails(setDoc(doc(db, 'appointments', 'browser-created'), {
+      doctorId: 'brig-ak-sood', patientId: 'patient-one', status: 'scheduled',
+    }));
+    await assertFails(setDoc(doc(db, 'appointmentSlots', 'brig-ak-sood_202610090800'), {
+      doctorId: 'brig-ak-sood', status: 'booked', appointmentId: 'browser-created',
+    }));
+  });
 });
