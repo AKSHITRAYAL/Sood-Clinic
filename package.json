@@ -6,6 +6,7 @@
     "test:rules": "FIREBASE_DEBUG_PATH=/tmp/sood-clinic-firebase-debug.log firebase emulators:exec --only firestore --project demo-sood-clinic \"vitest run tests/rules\"",
     "test:functions": "FIREBASE_DEBUG_PATH=/tmp/sood-clinic-firebase-debug.log firebase emulators:exec --only auth,firestore,functions --project demo-sood-clinic \"vitest run functions/test\"",
     "test:time": "vitest run tests/time",
+    "test:schedule": "vitest run tests/schedule",
     "test": "npm run test:rules && npm run test:functions"
   },
   "devDependencies": {

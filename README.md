@@ -35,7 +35,11 @@ that unknown Firestore collections remain inaccessible. It never contacts produc
 ## Deployment
 
 ```bash
-firebase deploy --only hosting:sood-clinic --project sood-clinic
+npm --prefix Frontend run build
+npx firebase-tools deploy --only firestore:rules,firestore:indexes,functions,hosting:sood-clinic --project sood-clinic
 ```
+
+This is a coordinated production release command. Use it only after tests and explicit
+approval; a Hosting-only deployment does not publish rules, indexes, or Functions.
 
 Never commit service-account keys, Firebase CLI credentials, or `.env` files.

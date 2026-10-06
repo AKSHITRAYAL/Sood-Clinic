@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run build:public && npm run build:staff",
+    "build:public": "vite build --mode public --outDir dist/public",
+    "build:staff": "vite build --mode staff --outDir dist/staff",
     "lint": "eslint .",
     "preview": "vite preview"
   },

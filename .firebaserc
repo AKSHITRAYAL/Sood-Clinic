@@ -1,5 +1,13 @@
 {
   "projects": {
     "default": "sood-clinic"
+  },
+  "targets": {
+    "sood-clinic": {
+      "hosting": {
+        "public": ["sood-clinic"],
+        "staff": ["sood-clinic-staff"]
+      }
+    }
   }
 }

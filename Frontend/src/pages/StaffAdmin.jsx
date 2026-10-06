@@ -5,6 +5,7 @@ import { Link, Navigate } from 'react-router-dom';
 import { httpsCallable } from 'firebase/functions';
 import { auth, firestore, functions } from '../lib/firebase';
 import { istDateKey, toIstParts } from '../lib/ist';
+import NotificationMenu from '../components/NotificationMenu';
 
 const DOCTOR_ID = 'brig-ak-sood';
 const dateKey = (date = new Date()) => istDateKey(date);
@@ -89,8 +90,8 @@ const StaffAdmin = () => {
 
   return <main className="staff-shell">
     <header className="staff-topbar">
-      <div><Link to="/" className="staff-wordmark">SOOD CLINIC</Link><span>Staff / Admin</span></div>
-      <nav><Link to="/staff/admin" className="is-active">Overview</Link><Link to="/staff/account">My account</Link><Link to="/">View public site</Link><button type="button" onClick={() => signOut(auth)}>Sign out</button></nav>
+      <Link to="/" className="staff-wordmark">SOOD CLINIC</Link>
+      <nav><Link to="/staff/admin" className="is-active">Overview</Link><NotificationMenu /><Link to="/staff/account">My account</Link><Link to="/">View public site</Link><button type="button" onClick={() => signOut(auth)}>Sign out</button></nav>
     </header>
     <div className="staff-admin">
       <header className="staff-admin__heading"><div><p className="section-kicker">Clinic operations</p><h1>{greeting()}, {auth.currentUser?.displayName || 'Administrator'}</h1><span>Monitor appointments, manage clinic availability, and maintain the internal staff directory.</span></div><div className="staff-admin__identity"><strong>{auth.currentUser?.displayName || 'Administrator'}</strong><span>Clinic administrator</span></div></header>
