@@ -7,9 +7,10 @@ import NotificationMenu from '../components/NotificationMenu';
 import PatientAvatar from '../components/PatientAvatar';
 import SoodClinicMark from '../components/SoodClinicMark';
 import { auth, firestore } from '../lib/firebase';
+import { toDate } from '../lib/time';
 
-const formatWhen = (value) => new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' });
-const isUpcoming = (item) => ['scheduled', 'confirmed'].includes(item.status) && new Date(item.startsAt) >= new Date();
+const formatWhen = (value) => { const date = toDate(value); return date ? date.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) : 'Time unavailable'; };
+const isUpcoming = (item) => { const date = toDate(item.startsAt); return ['scheduled', 'confirmed'].includes(item.status) && date && date >= new Date(); };
 const blankProfile = () => ({ title: '', displayName: '', phone: '', dateOfBirth: '', gender: '', maritalStatus: '', bloodGroup: '', addressLine1: '', city: '', state: '', postalCode: '', emergencyContactName: '', emergencyContactPhone: '', allergies: '', currentMedications: '', healthNotes: '' });
 
 const PortalIcon = ({ name }) => {
@@ -59,7 +60,7 @@ const PatientPortal = ({ view }) => {
       setForm({ ...blankProfile(), ...data, displayName: data.displayName || user.displayName || '' });
     }, failed);
     const stopDocuments = onSnapshot(query(collection(patientRef, 'medicalDocuments'), orderBy('createdAt', 'desc')), (snapshot) => setDocuments(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))), failed);
-    const stopAppointments = onSnapshot(query(collection(firestore, 'appointments'), where('patientId', '==', user.uid)), (snapshot) => setAppointments(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)))), failed);
+    const stopAppointments = onSnapshot(query(collection(firestore, 'appointments'), where('patientId', '==', user.uid)), (snapshot) => setAppointments(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (toDate(a.startsAt)?.getTime() || 0) - (toDate(b.startsAt)?.getTime() || 0))), failed);
     return () => { stopProfile(); stopDocuments(); stopAppointments(); };
   }, [user]);
 
@@ -99,7 +100,7 @@ const PatientPortal = ({ view }) => {
     <fieldset><legend>Emergency contact</legend><div className="patient-form__grid"><label>Contact name<input value={form.emergencyContactName} onChange={(event) => setForm({ ...form, emergencyContactName: event.target.value })} /></label><label>Contact phone<input value={form.emergencyContactPhone} onChange={(event) => setForm({ ...form, emergencyContactPhone: event.target.value })} inputMode="tel" /></label></div></fieldset><button type="submit">Save personal details</button>
   </form>;
   const healthForm = <form className="patient-form" onSubmit={saveProfile}><header><p className="section-kicker">Health profile</p><h2>Information you choose to share</h2><span>This is self-reported information, not a clinical diagnosis. Clinic staff may use it to prepare for your visit.</span></header><div className="patient-form__stack"><label>Allergies<textarea value={form.allergies} onChange={(event) => setForm({ ...form, allergies: event.target.value })} placeholder="For example, food, medicine, or other allergies" /></label><label>Current medications<textarea value={form.currentMedications} onChange={(event) => setForm({ ...form, currentMedications: event.target.value })} placeholder="Include medication name and dose if known" /></label><label>Notes for your care team<textarea value={form.healthNotes} onChange={(event) => setForm({ ...form, healthNotes: event.target.value })} placeholder="Anything you would like the clinic to know before your visit" /></label></div><button type="submit">Save health profile</button></form>;
-  const list = (items) => items.length ? <div className="patient-visit-list">{items.map((item) => <article key={item.id}><div className="patient-visit-list__date"><strong>{new Date(item.startsAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</strong><span>{new Date(item.startsAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}</span></div><div><strong>Consultation with Dr. A. K. Sood</strong><span>{item.reason || 'Clinic consultation'}</span></div><span className={`appointment-status appointment-status--${item.status}`}>{item.status}</span></article>)}</div> : <div className="patient-empty-state"><strong>No appointments yet</strong><span>When you book a visit, it will appear here.</span><Link to="/Booknow">Book appointment</Link></div>;
+  const list = (items) => items.length ? <div className="patient-visit-list">{items.map((item) => { const date = toDate(item.startsAt); return <article key={item.id}><div className="patient-visit-list__date"><strong>{date ? date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—'}</strong><span>{date ? date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }) : 'Time unavailable'}</span></div><div><strong>Consultation with Dr. A. K. Sood</strong><span>{item.reason || 'Clinic consultation'}</span></div><span className={`appointment-status appointment-status--${item.status}`}>{item.status}</span></article>; })}</div> : <div className="patient-empty-state"><strong>No appointments yet</strong><span>When you book a visit, it will appear here.</span><Link to="/Booknow">Book appointment</Link></div>;
 
   let content;
   if (view === 'appointments') content = <section className="patient-page-card"><header className="patient-card__head"><div><p className="section-kicker">Appointments</p><h2>All visits</h2></div><Link to="/Booknow">Book appointment</Link></header>{list(appointments)}</section>;

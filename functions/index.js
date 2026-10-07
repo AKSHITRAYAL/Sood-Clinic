@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const { istDateKey, toIstParts, weekdayIst } = require('./lib/ist');
 const { buildAvailability, makeSlotId } = require('./lib/availability');
 const { buildAuthorizationUrl, createEvent, decrypt, encrypt, exchangeAuthorizationCode, freeBusy, refreshAccessToken } = require('./lib/googleCalendar');
+const { ROLE, canTransition } = require('./lib/stateMachine');
 
 admin.initializeApp();
 setGlobalOptions({ region: 'asia-south1', maxInstances: 10 });
@@ -312,7 +313,7 @@ exports.createBooking = onCall({ region: 'asia-south1', timeoutSeconds: 30, memo
         reference, branchId, departmentId, doctorId, visitType: context.visitType.id, dateKey,
         startsAt: admin.firestore.Timestamp.fromDate(requested.startsAt), endsAt: admin.firestore.Timestamp.fromDate(requested.endsAt),
         status, source: request.auth ? 'patient_portal' : 'web', patientId: request.auth?.uid || null,
-        patientSnapshot: { name, phone }, reason: trimmed(reason, 500) || null,
+        patientSnapshot: { name, phone }, reason: trimmed(reason, 500) || null, slotIds: [slotRef.id],
         consent: { version: trimmed(consentVersion, 40) || 'booking-v1', acceptedAt: admin.firestore.FieldValue.serverTimestamp() },
         createdBy, externalCalendar: { provider: 'google', syncStatus: 'not_connected' }, createdAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
@@ -327,6 +328,36 @@ exports.createBooking = onCall({ region: 'asia-south1', timeoutSeconds: 30, memo
   }
   if (!result.idempotent) await syncAppointmentToGoogle(result.appointmentId);
   return result;
+});
+
+// All appointment lifecycle changes happen on the trusted server. Browser clients
+// may read appointments, but Firestore rules intentionally deny direct writes.
+exports.transitionAppointment = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  const role = ROLE[request.auth?.token?.role];
+  if (!role) throw publicError('permission-denied', 'Staff access is required.');
+  const { appointmentId, to, reason } = request.data || {};
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(String(appointmentId || '')) || !/^[a-z_]{2,40}$/.test(String(to || ''))) throw publicError('invalid-argument', 'Invalid appointment update.');
+  const cancellationReason = trimmed(reason, 300);
+  if (to === 'cancelled' && !cancellationReason) throw publicError('invalid-argument', 'A cancellation reason is required.');
+  const ref = db.collection('appointments').doc(appointmentId);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists) throw publicError('not-found', 'Appointment not found.');
+    const appointment = snapshot.data();
+    if (role === 'doctor' && appointment.doctorId !== request.auth.token.doctorId) throw publicError('permission-denied', 'You can only update your own appointments.');
+    if (!canTransition(appointment.status, to, role)) throw publicError('failed-precondition', 'That appointment change is not allowed.');
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const update = { status: to, updatedAt: now };
+    if (to === 'cancelled') update.cancellation = { byUid: request.auth.uid, byRole: role, reason: cancellationReason, at: now };
+    transaction.update(ref, update);
+    if (to === 'cancelled') {
+      const slotIds = Array.isArray(appointment.slotIds) && appointment.slotIds.length ? appointment.slotIds : (appointment.slotId ? [appointment.slotId] : []);
+      slotIds.forEach((slotId) => transaction.delete(db.collection('appointmentSlots').doc(slotId)));
+    }
+    transaction.set(ref.collection('events').doc(), { from: appointment.status, to, byUid: request.auth.uid, byRole: role, at: now, reason: to === 'cancelled' ? cancellationReason : null });
+    transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: request.auth.uid, role }, action: `appointment_${to}`, resource: { type: 'appointment', id: ref.id } });
+  });
+  return { ok: true, status: to };
 });
 
 // --- Google Calendar connection -------------------------------------------

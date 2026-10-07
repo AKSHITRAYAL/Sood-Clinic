@@ -1,0 +1,7 @@
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../lib/firebase';
+
+export const transitionAppointment = async (appointmentId, to, reason = '') => {
+  const invoke = httpsCallable(functions, 'transitionAppointment');
+  return invoke({ appointmentId, to, reason });
+};

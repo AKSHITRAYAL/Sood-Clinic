@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { collection, doc, getDoc, onSnapshot, orderBy, query, setDoc, where, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore';
 import { Link, Navigate } from 'react-router-dom';
 import NotificationMenu from '../components/NotificationMenu';
 import { publicUrl } from '../lib/portals';
 import { auth, firestore } from '../lib/firebase';
 import { addIstDays, istDateKey, istInstant, startOfIstWeekMonday, toIstParts, weekdayIst } from '../lib/ist';
 import { normalizeSchedule, sessionsFromWeekly, weeklyFromSessions } from '../lib/schedule';
+import { toDate } from '../lib/time';
+import { transitionAppointment } from '../services/appointmentService';
 
 const DOCTOR_ID = 'brig-ak-sood';
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -14,7 +16,7 @@ const IST = 'Asia/Kolkata';
 const defaultWeekly = () => Object.fromEntries(DAYS.map((_, day) => [day, { enabled: day !== 0, windows: day === 0 ? [] : [['08:00', '10:00'], ['17:00', '18:30']] }]));
 const greeting = () => { const { hour } = toIstParts(new Date()); return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'; };
 const formatDate = (date, options) => date.toLocaleDateString('en-IN', { timeZone: IST, ...options });
-const formatTime = (value) => new Date(value).toLocaleTimeString('en-IN', { timeZone: IST, hour: 'numeric', minute: '2-digit' });
+const formatTime = (value) => { const date = toDate(value); return date ? date.toLocaleTimeString('en-IN', { timeZone: IST, hour: 'numeric', minute: '2-digit' }) : 'Time unavailable'; };
 
 const DoctorSchedule = () => {
   const [user, setUser] = useState(undefined);
@@ -37,7 +39,10 @@ const DoctorSchedule = () => {
     if (!allowed) return undefined;
     const stopAppointments = onSnapshot(
       query(collection(firestore, 'appointments'), where('doctorId', '==', DOCTOR_ID), orderBy('startsAt', 'asc')),
-      (snapshot) => setAppointments(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))),
+      (snapshot) => setAppointments(snapshot.docs.map((item) => {
+        const appointment = item.data();
+        return { id: item.id, ...appointment, startsAt: toDate(appointment.startsAt), endsAt: toDate(appointment.endsAt), patient: appointment.patientSnapshot || appointment.patient };
+      })),
       () => setNotice('Appointments could not be loaded.'),
     );
     Promise.all([getDoc(doc(firestore, 'doctorSchedules', DOCTOR_ID)), getDoc(doc(firestore, 'clinicSchedules', DOCTOR_ID))]).then(([scheduleSnapshot, legacySnapshot]) => {
@@ -49,14 +54,14 @@ const DoctorSchedule = () => {
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, index) => istInstant(addIstDays(istDateKey(weekStart), index))), [weekStart]);
   const selectedKey = istDateKey(selected);
-  const selectedAppointments = appointments.filter((appointment) => appointment.startsAt && istDateKey(new Date(appointment.startsAt)) === selectedKey);
+  const selectedAppointments = appointments.filter((appointment) => { const startsAt = toDate(appointment.startsAt); return startsAt && istDateKey(startsAt) === selectedKey; });
   const moveWeek = (daysToMove) => setWeekStart(istInstant(addIstDays(istDateKey(weekStart), daysToMove)));
   const hoursFor = (date) => weekly[weekdayIst(istDateKey(date))] || { enabled: false, windows: [] };
   const saveWeekly = async () => { try { await setDoc(doc(firestore, 'doctorSchedules', DOCTOR_ID), { doctorId: DOCTOR_ID, sessions: sessionsFromWeekly(weekly), updatedAt: new Date().toISOString(), updatedBy: user.uid }, { merge: true }); setNotice('Regular clinic hours saved. Patients will see these hours in the booking calendar.'); } catch { setNotice('Unable to save regular hours.'); } };
   const toggleDay = (day) => setWeekly((current) => ({ ...current, [day]: { ...current[day], enabled: !current[day].enabled } }));
   const setWindow = (day, index, position, value) => setWeekly((current) => ({ ...current, [day]: { ...current[day], windows: current[day].windows.map((window, windowIndex) => windowIndex === index ? position === 0 ? [value, window[1]] : [window[0], value] : window) } }));
   const saveException = async (event) => { event.preventDefault(); if (exception.status === 'available' && exception.start >= exception.end) { setNotice('The end time must be after the start time.'); return; } try { await setDoc(doc(firestore, 'scheduleExceptions', `${DOCTOR_ID}_${selectedKey}`), { doctorId: DOCTOR_ID, dateKey: selectedKey, type: exception.status === 'available' ? 'extra' : 'closed', sessions: exception.status === 'available' ? [{ start: exception.start, end: exception.end }] : [], updatedAt: new Date().toISOString(), updatedBy: user.uid }); setNotice(exception.status === 'available' ? `Special hours saved for ${selectedKey}.` : `${selectedKey} is marked unavailable.`); } catch { setNotice('Unable to save the date exception.'); } };
-  const changeStatus = async (appointment, status) => { try { const batch = writeBatch(firestore); batch.update(doc(firestore, 'appointments', appointment.id), { status, updatedAt: new Date().toISOString(), updatedBy: user.uid }); if (status === 'cancelled') batch.update(doc(firestore, 'appointmentSlots', appointment.slotId), { status: 'available', appointmentId: null, updatedAt: new Date().toISOString() }); await batch.commit(); setNotice(`Appointment marked ${status}.`); } catch { setNotice('Unable to update this appointment.'); } };
+  const changeStatus = async (appointment, status) => { const reason = status === 'cancelled' ? window.prompt('Cancellation reason (required):') : ''; if (status === 'cancelled' && !reason?.trim()) return; try { await transitionAppointment(appointment.id, status, reason); setNotice(`Appointment marked ${status.replace('_', ' ')}.`); } catch (error) { setNotice(error?.message || 'Unable to update this appointment.'); } };
 
   if (user === undefined) return <main className="staff-shell"><p className="workspace-status">Verifying staff access…</p></main>;
   if (!user) return <Navigate to="/staff/login" replace />;

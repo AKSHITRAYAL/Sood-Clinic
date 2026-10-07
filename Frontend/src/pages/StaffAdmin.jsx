@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { collection, doc, onSnapshot, orderBy, query, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, onSnapshot, orderBy, query, setDoc } from 'firebase/firestore';
 import { Link, Navigate } from 'react-router-dom';
 import { httpsCallable } from 'firebase/functions';
 import { auth, firestore, functions } from '../lib/firebase';
 import { istDateKey, toIstParts } from '../lib/ist';
+import { formatDateTime, patientName, patientPhone } from '../lib/time';
+import { transitionAppointment } from '../services/appointmentService';
 import NotificationMenu from '../components/NotificationMenu';
 import { publicUrl } from '../lib/portals';
 
 const DOCTOR_ID = 'brig-ak-sood';
 const dateKey = (date = new Date()) => istDateKey(date);
-const formatDateTime = (value) => new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
 const greeting = () => { const { hour } = toIstParts(new Date()); return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'; };
 
 const StaffAdmin = () => {
@@ -47,17 +48,10 @@ const StaffAdmin = () => {
   const visibleAppointments = filter === 'all' ? appointments : appointments.filter((item) => item.status === filter);
 
   const updateAppointment = async (appointment, nextStatus) => {
-    try {
-      const batch = writeBatch(firestore);
-      batch.update(doc(firestore, 'appointments', appointment.id), { status: nextStatus, updatedAt: new Date().toISOString(), updatedBy: auth.currentUser.uid });
-      if (nextStatus === 'cancelled') {
-        batch.update(doc(firestore, 'appointmentSlots', appointment.slotId), { status: 'available', appointmentId: null, updatedAt: new Date().toISOString() });
-      }
-      await batch.commit();
-      setNotice(`Appointment marked ${nextStatus}.`);
-    } catch {
-      setNotice('Unable to update the appointment. Confirm this account has the administrator role.');
-    }
+    const reason = nextStatus === 'cancelled' ? window.prompt('Cancellation reason (required):') : '';
+    if (nextStatus === 'cancelled' && !reason?.trim()) return;
+    try { await transitionAppointment(appointment.id, nextStatus, reason); setNotice(`Appointment marked ${nextStatus.replace('_', ' ')}.`); }
+    catch (error) { setNotice(error?.message || 'Unable to update the appointment.'); }
   };
 
   const saveOverride = async (event) => {
@@ -96,10 +90,10 @@ const StaffAdmin = () => {
     </header>
     <div className="staff-admin">
       <header className="staff-admin__heading"><div><p className="section-kicker">Clinic operations</p><h1>{greeting()}, {auth.currentUser?.displayName || 'Administrator'}</h1><span>Monitor appointments, manage clinic availability, and maintain the internal staff directory.</span></div><div className="staff-admin__identity"><strong>{auth.currentUser?.displayName || 'Administrator'}</strong><span>Clinic administrator</span></div></header>
-      <section className="admin-metrics" aria-label="Appointment overview"><article><span>Scheduled</span><strong>{summary.scheduled}</strong><small>Awaiting consultation</small></article><article><span>Completed</span><strong>{summary.completed}</strong><small>Closed consultations</small></article><article><span>Cancelled</span><strong>{summary.cancelled}</strong><small>Slots returned to calendar</small></article><article><span>Directory</span><strong>{staff.length}</strong><small>Internal staff records</small></article></section>
+      <section className="admin-metrics" aria-label="Appointment overview"><article><span>Scheduled</span><strong>{summary.scheduled}</strong><small>Awaiting consultation</small></article><article><span>Completed</span><strong>{summary.completed}</strong><small>Closed consultations</small></article><article><span>Cancelled</span><strong>{summary.cancelled}</strong><small>Released time slots</small></article><article><span>Directory</span><strong>{staff.length}</strong><small>Internal staff records</small></article></section>
       {notice && <p className="admin-notice" role="status">{notice}</p>}
       <section className="admin-grid">
-        <section className="admin-panel admin-panel--appointments"><div className="admin-panel__head"><div><p className="section-kicker">Appointment desk</p><h2>Consultation queue</h2></div><select aria-label="Filter appointments" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="scheduled">Scheduled</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option><option value="all">All appointments</option></select></div><div className="admin-appointment-list">{visibleAppointments.length ? visibleAppointments.map((appointment) => <article key={appointment.id} className="admin-appointment"><div><strong>{appointment.patient?.name || 'Patient'}</strong><span>{formatDateTime(appointment.startsAt)}</span><small>{appointment.patient?.phone || 'No phone recorded'} · {appointment.reason || 'No reason supplied'}</small></div><div><span className={`appointment-status appointment-status--${appointment.status}`}>{appointment.status}</span>{appointment.status === 'scheduled' && <div className="admin-appointment__actions"><button type="button" onClick={() => updateAppointment(appointment, 'completed')}>Complete</button><button type="button" className="button-danger" onClick={() => updateAppointment(appointment, 'cancelled')}>Cancel</button></div>}</div></article>) : <p className="empty-state">No {filter === 'all' ? '' : filter} appointments.</p>}</div></section>
+        <section className="admin-panel admin-panel--appointments"><div className="admin-panel__head"><div><p className="section-kicker">Appointment desk</p><h2>Consultation queue</h2></div><select aria-label="Filter appointments" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="scheduled">Scheduled</option><option value="confirmed">Confirmed</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option><option value="all">All appointments</option></select></div><div className="admin-appointment-list">{visibleAppointments.length ? visibleAppointments.map((appointment) => <article key={appointment.id} className="admin-appointment"><div><strong>{patientName(appointment)}</strong><span>{formatDateTime(appointment.startsAt)}</span><small>{patientPhone(appointment)} · {appointment.reason || 'No reason supplied'}</small></div><div><span className={`appointment-status appointment-status--${appointment.status}`}>{appointment.status}</span>{['scheduled', 'confirmed', 'checked_in'].includes(appointment.status) && <div className="admin-appointment__actions">{appointment.status === 'scheduled' && <button type="button" onClick={() => updateAppointment(appointment, 'confirmed')}>Confirm</button>}{['scheduled', 'confirmed'].includes(appointment.status) && <button type="button" onClick={() => updateAppointment(appointment, 'checked_in')}>Check in</button>}<button type="button" className="button-danger" onClick={() => updateAppointment(appointment, 'cancelled')}>Cancel</button></div>}</div></article>) : <p className="empty-state">No {filter === 'all' ? '' : filter} appointments.</p>}</div></section>
         <form className="admin-panel admin-form" onSubmit={saveOverride}><div><p className="section-kicker">Calendar authority</p><h2>Exceptional availability</h2><span>Regular Monday–Saturday hours remain active. Use this only for closures, Sunday clinics, or overtime.</span></div><label>Date<input type="date" value={override.date} min={dateKey()} onChange={(event) => setOverride({ ...override, date: event.target.value })} required /></label><label>Day status<select value={override.status} onChange={(event) => setOverride({ ...override, status: event.target.value })}><option value="available">Open special hours</option><option value="unavailable">Mark unavailable</option></select></label>{override.status === 'available' && <div className="admin-time-pair"><label>From<input type="time" value={override.start} onChange={(event) => setOverride({ ...override, start: event.target.value })} required /></label><label>To<input type="time" value={override.end} onChange={(event) => setOverride({ ...override, end: event.target.value })} required /></label></div>}<button type="submit">Save availability</button></form>
         <form className="admin-panel admin-form" onSubmit={saveStaffProfile}><div><p className="section-kicker">Staff accounts</p><h2>Create a team account</h2><span>Creates the Firebase account and assigns its secure role from the trusted server service.</span></div><label>Full name<input value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} placeholder="Team member name" required /></label><label>Work email<input type="email" value={profile.email} onChange={(event) => setProfile({ ...profile, email: event.target.value })} placeholder="name@example.com" required /></label><label>Temporary password<input type="password" value={profile.password} onChange={(event) => setProfile({ ...profile, password: event.target.value })} minLength="6" required /></label><label>Workspace role<select value={profile.role} onChange={(event) => setProfile({ ...profile, role: event.target.value })}><option value="admin">Administrator</option><option value="doctor">Doctor</option><option value="receptionist">Reception</option></select></label><button type="submit">Create staff account</button></form>
         <section className="admin-panel admin-panel--directory"><div className="admin-panel__head"><div><p className="section-kicker">Team</p><h2>Staff directory</h2></div></div>{staff.length ? <ul className="staff-directory">{staff.map((member) => <li key={member.id}><div><strong>{member.name}</strong><span>{member.email}</span></div><div className="staff-directory__actions"><span>{member.role}</span><button type="button" onClick={() => changeStaffAccess(member, 'temporaryPassword')}>Reset password</button><button type="button" onClick={() => changeStaffAccess(member, 'disable')}>{member.active === false ? 'Enable' : 'Disable'}</button></div></li>)}</ul> : <p className="empty-state">No internal staff records yet.</p>}<p className="admin-panel__footnote">Administrative account actions run through a server-side Firebase Admin function. Never assign roles from browser storage or client-side data.</p></section>
