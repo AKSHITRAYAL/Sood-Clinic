@@ -13,6 +13,8 @@ const Contact = () => (
         <section className="rounded-2xl border bg-white p-7 shadow-sm">
           <h2 className="text-2xl font-semibold">Sood Clinic</h2>
           <p className="mt-4 leading-7">{clinicAddress}</p>
+          <h3 className="mt-7 text-lg font-semibold">Phone</h3>
+          <a className="mt-2 inline-flex text-lg font-semibold text-[#176dcc] hover:text-[#0f5bad]" href="tel:+911111111111">+91 11111 11111</a>
           <h3 className="mt-7 text-lg font-semibold">Consultation hours</h3>
           <p className="mt-2">Monday–Saturday</p>
           <p>8:00 AM–10:00 AM · 5:00 PM–6:30 PM</p>
