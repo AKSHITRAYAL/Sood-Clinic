@@ -4,12 +4,8 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { authReady, functions } from '../lib/firebase';
 import { addIstDays, istDateKey, istInstant } from '../lib/ist';
+import { getBookingCatalog } from '../services/bookingCatalogService';
 
-// The catalog selection stays narrow until P1-CONFIG exposes the multi-doctor
-// clinic catalog. Availability and booking are never calculated or written here.
-const DOCTOR_ID = 'brig-ak-sood';
-const BRANCH_ID = 'sood-clinic';
-const DEPARTMENT_ID = 'gastroenterology';
 const getAvailability = httpsCallable(functions, 'getAvailability');
 const createBooking = httpsCallable(functions, 'createBooking');
 
@@ -24,10 +20,13 @@ const friendlyError = (error) => {
 };
 
 const Bookappointment = () => {
+  const [catalog, setCatalog] = useState(null);
+  const [catalogError, setCatalogError] = useState('');
+  const [selection, setSelection] = useState({ branchId: '', departmentId: '', doctorId: '', visitTypeId: 'consultation' });
   const days = useMemo(() => {
     const today = istDateKey();
-    return Array.from({ length: 14 }, (_, index) => istInstant(addIstDays(today, index)));
-  }, []);
+    return Array.from({ length: catalog?.booking?.bookingWindowDays || 14 }, (_, index) => istInstant(addIstDays(today, index)));
+  }, [catalog]);
   const [selectedDate, setSelectedDate] = useState(days[0]);
   const [slots, setSlots] = useState([]);
   const [selectedSlot, setSelectedSlot] = useState(null);
@@ -38,12 +37,29 @@ const Bookappointment = () => {
   const [step, setStep] = useState('schedule');
   const [form, setForm] = useState({ name: '', phone: '', reason: '', consent: false });
 
+  const departments = useMemo(() => (catalog?.departments || []).filter((item) => item.branchId === selection.branchId), [catalog, selection.branchId]);
+  const doctors = useMemo(() => (catalog?.doctors || []).filter((item) => item.branchId === selection.branchId && item.departmentIds.includes(selection.departmentId)), [catalog, selection]);
+  const visitTypes = catalog?.booking?.visitTypes || [];
+  const selectedDoctor = doctors.find((item) => item.id === selection.doctorId);
+
+  useEffect(() => {
+    let active = true;
+    getBookingCatalog().then((data) => {
+      if (!active) return;
+      const branch = data.branches?.[0]; const department = data.departments?.find((item) => item.branchId === branch?.id); const doctor = data.doctors?.find((item) => item.branchId === branch?.id && item.departmentIds.includes(department?.id));
+      if (!branch || !department || !doctor) { setCatalogError('Online booking is not available right now. Please call the clinic.'); return; }
+      setCatalog(data); setSelection({ branchId: branch.id, departmentId: department.id, doctorId: doctor.id, visitTypeId: data.booking?.visitTypes?.[0]?.id || 'consultation' });
+    }).catch(() => active && setCatalogError('Online booking is temporarily unavailable. Please call the clinic or try again shortly.'));
+    return () => { active = false; };
+  }, []);
+
   useEffect(() => {
     let active = true;
     setSelectedSlot(null);
     setMessage('');
     setLoadingSlots(true);
-    getAvailability({ doctorId: DOCTOR_ID, dateKey: istDateKey(selectedDate), visitTypeId: 'consultation' })
+    if (!selection.doctorId) return undefined;
+    getAvailability({ doctorId: selection.doctorId, dateKey: istDateKey(selectedDate), visitTypeId: selection.visitTypeId })
       .then(({ data }) => {
         if (!active) return;
         setSlots(data.slots || []);
@@ -52,7 +68,7 @@ const Bookappointment = () => {
       .catch((error) => active && setMessage(friendlyError(error)))
       .finally(() => active && setLoadingSlots(false));
     return () => { active = false; };
-  }, [selectedDate]);
+  }, [selectedDate, selection.doctorId, selection.visitTypeId]);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -63,12 +79,12 @@ const Bookappointment = () => {
     try {
       await authReady;
       const { data } = await createBooking({
-        branchId: BRANCH_ID,
-        departmentId: DEPARTMENT_ID,
-        doctorId: DOCTOR_ID,
+        branchId: selection.branchId,
+        departmentId: selection.departmentId,
+        doctorId: selection.doctorId,
         dateKey: istDateKey(selectedDate),
         time: selectedSlot.time,
-        visitTypeId: 'consultation',
+        visitTypeId: selection.visitTypeId,
         patient: { name: form.name.trim(), phone: form.phone.trim(), consentToTreatment: true },
         reason: form.reason.trim(),
         consentVersion: 'booking-v1',
@@ -87,7 +103,7 @@ const Bookappointment = () => {
     }
   };
 
-  return <><Navbar /><main className="booking-page"><section className="booking-page__intro"><p>SOOD CLINIC · PANCHKULA</p><h1>Book your consultation</h1><span>Choose a time first, then add your details to confirm the request.</span></section><section className="booking-card appointment-booking"><div className="booking-doctor"><span>Gastroenterology</span><strong>Dr. Brig. A. K. Sood VSM (Retd)</strong><small>{step === 'schedule' ? '1 of 2 · Select a date and time' : '2 of 2 · Confirm your details'}</small></div><form onSubmit={submit} className="booking-form">{step === 'schedule' && <><div className="booking-calendar"><label>Choose a day</label><div className="day-picker">{days.map((date) => <button key={istDateKey(date)} type="button" onClick={() => setSelectedDate(date)} className={`day-option ${istDateKey(date) === istDateKey(selectedDate) ? 'day-option--selected' : ''}`}><span>{date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short' })}</span><strong>{date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric' })}</strong><small>{date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', month: 'short' })}</small></button>)}</div></div><div className="slot-picker"><label>Available times for {labelDate(selectedDate)}</label>{loadingSlots ? <p className="slot-empty">Loading available times…</p> : slots.length ? <div className="slot-grid">{slots.map((slot) => <button key={slot.slotId} type="button" onClick={() => setSelectedSlot(slot)} className={`slot-option ${selectedSlot?.slotId === slot.slotId ? 'slot-option--selected' : ''}`}>{slot.time}</button>)}</div> : <p className="slot-empty">No consultations are available on this day.</p>}</div>{calendarStatus && <p className="booking-message" role="status">{calendarStatus}</p>}<div className="text-center"><button type="button" disabled={!selectedSlot || loadingSlots} onClick={() => setStep('details')}>Continue</button></div></>}{step === 'details' && <><div className="booking-selection"><strong>{labelDate(selectedDate)} · {selectedSlot?.time}</strong><button type="button" onClick={() => setStep('schedule')}>Change</button></div><div><label htmlFor="patient-name">Full name</label><input id="patient-name" required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Enter full name" /></div><div><label htmlFor="patient-phone">Phone number</label><input id="patient-phone" type="tel" required value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="Enter phone number" /></div><div className="booking-form__full"><label htmlFor="reason">Reason for visit <em>Optional</em></label><input id="reason" value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} placeholder="A brief note helps the clinic prepare" /></div><label className="booking-consent"><input type="checkbox" checked={form.consent} onChange={(event) => setForm({ ...form, consent: event.target.checked })} /> <span>I consent to Sood Clinic recording these details to arrange this appointment.</span></label><div className="text-center"><button disabled={saving} type="submit">{saving ? 'Reserving your slot…' : 'Confirm appointment'}</button></div></>}{message && <p className="booking-message" role="status">{message}</p>}</form></section></main><Footer /></>;
+  return <><Navbar /><main className="booking-page"><section className="booking-page__intro"><p>SOOD CLINIC · PANCHKULA</p><h1>Book your consultation</h1><span>Choose a time first, then add your details to confirm the request.</span></section><section className="booking-card appointment-booking">{catalogError ? <p className="booking-message" role="alert">{catalogError}</p> : !catalog ? <p className="slot-empty">Loading clinic availability…</p> : <><div className="booking-doctor"><span>{departments.find((item) => item.id === selection.departmentId)?.name || 'Consultation'}</span><strong>{selectedDoctor?.name || 'Clinic specialist'}</strong><small>{step === 'schedule' ? '1 of 2 · Select a date and time' : '2 of 2 · Confirm your details'}</small></div><form onSubmit={submit} className="booking-form">{step === 'schedule' && <><div className="booking-form__full"><label>Specialist<select value={selection.doctorId} onChange={(event) => { const doctor = doctors.find((item) => item.id === event.target.value); setSelection({ ...selection, doctorId: event.target.value, departmentId: doctor?.departmentIds.includes(selection.departmentId) ? selection.departmentId : doctor?.departmentIds[0] || '' }); }}><option value="">Choose a specialist</option>{doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}</select></label></div><div className="booking-form__full"><label>Visit type<select value={selection.visitTypeId} onChange={(event) => setSelection({ ...selection, visitTypeId: event.target.value })}>{visitTypes.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}</select></label></div><div className="booking-calendar"><label>Choose a day</label><div className="day-picker">{days.map((date) => <button key={istDateKey(date)} type="button" onClick={() => setSelectedDate(date)} className={`day-option ${istDateKey(date) === istDateKey(selectedDate) ? 'day-option--selected' : ''}`}><span>{date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short' })}</span><strong>{date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric' })}</strong><small>{date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', month: 'short' })}</small></button>)}</div></div><div className="slot-picker"><label>Available times for {labelDate(selectedDate)}</label>{loadingSlots ? <p className="slot-empty">Loading available times…</p> : slots.length ? <div className="slot-grid">{slots.map((slot) => <button key={slot.slotId} type="button" onClick={() => setSelectedSlot(slot)} className={`slot-option ${selectedSlot?.slotId === slot.slotId ? 'slot-option--selected' : ''}`}>{slot.time}</button>)}</div> : <p className="slot-empty">No consultations are available on this day.</p>}</div>{calendarStatus && <p className="booking-message" role="status">{calendarStatus}</p>}<div className="text-center"><button type="button" disabled={!selectedSlot || loadingSlots} onClick={() => setStep('details')}>Continue</button></div></>}{step === 'details' && <><div className="booking-selection"><strong>{labelDate(selectedDate)} · {selectedSlot?.time}</strong><button type="button" onClick={() => setStep('schedule')}>Change</button></div><div><label htmlFor="patient-name">Full name</label><input id="patient-name" required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Enter full name" /></div><div><label htmlFor="patient-phone">Phone number</label><input id="patient-phone" type="tel" required value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="Enter phone number" /></div><div className="booking-form__full"><label htmlFor="reason">Reason for visit <em>Optional</em></label><input id="reason" value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} placeholder="A brief note helps the clinic prepare" /></div><label className="booking-consent"><input type="checkbox" checked={form.consent} onChange={(event) => setForm({ ...form, consent: event.target.checked })} /> <span>I consent to Sood Clinic recording these details to arrange this appointment.</span></label><div className="text-center"><button disabled={saving} type="submit">{saving ? 'Reserving your slot…' : 'Confirm appointment'}</button></div></>}{message && <p className="booking-message" role="status">{message}</p>}</form></>}</section></main><Footer /></>;
 };
 
 export default Bookappointment;

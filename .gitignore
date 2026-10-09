@@ -12,13 +12,19 @@ Frontend/.vite/
 .firebase/
 service-account*.json
 *-service-account.json
+*-firebase-adminsdk-*.json
+*firebase-adminsdk*.json
+.local/
 *.log
+firebase-debug.log
+firestore-debug.log
 
 # Secrets and editor files
 .env
 .env.*
 !.env.example
-*.md
+# Local AI handoff state is intentionally machine-specific. Keep project docs tracked.
+AI_STATE.md
 .DS_Store
 .vscode/
 

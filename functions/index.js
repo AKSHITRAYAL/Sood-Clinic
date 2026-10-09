@@ -9,6 +9,8 @@ const { istDateKey, toIstParts, weekdayIst } = require('./lib/ist');
 const { buildAvailability, makeSlotId } = require('./lib/availability');
 const { buildAuthorizationUrl, createEvent, decrypt, encrypt, exchangeAuthorizationCode, freeBusy, refreshAccessToken } = require('./lib/googleCalendar');
 const { ROLE, canTransition } = require('./lib/stateMachine');
+const { isDoctorId, isEmail, isStaffRole, isStrongTemporaryPassword, normalizeEmail, staffClaims } = require('./lib/staffAccess');
+const { canPatientCancel } = require('./lib/appointmentPolicy');
 
 admin.initializeApp();
 setGlobalOptions({ region: 'asia-south1', maxInstances: 10 });
@@ -89,46 +91,273 @@ app.post('/api/v1/public/booking/appointments', async (req, res, next) => {
 app.use((error, _req, res, _next) => { console.error(error); fail(res, error.status || 500, error.status ? error.message : 'Unable to process this request. Please try again later.'); });
 exports.clinicApi = onRequest({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, app);
 
-const validStaffRoles = new Set(['admin', 'doctor', 'receptionist']);
 const requireAdmin = (request) => {
   if (!request.auth || request.auth.token.role !== 'admin') throw new HttpsError('permission-denied', 'Administrator access is required.');
 };
+
+const auditStaffAccess = async ({ actorUid, action, targetUid, meta = {} }) => db.collection('auditLogs').add({
+  at: admin.firestore.FieldValue.serverTimestamp(),
+  actor: { uid: actorUid, role: 'admin' },
+  action,
+  resource: { type: 'staff_account', id: targetUid },
+  meta,
+});
+
+const activeAdminCount = async () => {
+  let pageToken;
+  let count = 0;
+  do {
+    const page = await admin.auth().listUsers(1000, pageToken);
+    count += page.users.filter((user) => !user.disabled && user.customClaims?.role === 'admin').length;
+    pageToken = page.pageToken;
+  } while (pageToken);
+  return count;
+};
+
+const preventSelfOrLastAdminLockout = async ({ actorUid, target, nextRole, nextDisabled }) => {
+  const changingAdminAuthority = target.customClaims?.role === 'admin'
+    && (nextRole !== 'admin' || nextDisabled === true);
+  if (target.uid === actorUid && changingAdminAuthority) throw new HttpsError('failed-precondition', 'Use a different active administrator to change your own administrator access.');
+  if (changingAdminAuthority && await activeAdminCount() <= 1) throw new HttpsError('failed-precondition', 'At least one active administrator must remain assigned.');
+};
+
+// Patient identifiers are indexed on the trusted server. The browser never gets
+// permission to enumerate the patients collection, which prevents an accidental
+// directory exposure as the clinic grows.
+const PATIENT_PROFILE_FIELDS = Object.freeze([
+  'title', 'displayName', 'phone', 'dateOfBirth', 'gender', 'maritalStatus',
+  'bloodGroup', 'addressLine1', 'city', 'state', 'postalCode',
+  'emergencyContactName', 'emergencyContactPhone', 'allergies',
+  'currentMedications', 'healthNotes',
+]);
+const patientProfile = (input = {}) => {
+  const result = {};
+  PATIENT_PROFILE_FIELDS.forEach((field) => { result[field] = trimmed(input[field], field === 'healthNotes' || field === 'allergies' || field === 'currentMedications' ? 2000 : 160); });
+  if (!result.displayName) throw new HttpsError('invalid-argument', 'A patient full name is required.');
+  if (result.dateOfBirth && !/^\d{4}-\d{2}-\d{2}$/.test(result.dateOfBirth)) throw new HttpsError('invalid-argument', 'Use a valid date of birth.');
+  return result;
+};
+const patientDirectoryRecord = ({ uid, email, profile }) => ({
+  uid,
+  displayName: profile.displayName,
+  displayNameLower: profile.displayName.toLowerCase(),
+  email: normalizeEmail(email),
+  emailLower: normalizeEmail(email),
+  phone: profile.phone || '',
+  updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+});
+const auditPatientAccess = ({ actorUid, action, targetUid, meta = {} }) => db.collection('auditLogs').add({
+  at: admin.firestore.FieldValue.serverTimestamp(), actor: { uid: actorUid, role: 'admin' }, action,
+  resource: { type: 'patient', id: targetUid }, meta,
+});
+
+exports.syncPatientDirectory = onCall({ region: 'asia-south1', timeoutSeconds: 120, memory: '256MiB' }, async (request) => {
+  requireAdmin(request);
+  const snapshot = await db.collection('patients').get();
+  let batch = db.batch(); let writes = 0; let indexed = 0;
+  for (const patient of snapshot.docs) {
+    const data = patient.data();
+    const email = normalizeEmail(data.email);
+    const displayName = trimmed(data.displayName, 160);
+    if (!email || !displayName) continue;
+    batch.set(db.collection('patientDirectory').doc(patient.id), patientDirectoryRecord({ uid: patient.id, email, profile: { ...data, displayName } }), { merge: true });
+    writes += 1; indexed += 1;
+    if (writes === 400) { await batch.commit(); batch = db.batch(); writes = 0; }
+  }
+  if (writes) await batch.commit();
+  await auditPatientAccess({ actorUid: request.auth.uid, action: 'patient_directory_synchronised', targetUid: request.auth.uid, meta: { indexed } });
+  return { indexed };
+});
+
+exports.searchPatients = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  requireAdmin(request);
+  const term = trimmed(request.data?.term, 120).toLowerCase();
+  if (term.length < 2) throw new HttpsError('invalid-argument', 'Enter at least two characters to search patients.');
+  let snapshot;
+  if (term.includes('@')) snapshot = await db.collection('patientDirectory').where('emailLower', '==', term).limit(20).get();
+  else snapshot = await db.collection('patientDirectory').orderBy('displayNameLower').startAt(term).endAt(`${term}\uf8ff`).limit(20).get();
+  return { patients: snapshot.docs.map((item) => ({ uid: item.id, displayName: item.get('displayName'), email: item.get('email'), phone: item.get('phone') || '' })) };
+});
+
+exports.getAdminPatientProfile = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  requireAdmin(request);
+  const uid = trimmed(request.data?.uid, 128);
+  if (!uid) throw new HttpsError('invalid-argument', 'Select a patient first.');
+  const snapshot = await db.collection('patients').doc(uid).get();
+  if (!snapshot.exists) throw new HttpsError('not-found', 'Patient record not found.');
+  const data = snapshot.data();
+  return { uid, profile: Object.fromEntries([...PATIENT_PROFILE_FIELDS, 'email', 'createdAt', 'updatedAt'].map((field) => [field, data[field] || ''])) };
+});
+
+exports.updateAdminPatientProfile = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  requireAdmin(request);
+  const uid = trimmed(request.data?.uid, 128);
+  if (!uid) throw new HttpsError('invalid-argument', 'Select a patient first.');
+  const patientRef = db.collection('patients').doc(uid);
+  const snapshot = await patientRef.get();
+  if (!snapshot.exists) throw new HttpsError('not-found', 'Patient record not found.');
+  const existing = snapshot.data(); const profile = patientProfile(request.data?.profile);
+  const email = normalizeEmail(existing.email);
+  await patientRef.set({ ...profile, email, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
+  await db.collection('patientDirectory').doc(uid).set(patientDirectoryRecord({ uid, email, profile }), { merge: true });
+  await admin.auth().updateUser(uid, { displayName: `${profile.title ? `${profile.title} ` : ''}${profile.displayName}`.trim() }).catch(() => null);
+  await auditPatientAccess({ actorUid: request.auth.uid, action: 'patient_profile_updated', targetUid: uid, meta: { fields: PATIENT_PROFILE_FIELDS.filter((field) => profile[field] !== (existing[field] || '')) } });
+  return { message: 'Patient profile updated.' };
+});
+
+// Patient-side profile writes also use the trusted boundary. This keeps the
+// private directory current while preserving a patient’s right to manage only
+// their own information.
+exports.registerPatientProfile = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  if (!request.auth || isStaffRole(request.auth.token.role)) throw new HttpsError('permission-denied', 'Patient sign-in is required.');
+  const user = await admin.auth().getUser(request.auth.uid);
+  const displayName = trimmed(request.data?.displayName, 160);
+  if (!displayName || !isEmail(user.email)) throw new HttpsError('invalid-argument', 'A patient name and verified email are required.');
+  const patientRef = db.collection('patients').doc(user.uid);
+  const prior = await patientRef.get();
+  const profile = { ...patientProfile({ displayName, ...(prior.exists ? prior.data() : {}) }), displayName };
+  await patientRef.set({ ...profile, email: normalizeEmail(user.email), createdAt: prior.exists ? prior.get('createdAt') : new Date().toISOString(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection('patientDirectory').doc(user.uid).set(patientDirectoryRecord({ uid: user.uid, email: user.email, profile }), { merge: true });
+  return { message: 'Patient profile created.' };
+});
+
+exports.updateOwnPatientProfile = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  if (!request.auth || isStaffRole(request.auth.token.role)) throw new HttpsError('permission-denied', 'Patient sign-in is required.');
+  const user = await admin.auth().getUser(request.auth.uid);
+  const patientRef = db.collection('patients').doc(user.uid); const prior = await patientRef.get();
+  const profile = patientProfile(request.data?.profile);
+  await patientRef.set({ ...profile, email: normalizeEmail(user.email), createdAt: prior.exists ? prior.get('createdAt') : new Date().toISOString(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection('patientDirectory').doc(user.uid).set(patientDirectoryRecord({ uid: user.uid, email: user.email, profile }), { merge: true });
+  await admin.auth().updateUser(user.uid, { displayName: `${profile.title ? `${profile.title} ` : ''}${profile.displayName}`.trim() });
+  return { message: 'Your profile has been saved.' };
+});
 
 // Privileged staff lifecycle operations. This endpoint is deliberately callable only by
 // Firebase users carrying the trusted admin custom claim; the browser never sets roles.
 exports.manageStaffAccount = onCall({ region: 'asia-south1', enforceAppCheck: false }, async (request) => {
   requireAdmin(request);
-  const { action, email, password, displayName = '', role, disabled } = request.data || {};
-  const normalizedEmail = String(email || '').trim().toLowerCase();
-  if (!normalizedEmail) throw new HttpsError('invalid-argument', 'A staff email is required.');
+  const { action, email, password, displayName = '', role, doctorId, disabled } = request.data || {};
+  const normalizedEmail = normalizeEmail(email);
+  if (!isEmail(normalizedEmail)) throw new HttpsError('invalid-argument', 'Enter a valid staff email address.');
   if (action === 'provision') {
-    if (!validStaffRoles.has(role) || String(password || '').length < 6) throw new HttpsError('invalid-argument', 'Choose a valid role and a temporary password of at least six characters.');
+    if (!isStaffRole(role) || !isStrongTemporaryPassword(password) || !String(displayName).trim()) throw new HttpsError('invalid-argument', 'Enter a name, valid role, and a temporary password with at least 12 characters including letters and numbers.');
+    if (role === 'doctor' && !isDoctorId(doctorId)) throw new HttpsError('invalid-argument', 'Enter a stable doctor ID using letters, numbers, hyphens, or underscores.');
     let user;
-    try { user = await admin.auth().getUserByEmail(normalizedEmail); await admin.auth().updateUser(user.uid, { displayName: String(displayName).trim() || undefined, password: String(password) }); }
-    catch (error) { if (error.code !== 'auth/user-not-found') throw error; user = await admin.auth().createUser({ email: normalizedEmail, password: String(password), displayName: String(displayName).trim() || undefined }); }
-    const claims = role === 'doctor' ? { role, doctorId: 'brig-ak-sood' } : { role };
+    try {
+      user = await admin.auth().getUserByEmail(normalizedEmail);
+      const existingProfile = await db.collection('staffProfiles').doc(user.uid).get();
+      if (!existingProfile.exists && !isStaffRole(user.customClaims?.role)) throw new HttpsError('already-exists', 'This email already belongs to an account. Do not convert an existing account into staff access from this screen.');
+      await admin.auth().updateUser(user.uid, { displayName: String(displayName).trim(), password: String(password), disabled: false });
+    } catch (error) {
+      if (error instanceof HttpsError) throw error;
+      if (error.code !== 'auth/user-not-found') throw error;
+      user = await admin.auth().createUser({ email: normalizedEmail, password: String(password), displayName: String(displayName).trim(), disabled: false });
+    }
+    const claims = staffClaims({ existingClaims: user.customClaims, role, doctorId, forcePasswordChange: true });
     await admin.auth().setCustomUserClaims(user.uid, claims);
-    await db.collection('staffProfiles').doc(user.uid).set({ uid: user.uid, email: normalizedEmail, name: String(displayName).trim(), role, active: true, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
-    return { uid: user.uid, message: 'Staff account provisioned. Ask the user to sign in with the temporary password and change it.' };
+    await admin.auth().revokeRefreshTokens(user.uid);
+    await db.collection('staffProfiles').doc(user.uid).set({ uid: user.uid, email: normalizedEmail, name: String(displayName).trim(), role, doctorId: role === 'doctor' ? doctorId : null, active: true, requiresPasswordChange: true, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid, createdAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    await auditStaffAccess({ actorUid: request.auth.uid, action: 'staff_provisioned', targetUid: user.uid, meta: { role, doctorId: role === 'doctor' ? doctorId : null } });
+    return { uid: user.uid, message: 'Staff account provisioned. The temporary password must be changed at first sign-in.' };
   }
   const user = await admin.auth().getUserByEmail(normalizedEmail);
-  if (action === 'role') {
-    if (!validStaffRoles.has(role)) throw new HttpsError('invalid-argument', 'Choose a valid staff role.');
-    await admin.auth().setCustomUserClaims(user.uid, role === 'doctor' ? { role, doctorId: 'brig-ak-sood' } : { role });
-    await db.collection('staffProfiles').doc(user.uid).set({ uid: user.uid, email: normalizedEmail, role, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
-    return { message: 'Staff role updated. The user must sign out and in again.' };
+  if (!isStaffRole(user.customClaims?.role)) throw new HttpsError('failed-precondition', 'This account is not a managed staff account.');
+  if (action === 'updateAccess') {
+    if (!isStaffRole(role) || !String(displayName).trim()) throw new HttpsError('invalid-argument', 'Enter a name and valid staff role.');
+    if (role === 'doctor' && !isDoctorId(doctorId)) throw new HttpsError('invalid-argument', 'Enter a stable doctor ID using letters, numbers, hyphens, or underscores.');
+    await preventSelfOrLastAdminLockout({ actorUid: request.auth.uid, target: user, nextRole: role, nextDisabled: user.disabled });
+    await admin.auth().updateUser(user.uid, { displayName: String(displayName).trim() });
+    await admin.auth().setCustomUserClaims(user.uid, staffClaims({ existingClaims: user.customClaims, role, doctorId, forcePasswordChange: Boolean(user.customClaims?.forcePasswordChange) }));
+    await admin.auth().revokeRefreshTokens(user.uid);
+    await db.collection('staffProfiles').doc(user.uid).set({ uid: user.uid, email: normalizedEmail, name: String(displayName).trim(), role, doctorId: role === 'doctor' ? doctorId : null, active: !user.disabled, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
+    await auditStaffAccess({ actorUid: request.auth.uid, action: 'staff_access_updated', targetUid: user.uid, meta: { role, doctorId: role === 'doctor' ? doctorId : null } });
+    return { message: 'Staff access updated and active sessions were revoked.' };
   }
   if (action === 'temporaryPassword') {
-    if (String(password || '').length < 6) throw new HttpsError('invalid-argument', 'Temporary password must be at least six characters.');
+    if (!isStrongTemporaryPassword(password)) throw new HttpsError('invalid-argument', 'Temporary password must have at least 12 characters including letters and numbers.');
     await admin.auth().updateUser(user.uid, { password: String(password) });
-    return { message: 'Temporary password updated. Give it to the staff member through a secure channel.' };
+    await admin.auth().setCustomUserClaims(user.uid, { ...user.customClaims, forcePasswordChange: true });
+    await admin.auth().revokeRefreshTokens(user.uid);
+    await db.collection('staffProfiles').doc(user.uid).set({ requiresPasswordChange: true, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
+    await auditStaffAccess({ actorUid: request.auth.uid, action: 'staff_temporary_password_set', targetUid: user.uid });
+    return { message: 'Temporary password set. Existing sessions were revoked; share it through a secure channel.' };
   }
   if (action === 'disable') {
-    await admin.auth().updateUser(user.uid, { disabled: Boolean(disabled) });
+    const nextDisabled = Boolean(disabled);
+    await preventSelfOrLastAdminLockout({ actorUid: request.auth.uid, target: user, nextRole: user.customClaims?.role, nextDisabled });
+    await admin.auth().updateUser(user.uid, { disabled: nextDisabled });
+    await admin.auth().revokeRefreshTokens(user.uid);
     await db.collection('staffProfiles').doc(user.uid).set({ active: !Boolean(disabled), updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
-    return { message: Boolean(disabled) ? 'Staff account disabled.' : 'Staff account enabled.' };
+    await auditStaffAccess({ actorUid: request.auth.uid, action: nextDisabled ? 'staff_suspended' : 'staff_restored', targetUid: user.uid });
+    return { message: nextDisabled ? 'Staff account suspended and active sessions were revoked.' : 'Staff account restored.' };
+  }
+  if (action === 'revokeSessions') {
+    if (user.uid === request.auth.uid) throw new HttpsError('failed-precondition', 'Use the sign-out control for your own session.');
+    await admin.auth().revokeRefreshTokens(user.uid);
+    await auditStaffAccess({ actorUid: request.auth.uid, action: 'staff_sessions_revoked', targetUid: user.uid });
+    return { message: 'Active refresh sessions were revoked. Existing ID tokens expire within one hour.' };
+  }
+  if (action === 'completeMandatoryPasswordChange') {
+    if (user.uid !== request.auth.uid) throw new HttpsError('permission-denied', 'You can only complete your own password change.');
+    await admin.auth().setCustomUserClaims(user.uid, { ...user.customClaims, forcePasswordChange: false });
+    await db.collection('staffProfiles').doc(user.uid).set({ requiresPasswordChange: false, passwordChangedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
+    await auditStaffAccess({ actorUid: request.auth.uid, action: 'staff_mandatory_password_change_completed', targetUid: user.uid });
+    return { message: 'Password requirement cleared.' };
   }
   throw new HttpsError('invalid-argument', 'Unsupported staff account action.');
+});
+
+// Imports only accounts that already carry a trusted staff custom claim. It never
+// grants a role and exists to migrate the original command-created staff accounts
+// into the protected directory before stricter lifecycle enforcement is enabled.
+exports.syncManagedStaffDirectory = onCall({ region: 'asia-south1' }, async (request) => {
+  requireAdmin(request);
+  let pageToken;
+  let imported = 0;
+  do {
+    const page = await admin.auth().listUsers(1000, pageToken);
+    const batch = db.batch();
+    page.users.filter((user) => isStaffRole(user.customClaims?.role)).forEach((user) => {
+      const role = user.customClaims.role;
+      batch.set(db.collection('staffProfiles').doc(user.uid), {
+        uid: user.uid,
+        email: user.email || '',
+        name: user.displayName || '',
+        role,
+        doctorId: role === 'doctor' ? user.customClaims.doctorId || null : null,
+        active: !user.disabled,
+        requiresPasswordChange: user.customClaims.forcePasswordChange === true,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedBy: request.auth.uid,
+      }, { merge: true });
+      imported += 1;
+    });
+    await batch.commit();
+    pageToken = page.pageToken;
+  } while (pageToken);
+  await auditStaffAccess({ actorUid: request.auth.uid, action: 'staff_directory_synchronised', targetUid: request.auth.uid, meta: { imported } });
+  return { imported };
+});
+
+// Public booking reads its catalogue through this narrow contract rather than
+// embedding clinic/doctor IDs in the client. It is intentionally provider-agnostic
+// so a future database adapter only has to preserve this response shape.
+exports.getBookingCatalog = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async () => {
+  const [branchSnapshot, departmentSnapshot, doctorSnapshot, configSnapshot] = await Promise.all([
+    db.collection('branches').get(),
+    db.collection('departments').get(),
+    db.collection('doctors').get(),
+    db.collection('clinic').doc('publicConfig').get(),
+  ]);
+  const departments = departmentSnapshot.docs.filter((item) => item.get('active') === true && item.get('publicBookingEnabled') === true).map((item) => ({
+    id: item.id, branchId: item.get('branchId'), name: trimmed(item.get('name'), 120), description: trimmed(item.get('description'), 300), sortOrder: Number(item.get('sortOrder')) || 0,
+  }));
+  const doctors = doctorSnapshot.docs.filter((item) => item.get('active') === true && item.get('bookingEnabled') === true).map((item) => ({
+    id: item.id, branchId: item.get('branchId'), departmentIds: Array.isArray(item.get('departmentIds')) ? item.get('departmentIds') : [], name: trimmed(item.get('name'), 160), qualification: trimmed(item.get('qualification'), 160),
+  }));
+  const branches = branchSnapshot.docs.filter((item) => item.get('active') === true).map((item) => ({ id: item.id, name: trimmed(item.get('name'), 120), timezone: item.get('timezone') || 'Asia/Kolkata' }));
+  const config = bookingConfig(configSnapshot);
+  return { branches, departments, doctors, booking: { bookingWindowDays: config.bookingWindowDays, visitTypes: config.visitTypes.length ? config.visitTypes.map((item) => ({ id: trimmed(item.id, 60), label: trimmed(item.label, 100), minutes: item.minutes })) : [{ id: 'consultation', label: 'Consultation', minutes: config.slotMinutes }] } };
 });
 
 // --- Appointment engine ----------------------------------------------------
@@ -144,6 +373,7 @@ const DEFAULT_BOOKING_CONFIG = Object.freeze({
   bufferBeforeMinutes: 0,
   bufferAfterMinutes: 0,
   autoConfirm: false,
+  patientCancellationCutoffHours: 2,
 });
 
 const asDate = (value) => {
@@ -174,6 +404,7 @@ const bookingConfig = (data) => {
     bufferBeforeMinutes: number('bufferBeforeMinutes', DEFAULT_BOOKING_CONFIG.bufferBeforeMinutes, 0, 120),
     bufferAfterMinutes: number('bufferAfterMinutes', DEFAULT_BOOKING_CONFIG.bufferAfterMinutes, 0, 120),
     autoConfirm: configured.autoConfirm === true,
+    patientCancellationCutoffHours: number('patientCancellationCutoffHours', DEFAULT_BOOKING_CONFIG.patientCancellationCutoffHours, 0, 168),
     visitTypes: Array.isArray(configured.visitTypes) ? configured.visitTypes : [],
   };
 };
@@ -360,6 +591,30 @@ exports.transitionAppointment = onCall({ region: 'asia-south1', timeoutSeconds: 
   return { ok: true, status: to };
 });
 
+// Patients can release their own future slot before the configured cutoff. The
+// appointment, slot release, event, and audit record are one transaction.
+exports.cancelPatientAppointment = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  if (!request.auth || isStaffRole(request.auth.token.role)) throw publicError('permission-denied', 'Sign in to cancel your appointment.');
+  const appointmentId = trimmed(request.data?.appointmentId, 200);
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(appointmentId)) throw publicError('invalid-argument', 'Invalid appointment.');
+  const reason = trimmed(request.data?.reason, 300) || 'Cancelled by patient';
+  const config = bookingConfig(await db.collection('clinic').doc('publicConfig').get());
+  const ref = db.collection('appointments').doc(appointmentId);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists) throw publicError('not-found', 'Appointment not found.');
+    const appointment = snapshot.data();
+    if (!canPatientCancel({ appointment, uid: request.auth.uid, cutoffHours: config.patientCancellationCutoffHours })) throw publicError('failed-precondition', 'This appointment can no longer be cancelled online. Please contact the clinic.');
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    transaction.update(ref, { status: 'cancelled', cancellation: { byUid: request.auth.uid, byRole: 'patient', reason, at: now }, updatedAt: now });
+    const slotIds = Array.isArray(appointment.slotIds) && appointment.slotIds.length ? appointment.slotIds : (appointment.slotId ? [appointment.slotId] : []);
+    slotIds.forEach((slotId) => transaction.delete(db.collection('appointmentSlots').doc(slotId)));
+    transaction.set(ref.collection('events').doc(), { from: appointment.status, to: 'cancelled', byUid: request.auth.uid, byRole: 'patient', reason, at: now });
+    transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: request.auth.uid, role: 'patient' }, action: 'appointment_cancelled', resource: { type: 'appointment', id: ref.id }, meta: { source: 'patient_portal' } });
+  });
+  return { ok: true, status: 'cancelled' };
+});
+
 // --- Google Calendar connection -------------------------------------------
 // This is clinic-admin initiated only. Browser code receives an OAuth URL but
 // never receives a client secret, refresh token, or another calendar's events.
@@ -372,7 +627,9 @@ exports.beginGoogleCalendarConnection = onCall({ region: 'asia-south1', secrets:
   return { authorizationUrl: buildAuthorizationUrl({ clientId: GOOGLE_CALENDAR_CLIENT_ID.value(), redirectUri: googleCallbackUrl(), state }) };
 });
 
-exports.googleCalendarCallback = onRequest({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (req, res) => {
+// Google redirects a browser here after consent, so this endpoint must be publicly
+// invokable. The one-time, expiring state value protects the callback itself.
+exports.googleCalendarCallback = onRequest({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB', invoker: 'public', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (req, res) => {
   const code = String(req.query.code || '');
   const state = String(req.query.state || '');
   if (!code || !state) return res.status(400).send('Google Calendar connection could not be verified.');

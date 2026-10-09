@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
 import { Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { auth, authReady, firestore } from '../lib/firebase';
+import { auth, authReady, functions } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
 
 const Login = () => {
   const [mode, setMode] = useState('sign-in');
@@ -14,7 +14,7 @@ const Login = () => {
     event.preventDefault(); setError(''); setMessage(''); setLoading(true);
     try {
       await authReady;
-      if (mode === 'create') { const result = await createUserWithEmailAndPassword(auth, email.trim(), password); await updateProfile(result.user, { displayName: name.trim() }); await setDoc(doc(firestore, 'patients', result.user.uid), { displayName: name.trim(), email: email.trim().toLowerCase(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, { merge: true }); navigate('/patient'); }
+      if (mode === 'create') { const result = await createUserWithEmailAndPassword(auth, email.trim(), password); await updateProfile(result.user, { displayName: name.trim() }); await httpsCallable(functions, 'registerPatientProfile')({ displayName: name.trim() }); navigate('/patient'); }
       else { const result = await signInWithEmailAndPassword(auth, email.trim(), password); const token = await result.user.getIdTokenResult(true); if (['admin', 'doctor', 'receptionist'].includes(token.claims.role)) { await auth.signOut(); setError('This is a staff account. Please use the private staff sign-in page.'); } else navigate('/patient'); }
     } catch (caught) { const codes = { 'auth/email-already-in-use': 'An account already exists for this email. Please sign in instead.', 'auth/invalid-credential': 'Email or password is incorrect.', 'auth/weak-password': 'Use a password with at least six characters.', 'auth/user-not-found': 'No patient account was found for this email.' }; setError(codes[caught.code] || 'We could not complete that request. Please check the details and try again.'); } finally { setLoading(false); }
   };

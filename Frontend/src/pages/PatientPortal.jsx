@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
-import { EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential, sendPasswordResetEmail, signOut, updatePassword, updateProfile } from 'firebase/auth';
-import { collection, doc, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore';
+import { EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential, sendPasswordResetEmail, signOut, updatePassword } from 'firebase/auth';
+import { collection, doc, onSnapshot, orderBy, query, where } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import { Link, Navigate, NavLink } from 'react-router-dom';
 import NotificationMenu from '../components/NotificationMenu';
 import PatientAvatar from '../components/PatientAvatar';
 import SoodClinicMark from '../components/SoodClinicMark';
-import { auth, firestore } from '../lib/firebase';
+import { auth, firestore, functions } from '../lib/firebase';
 import { toDate } from '../lib/time';
+import { cancelPatientAppointment } from '../services/appointmentService';
 
 const formatWhen = (value) => { const date = toDate(value); return date ? date.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) : 'Time unavailable'; };
 const isUpcoming = (item) => { const date = toDate(item.startsAt); return ['scheduled', 'confirmed'].includes(item.status) && date && date >= new Date(); };
@@ -68,11 +70,10 @@ const PatientPortal = ({ view }) => {
     event.preventDefault(); setError(''); setNotice('');
     const displayName = form.displayName.trim();
     if (!displayName) { setError('Please enter your full name.'); return; }
-    const now = new Date().toISOString();
     try {
-      await updateProfile(user, { displayName: `${form.title ? `${form.title} ` : ''}${displayName}`.trim() });
-      await setDoc(doc(firestore, 'patients', user.uid), { ...form, displayName, email: user.email || '', createdAt: profile.createdAt || now, updatedAt: now }, { merge: true });
-      setNotice('Your profile has been saved.');
+      const result = await httpsCallable(functions, 'updateOwnPatientProfile')({ profile: { ...form, displayName } });
+      await user.reload();
+      setNotice(result.data?.message || 'Your profile has been saved.');
     } catch { setError('We could not save your profile. Please try again.'); }
   };
 
@@ -81,6 +82,13 @@ const PatientPortal = ({ view }) => {
     event.preventDefault(); setError('');
     if (newPassword.length < 10) { setError('Use a password with at least 10 characters.'); return; }
     try { await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, currentPassword)); await updatePassword(user, newPassword); setCurrentPassword(''); setNewPassword(''); setNotice('Your password has been changed.'); } catch { setError('Check your current password and try again.'); }
+  };
+  const cancelAppointment = async (appointment) => {
+    if (!window.confirm('Cancel this appointment? This cannot be undone.')) return;
+    const reason = window.prompt('Optional: tell the clinic why you are cancelling.') || '';
+    setError(''); setNotice('');
+    try { await cancelPatientAppointment(appointment.id, reason); setNotice('Your appointment has been cancelled.'); }
+    catch (caught) { setError(caught.message || 'This appointment could not be cancelled online.'); }
   };
 
   if (user === undefined) return <main className="patient-portal"><p className="workspace-status">Loading your care information…</p></main>;
@@ -100,7 +108,7 @@ const PatientPortal = ({ view }) => {
     <fieldset><legend>Emergency contact</legend><div className="patient-form__grid"><label>Contact name<input value={form.emergencyContactName} onChange={(event) => setForm({ ...form, emergencyContactName: event.target.value })} /></label><label>Contact phone<input value={form.emergencyContactPhone} onChange={(event) => setForm({ ...form, emergencyContactPhone: event.target.value })} inputMode="tel" /></label></div></fieldset><button type="submit">Save personal details</button>
   </form>;
   const healthForm = <form className="patient-form" onSubmit={saveProfile}><header><p className="section-kicker">Health profile</p><h2>Information you choose to share</h2><span>This is self-reported information, not a clinical diagnosis. Clinic staff may use it to prepare for your visit.</span></header><div className="patient-form__stack"><label>Allergies<textarea value={form.allergies} onChange={(event) => setForm({ ...form, allergies: event.target.value })} placeholder="For example, food, medicine, or other allergies" /></label><label>Current medications<textarea value={form.currentMedications} onChange={(event) => setForm({ ...form, currentMedications: event.target.value })} placeholder="Include medication name and dose if known" /></label><label>Notes for your care team<textarea value={form.healthNotes} onChange={(event) => setForm({ ...form, healthNotes: event.target.value })} placeholder="Anything you would like the clinic to know before your visit" /></label></div><button type="submit">Save health profile</button></form>;
-  const list = (items) => items.length ? <div className="patient-visit-list">{items.map((item) => { const date = toDate(item.startsAt); return <article key={item.id}><div className="patient-visit-list__date"><strong>{date ? date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—'}</strong><span>{date ? date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }) : 'Time unavailable'}</span></div><div><strong>Consultation with Dr. A. K. Sood</strong><span>{item.reason || 'Clinic consultation'}</span></div><span className={`appointment-status appointment-status--${item.status}`}>{item.status}</span></article>; })}</div> : <div className="patient-empty-state"><strong>No appointments yet</strong><span>When you book a visit, it will appear here.</span><Link to="/Booknow">Book appointment</Link></div>;
+  const list = (items) => items.length ? <div className="patient-visit-list">{items.map((item) => { const date = toDate(item.startsAt); const canCancel = isUpcoming(item) && date && date.getTime() > Date.now() + 2 * 60 * 60 * 1000; return <article key={item.id}><div className="patient-visit-list__date"><strong>{date ? date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—'}</strong><span>{date ? date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }) : 'Time unavailable'}</span></div><div><strong>Consultation with Dr. A. K. Sood</strong><span>{item.reason || 'Clinic consultation'}</span></div><span className={`appointment-status appointment-status--${item.status}`}>{item.status}</span>{canCancel && <button type="button" className="patient-appointment-cancel" onClick={() => cancelAppointment(item)}>Cancel</button>}</article>; })}</div> : <div className="patient-empty-state"><strong>No appointments yet</strong><span>When you book a visit, it will appear here.</span><Link to="/Booknow">Book appointment</Link></div>;
 
   let content;
   if (view === 'appointments') content = <section className="patient-page-card"><header className="patient-card__head"><div><p className="section-kicker">Appointments</p><h2>All visits</h2></div><Link to="/Booknow">Book appointment</Link></header>{list(appointments)}</section>;
