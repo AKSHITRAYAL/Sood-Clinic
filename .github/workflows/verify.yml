@@ -1,0 +1,60 @@
+name: Verify clinic application
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Lint, test and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+            Frontend/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install root tooling
+        run: npm ci
+
+      - name: Install Functions dependencies
+        run: npm --prefix functions ci
+
+      - name: Install frontend dependencies
+        run: npm --prefix Frontend ci
+
+      - name: Validate Functions source
+        run: npm --prefix functions run lint
+
+      - name: Run unit tests
+        run: |
+          npm run test:time
+          npm run test:schedule
+          npx vitest run functions/test
+
+      - name: Run Firestore rules tests
+        run: npm run test:rules
+
+      - name: Lint and build both sites
+        run: |
+          npm --prefix Frontend run lint
+          npm --prefix Frontend run build
+
+      - name: Reject whitespace errors
+        run: git diff --check

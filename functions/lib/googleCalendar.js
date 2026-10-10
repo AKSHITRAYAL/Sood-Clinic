@@ -76,4 +76,11 @@ const createEvent = async ({ accessToken, calendarId, startsAt, endsAt, appointm
   body: JSON.stringify({ summary: `Sood Clinic appointment ${appointmentReference}`, start: { dateTime: startsAt, timeZone: 'Asia/Kolkata' }, end: { dateTime: endsAt, timeZone: 'Asia/Kolkata' }, extendedProperties: { private: { appointmentReference } } }),
 });
 
-module.exports = { buildAuthorizationUrl, createEvent, decrypt, encrypt, exchangeAuthorizationCode, freeBusy, refreshAccessToken };
+const updateEventTime = async ({ accessToken, calendarId, eventId, startsAt, endsAt }) => requestJson(`${GOOGLE_API}/calendars/${encodeURIComponent(calendarId || 'primary')}/events/${encodeURIComponent(eventId)}`, {
+  method: 'PATCH',
+  headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+  // The external calendar remains intentionally free of patient information.
+  body: JSON.stringify({ start: { dateTime: startsAt, timeZone: 'Asia/Kolkata' }, end: { dateTime: endsAt, timeZone: 'Asia/Kolkata' } }),
+});
+
+module.exports = { buildAuthorizationUrl, createEvent, decrypt, encrypt, exchangeAuthorizationCode, freeBusy, refreshAccessToken, updateEventTime };

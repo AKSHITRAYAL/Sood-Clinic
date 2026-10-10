@@ -1,0 +1,20 @@
+import { useEffect, useState } from 'react';
+import { onAuthStateChanged } from 'firebase/auth';
+import { httpsCallable } from 'firebase/functions';
+import { Link, useSearchParams } from 'react-router-dom';
+import Footer from '../components/Footer';
+import Navbar from '../components/Navbar';
+import { auth, functions } from '../lib/firebase';
+import './patientExperience.css';
+
+const PatientExperience = () => {
+  const [testimonials, setTestimonials] = useState([]); const [user, setUser] = useState(undefined); const [params] = useSearchParams();
+  const [rating, setRating] = useState(0); const [comment, setComment] = useState(''); const [notice, setNotice] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
+  const appointmentId = params.get('appointment') || '';
+  useEffect(() => onAuthStateChanged(auth, (next) => setUser(next || null)), []);
+  useEffect(() => { let active = true; httpsCallable(functions, 'getPublicTestimonials')().then((result) => active && setTestimonials(result.data.testimonials || [])).catch(() => active && setTestimonials([])); return () => { active = false; }; }, []);
+  const submit = async (event) => { event.preventDefault(); setError(''); setNotice(''); if (!appointmentId) { setError('Open this form from a completed appointment in your patient portal.'); return; } if (!rating || comment.trim().length < 10) { setError('Choose a rating and write at least 10 characters.'); return; } setBusy(true); try { const result = await httpsCallable(functions, 'submitPatientFeedback')({ appointmentId, rating, comment }); setNotice(result.data.message); setComment(''); setRating(0); } catch (caught) { setError(caught.message || 'Feedback could not be submitted.'); } finally { setBusy(false); } };
+  return <><Navbar /><main className="patient-experience"><header className="patient-experience__hero"><p>SOOD CLINIC EXPERIENCE</p><h1>Care is personal. Feedback should be, too.</h1><span>Read only feedback that was deliberately reviewed for public sharing. If you have completed a visit, you can share feedback privately with the clinic.</span></header><section className="patient-experience__grid"><section className="patient-experience__reviews"><header><p>REVIEWS</p><h2>Patient experiences</h2></header>{testimonials.length ? <div>{testimonials.map((item) => <article key={item.id}><strong aria-label={`${item.rating} out of 5 stars`}>{'★'.repeat(item.rating)}{'☆'.repeat(5 - item.rating)}</strong><p>“{item.comment}”</p><span>Published with review</span></article>)}</div> : <div className="patient-experience__empty"><strong>No public reviews yet</strong><span>When patients choose to share approved feedback, it will appear here.</span></div>}</section><section className="patient-experience__share"><p>PRIVATE FEEDBACK</p><h2>Share your experience</h2><span>Feedback is private by default and is never published automatically. Please avoid including medical details or other sensitive personal information.</span>{user === undefined ? <p className="slot-empty">Checking your account…</p> : !user ? <Link to="/login">Sign in to share feedback</Link> : <form onSubmit={submit}><fieldset><legend>Your rating</legend><div className="patient-experience__rating">{[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" aria-label={`${value} star${value === 1 ? '' : 's'}`} aria-pressed={rating === value} className={rating >= value ? 'is-selected' : ''} onClick={() => setRating(value)}>★</button>)}</div></fieldset><label>Feedback<textarea value={comment} onChange={(event) => setComment(event.target.value)} maxLength="800" placeholder="Tell the clinic what went well or what could be improved." required /></label><button type="submit" disabled={busy}>{busy ? 'Submitting…' : 'Submit private feedback'}</button></form>}{notice && <p className="admin-notice" role="status">{notice}</p>}{error && <p className="staff-login__error" role="alert">{error}</p>}</section></section></main><Footer /></>;
+};
+
+export default PatientExperience;

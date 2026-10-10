@@ -22,7 +22,7 @@ const NoticeSlider = () => {
         <p className="notice-carousel__eyebrow">Sood Clinic</p>
         <h1>{notice.title}</h1>
         <p className="notice-carousel__description">Compassionate specialist care, built around you.</p>
-        <Link to="/Booknow" className="hero-appointment-button">Schedule a consultation</Link>
+        <Link to="/book" className="hero-appointment-button">Schedule a consultation</Link>
       </div>
       <div className="notice-carousel__dots" role="tablist" aria-label="Hospital highlights">
         {notices.map((item, index) => <button key={item.id} type="button" aria-label={`Show highlight ${index + 1}`} aria-selected={activeIndex === index} className={activeIndex === index ? 'active' : ''} onClick={() => setActiveIndex(index)} />)}

@@ -1,0 +1,20 @@
+import { useCallback, useEffect, useState } from 'react';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { httpsCallable } from 'firebase/functions';
+import { Link, Navigate } from 'react-router-dom';
+import NotificationMenu from '../components/NotificationMenu';
+import { auth, functions } from '../lib/firebase';
+
+const AdminFeedback = () => {
+  const [access, setAccess] = useState('checking'); const [items, setItems] = useState([]); const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [busy, setBusy] = useState('');
+  const load = useCallback(async () => { setError(''); try { const result = await httpsCallable(functions, 'getFeedbackModerationQueue')(); setItems(result.data.feedback || []); } catch (caught) { setError(caught.message || 'Feedback could not be loaded.'); } }, []);
+  useEffect(() => onAuthStateChanged(auth, async (user) => { if (!user) return setAccess('signed-out'); const token = await user.getIdTokenResult(); setAccess(token.claims.forcePasswordChange ? 'password-change' : token.claims.role === 'admin' ? 'allowed' : 'denied'); }), []);
+  useEffect(() => { if (access === 'allowed') load(); }, [access, load]);
+  const moderate = async (feedbackId, action) => { setBusy(feedbackId); setError(''); try { const result = await httpsCallable(functions, 'moderatePatientFeedback')({ feedbackId, action }); setItems((current) => current.filter((item) => item.id !== feedbackId)); setNotice(result.data.message); } catch (caught) { setError(caught.message || 'Feedback could not be updated.'); } finally { setBusy(''); } };
+  if (access === 'signed-out') return <Navigate to="/staff/login" replace />;
+  if (access === 'password-change') return <Navigate to="/staff/account" replace />;
+  if (access === 'denied') return <main className="staff-shell"><section className="workspace-gate"><p>SOOD CLINIC STAFF</p><h1>Administrator access required</h1><button type="button" onClick={() => signOut(auth)}>Sign out</button></section></main>;
+  if (access === 'checking') return <main className="staff-shell"><p className="workspace-status">Verifying secure administrator access…</p></main>;
+  return <main className="staff-shell"><header className="staff-topbar"><Link to="/staff/admin" className="staff-wordmark">SOOD CLINIC</Link><nav><Link to="/staff/admin">Overview</Link><Link to="/staff/admin/patients">Patients</Link><Link to="/staff/admin/catalogue">Booking setup</Link><Link className="is-active" to="/staff/admin/feedback">Feedback</Link><Link to="/staff/admin/audit">Activity</Link><NotificationMenu /><Link to="/staff/account">My account</Link><button type="button" onClick={() => signOut(auth)}>Sign out</button></nav></header><div className="admin-audit"><header className="staff-access__heading"><div><p className="section-kicker">Patient experience</p><h1>Feedback review</h1><span>Feedback is private until you deliberately publish it. Do not publish comments containing health details or personal identifiers.</span></div><button type="button" onClick={load}>Refresh</button></header>{notice && <p className="admin-notice" role="status">{notice}</p>}{error && <p className="staff-login__error" role="alert">{error}</p>}<section className="admin-panel feedback-queue"><div className="admin-panel__head"><div><p className="section-kicker">Pending review</p><h2>Patient feedback</h2></div><span>{items.length}</span></div>{items.length ? <ul>{items.map((item) => <li key={item.id}><div><strong aria-label={`${item.rating} out of 5 stars`}>{'★'.repeat(item.rating)}{'☆'.repeat(5 - item.rating)}</strong><p>{item.comment}</p></div><div><button type="button" disabled={busy === item.id} onClick={() => moderate(item.id, 'publish')}>Publish</button><button type="button" disabled={busy === item.id} className="button-danger" onClick={() => moderate(item.id, 'reject')}>Reject</button></div></li>)}</ul> : <p className="empty-state">No feedback is waiting for review.</p>}</section></div></main>;
+};
+export default AdminFeedback;

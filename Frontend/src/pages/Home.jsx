@@ -1,6 +1,7 @@
 import Navbar from '../components/Navbar';
 import NoticeSlider from '../components/Slider';
 import Footer from '../components/Footer';
+import { Link } from 'react-router-dom';
 
 const Home = () => (
   <>
@@ -18,6 +19,10 @@ const Home = () => (
           <p className="mb-3 text-xs font-extrabold uppercase tracking-[0.16em] text-sky-700">Sood Clinic, Panchkula</p>
           <p className="leading-7 text-slate-600">Gastroenterology care at Sood Clinic, Panchkula. Dr. Sood has over 38 years of clinical experience and offers in-clinic visits and video consultations.</p>
         </div>
+      </section>
+      <section className="home-guides-callout" aria-label="Patient education">
+        <div><p>CLINIC EDUCATION</p><h2>Understand your digestive health.</h2><span>Short, evidence-informed guides to help you prepare for a conversation with your clinician.</span></div>
+        <Link to="/guides">Explore health guides</Link>
       </section>
     </main>
     <Footer />

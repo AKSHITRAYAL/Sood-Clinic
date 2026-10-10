@@ -1,14 +1,24 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import AccountSettings from '../pages/AccountSettings';
-import DoctorSchedule from '../pages/DoctorSchedule';
-import ReceptionWorkspace from '../pages/ReceptionWorkspace';
-import StaffAdmin from '../pages/StaffAdmin';
-import StaffAccess from '../pages/StaffAccess';
-import AdminPatients from '../pages/AdminPatients';
-import StaffEntry from '../pages/StaffEntry';
-import StaffLogin from '../pages/StaffLogin';
+import AppErrorBoundary from '../components/AppErrorBoundary';
+import StaffSessionGuard from '../components/StaffSessionGuard';
 
-const StaffApp = () => <BrowserRouter><Routes>
+const AccountSettings = lazy(() => import('../pages/AccountSettings'));
+const DoctorSchedule = lazy(() => import('../pages/DoctorSchedule'));
+const ReceptionWorkspace = lazy(() => import('../pages/ReceptionWorkspace'));
+const StaffAdmin = lazy(() => import('../pages/StaffAdmin'));
+const StaffAccess = lazy(() => import('../pages/StaffAccess'));
+const AdminPatients = lazy(() => import('../pages/AdminPatients'));
+const AdminAudit = lazy(() => import('../pages/AdminAudit'));
+const AdminCatalogue = lazy(() => import('../pages/AdminCatalogue'));
+const AdminFeedback = lazy(() => import('../pages/AdminFeedback'));
+const AdminVisitTypes = lazy(() => import('../pages/AdminVisitTypes'));
+const VideoConsultations = lazy(() => import('../pages/VideoConsultations'));
+const StaffEntry = lazy(() => import('../pages/StaffEntry'));
+const StaffLogin = lazy(() => import('../pages/StaffLogin'));
+const RouteLoading = () => <main className="route-loading route-loading--staff" aria-live="polite">Loading secure workspace…</main>;
+
+const StaffApp = () => <BrowserRouter><AppErrorBoundary staff><StaffSessionGuard><Suspense fallback={<RouteLoading />}><Routes>
   <Route path="/" element={<StaffEntry />} />
   <Route path="/staff" element={<StaffEntry />} />
   <Route path="/staff/login" element={<StaffLogin />} />
@@ -16,9 +26,14 @@ const StaffApp = () => <BrowserRouter><Routes>
   <Route path="/staff/admin" element={<StaffAdmin />} />
   <Route path="/staff/admin/access" element={<StaffAccess />} />
   <Route path="/staff/admin/patients" element={<AdminPatients />} />
+  <Route path="/staff/admin/audit" element={<AdminAudit />} />
+  <Route path="/staff/admin/catalogue" element={<AdminCatalogue />} />
+  <Route path="/staff/admin/feedback" element={<AdminFeedback />} />
+  <Route path="/staff/admin/visit-types" element={<AdminVisitTypes />} />
+  <Route path="/staff/video" element={<VideoConsultations />} />
   <Route path="/staff/doctor" element={<DoctorSchedule />} />
   <Route path="/staff/reception" element={<ReceptionWorkspace />} />
   <Route path="*" element={<Navigate to="/" replace />} />
-</Routes></BrowserRouter>;
+</Routes></Suspense></StaffSessionGuard></AppErrorBoundary></BrowserRouter>;
 
 export default StaffApp;

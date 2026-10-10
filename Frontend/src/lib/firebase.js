@@ -1,4 +1,3 @@
-import { getAnalytics, isSupported } from 'firebase/analytics';
 import { browserLocalPersistence, getAuth, setPersistence } from 'firebase/auth';
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
@@ -23,8 +22,3 @@ export const auth = getAuth(firebaseApp);
 export const authReady = setPersistence(auth, browserLocalPersistence).catch((error) => {
   console.error('Unable to configure authentication persistence.', error);
 });
-
-export async function initializeAnalytics() {
-  if (typeof window === 'undefined' || !(await isSupported())) return null;
-  return getAnalytics(firebaseApp);
-}

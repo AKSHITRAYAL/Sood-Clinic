@@ -2,15 +2,14 @@ const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https')
 const { setGlobalOptions } = require('firebase-functions/v2');
 const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
-const express = require('express');
-const cors = require('cors');
 const crypto = require('crypto');
 const { istDateKey, toIstParts, weekdayIst } = require('./lib/ist');
 const { buildAvailability, makeSlotId } = require('./lib/availability');
-const { buildAuthorizationUrl, createEvent, decrypt, encrypt, exchangeAuthorizationCode, freeBusy, refreshAccessToken } = require('./lib/googleCalendar');
+const { buildAuthorizationUrl, createEvent, decrypt, encrypt, exchangeAuthorizationCode, freeBusy, refreshAccessToken, updateEventTime } = require('./lib/googleCalendar');
 const { ROLE, canTransition } = require('./lib/stateMachine');
 const { isDoctorId, isEmail, isStaffRole, isStrongTemporaryPassword, normalizeEmail, staffClaims } = require('./lib/staffAccess');
 const { canPatientCancel } = require('./lib/appointmentPolicy');
+const { formatUhid, isUhid, normalizePatientName, normalizePhone } = require('./lib/patientRegistry');
 
 admin.initializeApp();
 setGlobalOptions({ region: 'asia-south1', maxInstances: 10 });
@@ -19,80 +18,14 @@ const db = admin.firestore();
 const GOOGLE_CALENDAR_CLIENT_ID = defineSecret('GOOGLE_CALENDAR_CLIENT_ID');
 const GOOGLE_CALENDAR_CLIENT_SECRET = defineSecret('GOOGLE_CALENDAR_CLIENT_SECRET');
 const GOOGLE_CALENDAR_TOKEN_KEY = defineSecret('GOOGLE_CALENDAR_TOKEN_KEY');
-const app = express();
-const allowedOrigins = ['https://sood-clinic.web.app', 'https://sood-clinic.firebaseapp.com', 'http://localhost:5174'];
-app.disable('x-powered-by');
-app.use(cors({ origin: (origin, callback) => callback(null, !origin || allowedOrigins.includes(origin)) }));
-app.use(express.json({ limit: '50kb' }));
-app.use((req, res, next) => {
-  res.set('X-Content-Type-Options', 'nosniff');
-  res.set('X-Frame-Options', 'DENY');
-  res.set('Referrer-Policy', 'no-referrer');
-  next();
-});
-
-const fail = (res, status, message) => res.status(status).json({ error: { message } });
-const minutes = (time) => {
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time || '')) return NaN;
-  const [hours, mins] = time.split(':').map(Number);
-  return hours * 60 + mins;
-};
-const publicBranch = (doc) => ({ _id: doc.id, name: doc.get('name'), code: doc.get('code'), timezone: doc.get('timezone') || 'Asia/Kolkata' });
-
-app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'sood-clinic-api' }));
-app.get('/api/v1/public/booking/branches', async (_req, res, next) => {
-  try {
-    const snapshot = await db.collection('branches').where('active', '==', true).orderBy('name').get();
-    res.json({ data: snapshot.docs.map(publicBranch) });
-  } catch (error) { next(error); }
-});
-
-app.get('/api/v1/public/booking/branches/:branchId/departments', async (req, res, next) => {
-  try {
-    const snapshot = await db.collection('departments').where('branchId', '==', req.params.branchId).where('active', '==', true).where('publicBookingEnabled', '==', true).orderBy('sortOrder').get();
-    res.json({ data: snapshot.docs.map((doc) => ({ _id: doc.id, name: doc.get('name'), description: doc.get('description') || '' })) });
-  } catch (error) { next(error); }
-});
-
-app.get('/api/v1/public/booking/branches/:branchId/departments/:departmentId/doctors', async (req, res, next) => {
-  try {
-    const snapshot = await db.collection('doctors').where('branchId', '==', req.params.branchId).where('departmentIds', 'array-contains', req.params.departmentId).where('active', '==', true).where('bookingEnabled', '==', true).get();
-    res.json({ data: snapshot.docs.map((doc) => ({ id: doc.id, name: doc.get('name'), qualification: doc.get('qualification') || '', schedule: doc.get('weeklySchedule') || [] })) });
-  } catch (error) { next(error); }
-});
-
-app.post('/api/v1/public/booking/appointments', async (req, res, next) => {
-  try {
-    const { branchId, departmentId, doctorId, startsAt, endsAt, patient, reason = '' } = req.body || {};
-    if (!branchId || !departmentId || !doctorId || !startsAt || !endsAt || !patient?.name || !patient?.phone) return fail(res, 422, 'Please complete all required booking details.');
-    if (!patient.consentToTreatment) return fail(res, 422, 'Consent to treatment is required to book an appointment.');
-    const start = new Date(startsAt); const end = new Date(endsAt);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start || start <= new Date()) return fail(res, 422, 'Choose a future appointment time.');
-    const [branch, department, doctor] = await Promise.all([db.collection('branches').doc(branchId).get(), db.collection('departments').doc(departmentId).get(), db.collection('doctors').doc(doctorId).get()]);
-    if (!branch.exists || !branch.get('active') || !department.exists || department.get('branchId') !== branchId || !department.get('active') || !department.get('publicBookingEnabled') || !doctor.exists || doctor.get('branchId') !== branchId || !doctor.get('active') || !doctor.get('bookingEnabled') || !(doctor.get('departmentIds') || []).includes(departmentId)) return fail(res, 422, 'The selected clinic service is no longer available.');
-    const startParts = toIstParts(start);
-    const endParts = toIstParts(end);
-    const startMinutes = startParts.hour * 60 + startParts.minute;
-    const endMinutes = endParts.hour * 60 + endParts.minute;
-    const schedule = (doctor.get('weeklySchedule') || []).find((rule) => rule.weekday === weekdayIst(istDateKey(start)) && minutes(rule.startTime) <= startMinutes && minutes(rule.endTime) >= endMinutes);
-    if (!schedule) return fail(res, 422, 'This doctor is not available at the selected time.');
-    const appointmentRef = db.collection('appointments').doc();
-    const slotRef = db.collection('appointmentSlots').doc(`${doctorId}_${start.toISOString()}`);
-    const reference = `SC-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
-    await db.runTransaction(async (transaction) => {
-      if ((await transaction.get(slotRef)).exists) throw Object.assign(new Error('That appointment time is no longer available.'), { status: 409 });
-      transaction.set(slotRef, { doctorId, startsAt: admin.firestore.Timestamp.fromDate(start), appointmentId: appointmentRef.id, createdAt: admin.firestore.FieldValue.serverTimestamp() });
-      transaction.set(appointmentRef, { reference, branchId, departmentId, doctorId, startsAt: admin.firestore.Timestamp.fromDate(start), endsAt: admin.firestore.Timestamp.fromDate(end), reason: String(reason).slice(0, 500), status: 'scheduled', source: 'patient_portal', patient: { name: String(patient.name).trim().slice(0, 120), phone: String(patient.phone).trim().slice(0, 30), gender: ['male', 'female', 'other'].includes(patient.gender) ? patient.gender : 'unknown', consentToTreatment: true }, createdAt: admin.firestore.FieldValue.serverTimestamp() });
-    });
-    res.status(201).json({ data: { appointmentId: appointmentRef.id, reference, status: 'scheduled' } });
-  } catch (error) { next(error); }
-});
-
-app.use((error, _req, res, _next) => { console.error(error); fail(res, error.status || 500, error.status ? error.message : 'Unable to process this request. Please try again later.'); });
-exports.clinicApi = onRequest({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, app);
-
 const requireAdmin = (request) => {
   if (!request.auth || request.auth.token.role !== 'admin') throw new HttpsError('permission-denied', 'Administrator access is required.');
+};
+
+const requireRegistrationStaff = (request) => {
+  const role = request.auth?.token?.role;
+  if (!request.auth || !['admin', 'receptionist'].includes(role)) throw new HttpsError('permission-denied', 'Reception or administrator access is required.');
+  return role;
 };
 
 const auditStaffAccess = async ({ actorUid, action, targetUid, meta = {} }) => db.collection('auditLogs').add({
@@ -137,19 +70,40 @@ const patientProfile = (input = {}) => {
   if (result.dateOfBirth && !/^\d{4}-\d{2}-\d{2}$/.test(result.dateOfBirth)) throw new HttpsError('invalid-argument', 'Use a valid date of birth.');
   return result;
 };
-const patientDirectoryRecord = ({ uid, email, profile }) => ({
-  uid,
+const patientDirectoryRecord = ({ patientId, uid, email, profile, uhid = '', linkedUids = [] }) => ({
+  // uid is retained while authenticated patient records use their Auth UID as
+  // the document ID. patientId is the registry-facing identifier and supports
+  // staff-created records that are not linked to an account yet.
+  uid: uid || linkedUids[0] || patientId,
+  patientId: patientId || uid,
+  uhid,
   displayName: profile.displayName,
-  displayNameLower: profile.displayName.toLowerCase(),
+  displayNameLower: normalizePatientName(profile.displayName),
   email: normalizeEmail(email),
   emailLower: normalizeEmail(email),
   phone: profile.phone || '',
+  phoneNormalized: normalizePhone(profile.phone),
+  linkedUids: Array.isArray(linkedUids) ? [...new Set(linkedUids)].slice(0, 10) : [],
   updatedAt: admin.firestore.FieldValue.serverTimestamp(),
 });
-const auditPatientAccess = ({ actorUid, action, targetUid, meta = {} }) => db.collection('auditLogs').add({
-  at: admin.firestore.FieldValue.serverTimestamp(), actor: { uid: actorUid, role: 'admin' }, action,
+const auditPatientAccess = ({ actorUid, actorRole = 'admin', action, targetUid, meta = {} }) => db.collection('auditLogs').add({
+  at: admin.firestore.FieldValue.serverTimestamp(), actor: { uid: actorUid, role: actorRole }, action,
   resource: { type: 'patient', id: targetUid }, meta,
 });
+
+const allocateUhid = async (transaction) => {
+  const counterRef = db.collection('counters').doc('patientUhid');
+  const counter = await transaction.get(counterRef);
+  const current = Number(counter.get('value')) || 0;
+  if (!Number.isInteger(current) || current < 0) throw new HttpsError('failed-precondition', 'The patient ID registry requires administrator review.');
+  const next = current + 1;
+  transaction.set(counterRef, { value: next, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  return formatUhid(next);
+};
+
+const patientIdentityLockId = ({ displayName, phone }) => crypto.createHash('sha256')
+  .update(`${normalizePatientName(displayName)}\u0000${normalizePhone(phone)}`)
+  .digest('hex');
 
 exports.syncPatientDirectory = onCall({ region: 'asia-south1', timeoutSeconds: 120, memory: '256MiB' }, async (request) => {
   requireAdmin(request);
@@ -159,8 +113,9 @@ exports.syncPatientDirectory = onCall({ region: 'asia-south1', timeoutSeconds: 1
     const data = patient.data();
     const email = normalizeEmail(data.email);
     const displayName = trimmed(data.displayName, 160);
-    if (!email || !displayName) continue;
-    batch.set(db.collection('patientDirectory').doc(patient.id), patientDirectoryRecord({ uid: patient.id, email, profile: { ...data, displayName } }), { merge: true });
+    if (!displayName) continue;
+    const linkedUids = Array.isArray(data.linkedUids) ? data.linkedUids : (data.recordSource === 'staff' ? [] : [patient.id]);
+    batch.set(db.collection('patientDirectory').doc(patient.id), patientDirectoryRecord({ patientId: patient.id, uid: linkedUids[0] || patient.id, email, profile: { ...data, displayName }, uhid: data.uhid || '', linkedUids }), { merge: true });
     writes += 1; indexed += 1;
     if (writes === 400) { await batch.commit(); batch = db.batch(); writes = 0; }
   }
@@ -170,13 +125,24 @@ exports.syncPatientDirectory = onCall({ region: 'asia-south1', timeoutSeconds: 1
 });
 
 exports.searchPatients = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
-  requireAdmin(request);
-  const term = trimmed(request.data?.term, 120).toLowerCase();
+  requireRegistrationStaff(request);
+  const rawTerm = trimmed(request.data?.term, 120);
+  const term = rawTerm.toLowerCase();
+  const phone = normalizePhone(rawTerm);
   if (term.length < 2) throw new HttpsError('invalid-argument', 'Enter at least two characters to search patients.');
   let snapshot;
-  if (term.includes('@')) snapshot = await db.collection('patientDirectory').where('emailLower', '==', term).limit(20).get();
+  if (isUhid(rawTerm)) snapshot = await db.collection('patientDirectory').where('uhid', '==', rawTerm.toUpperCase()).limit(1).get();
+  else if (term.includes('@')) snapshot = await db.collection('patientDirectory').where('emailLower', '==', term).limit(20).get();
+  else if (phone) snapshot = await db.collection('patientDirectory').where('phoneNormalized', '==', phone).limit(20).get();
   else snapshot = await db.collection('patientDirectory').orderBy('displayNameLower').startAt(term).endAt(`${term}\uf8ff`).limit(20).get();
-  return { patients: snapshot.docs.map((item) => ({ uid: item.id, displayName: item.get('displayName'), email: item.get('email'), phone: item.get('phone') || '' })) };
+  return { patients: snapshot.docs.map((item) => ({
+    uid: item.get('uid') || item.id,
+    patientId: item.get('patientId') || item.id,
+    uhid: item.get('uhid') || '',
+    displayName: item.get('displayName'),
+    email: item.get('email'),
+    phone: item.get('phone') || '',
+  })) };
 });
 
 exports.getAdminPatientProfile = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
@@ -186,7 +152,13 @@ exports.getAdminPatientProfile = onCall({ region: 'asia-south1', timeoutSeconds:
   const snapshot = await db.collection('patients').doc(uid).get();
   if (!snapshot.exists) throw new HttpsError('not-found', 'Patient record not found.');
   const data = snapshot.data();
-  return { uid, profile: Object.fromEntries([...PATIENT_PROFILE_FIELDS, 'email', 'createdAt', 'updatedAt'].map((field) => [field, data[field] || ''])) };
+  return {
+    uid,
+    patientId: uid,
+    uhid: data.uhid || '',
+    linkedUids: Array.isArray(data.linkedUids) ? data.linkedUids : [uid],
+    profile: Object.fromEntries([...PATIENT_PROFILE_FIELDS, 'email', 'createdAt', 'updatedAt'].map((field) => [field, data[field] || ''])),
+  };
 });
 
 exports.updateAdminPatientProfile = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
@@ -194,15 +166,24 @@ exports.updateAdminPatientProfile = onCall({ region: 'asia-south1', timeoutSecon
   const uid = trimmed(request.data?.uid, 128);
   if (!uid) throw new HttpsError('invalid-argument', 'Select a patient first.');
   const patientRef = db.collection('patients').doc(uid);
-  const snapshot = await patientRef.get();
-  if (!snapshot.exists) throw new HttpsError('not-found', 'Patient record not found.');
-  const existing = snapshot.data(); const profile = patientProfile(request.data?.profile);
-  const email = normalizeEmail(existing.email);
-  await patientRef.set({ ...profile, email, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
-  await db.collection('patientDirectory').doc(uid).set(patientDirectoryRecord({ uid, email, profile }), { merge: true });
+  const profile = patientProfile(request.data?.profile);
+  let existing; let uhid;
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(patientRef);
+    if (!snapshot.exists) throw new HttpsError('not-found', 'Patient record not found.');
+    existing = snapshot.data();
+    const email = normalizeEmail(existing.email);
+    uhid = existing.uhid || await allocateUhid(transaction);
+    const linkedUids = Array.isArray(existing.linkedUids) ? existing.linkedUids : [uid];
+    transaction.set(patientRef, {
+      ...profile, email, uhid, linkedUids, displayNameLower: normalizePatientName(profile.displayName), phoneNormalized: normalizePhone(profile.phone),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid,
+    }, { merge: true });
+    transaction.set(db.collection('patientDirectory').doc(uid), patientDirectoryRecord({ patientId: uid, uid, email, profile, uhid, linkedUids }), { merge: true });
+  });
   await admin.auth().updateUser(uid, { displayName: `${profile.title ? `${profile.title} ` : ''}${profile.displayName}`.trim() }).catch(() => null);
   await auditPatientAccess({ actorUid: request.auth.uid, action: 'patient_profile_updated', targetUid: uid, meta: { fields: PATIENT_PROFILE_FIELDS.filter((field) => profile[field] !== (existing[field] || '')) } });
-  return { message: 'Patient profile updated.' };
+  return { message: 'Patient profile updated.', uhid };
 });
 
 // Patient-side profile writes also use the trusted boundary. This keeps the
@@ -214,22 +195,85 @@ exports.registerPatientProfile = onCall({ region: 'asia-south1', timeoutSeconds:
   const displayName = trimmed(request.data?.displayName, 160);
   if (!displayName || !isEmail(user.email)) throw new HttpsError('invalid-argument', 'A patient name and verified email are required.');
   const patientRef = db.collection('patients').doc(user.uid);
-  const prior = await patientRef.get();
-  const profile = { ...patientProfile({ displayName, ...(prior.exists ? prior.data() : {}) }), displayName };
-  await patientRef.set({ ...profile, email: normalizeEmail(user.email), createdAt: prior.exists ? prior.get('createdAt') : new Date().toISOString(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-  await db.collection('patientDirectory').doc(user.uid).set(patientDirectoryRecord({ uid: user.uid, email: user.email, profile }), { merge: true });
-  return { message: 'Patient profile created.' };
+  let uhid;
+  await db.runTransaction(async (transaction) => {
+    const prior = await transaction.get(patientRef);
+    const priorData = prior.exists ? prior.data() : {};
+    const profile = { ...patientProfile({ displayName, ...priorData }), displayName };
+    uhid = priorData.uhid || await allocateUhid(transaction);
+    const linkedUids = [...new Set([...(Array.isArray(priorData.linkedUids) ? priorData.linkedUids : []), user.uid])];
+    transaction.set(patientRef, {
+      ...profile, email: normalizeEmail(user.email), uhid, linkedUids,
+      displayNameLower: normalizePatientName(profile.displayName), phoneNormalized: normalizePhone(profile.phone),
+      createdAt: prior.exists ? priorData.createdAt || admin.firestore.FieldValue.serverTimestamp() : admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    transaction.set(db.collection('patientDirectory').doc(user.uid), patientDirectoryRecord({ patientId: user.uid, uid: user.uid, email: user.email, profile, uhid, linkedUids }), { merge: true });
+  });
+  return { message: 'Patient profile created.', uhid };
 });
 
 exports.updateOwnPatientProfile = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   if (!request.auth || isStaffRole(request.auth.token.role)) throw new HttpsError('permission-denied', 'Patient sign-in is required.');
   const user = await admin.auth().getUser(request.auth.uid);
-  const patientRef = db.collection('patients').doc(user.uid); const prior = await patientRef.get();
+  const patientRef = db.collection('patients').doc(user.uid);
   const profile = patientProfile(request.data?.profile);
-  await patientRef.set({ ...profile, email: normalizeEmail(user.email), createdAt: prior.exists ? prior.get('createdAt') : new Date().toISOString(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-  await db.collection('patientDirectory').doc(user.uid).set(patientDirectoryRecord({ uid: user.uid, email: user.email, profile }), { merge: true });
+  let uhid;
+  await db.runTransaction(async (transaction) => {
+    const prior = await transaction.get(patientRef);
+    const priorData = prior.exists ? prior.data() : {};
+    uhid = priorData.uhid || await allocateUhid(transaction);
+    const linkedUids = [...new Set([...(Array.isArray(priorData.linkedUids) ? priorData.linkedUids : []), user.uid])];
+    transaction.set(patientRef, {
+      ...profile, email: normalizeEmail(user.email), uhid, linkedUids,
+      displayNameLower: normalizePatientName(profile.displayName), phoneNormalized: normalizePhone(profile.phone),
+      createdAt: prior.exists ? priorData.createdAt || admin.firestore.FieldValue.serverTimestamp() : admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    transaction.set(db.collection('patientDirectory').doc(user.uid), patientDirectoryRecord({ patientId: user.uid, uid: user.uid, email: user.email, profile, uhid, linkedUids }), { merge: true });
+  });
   await admin.auth().updateUser(user.uid, { displayName: `${profile.title ? `${profile.title} ` : ''}${profile.displayName}`.trim() });
-  return { message: 'Your profile has been saved.' };
+  return { message: 'Your profile has been saved.', uhid };
+});
+
+// Staff registration deliberately creates a clinical record only. Linking it to
+// a future patient login is a separate, verified workflow so a receptionist can
+// never take over an existing Firebase account by entering an email address.
+exports.registerPatient = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  const actorRole = requireRegistrationStaff(request);
+  const profile = patientProfile(request.data?.profile);
+  const phoneNormalized = normalizePhone(profile.phone);
+  if (!phoneNormalized) throw new HttpsError('invalid-argument', 'Enter a valid patient phone number before registering the record.');
+  const patientRef = db.collection('patients').doc();
+  const lockRef = db.collection('patientIdentityLocks').doc(patientIdentityLockId(profile));
+  let uhid;
+  try {
+    await db.runTransaction(async (transaction) => {
+      const [lock, samePhone] = await Promise.all([
+        transaction.get(lockRef),
+        transaction.get(db.collection('patients').where('phoneNormalized', '==', phoneNormalized).limit(20)),
+      ]);
+      const duplicate = samePhone.docs.some((item) => normalizePatientName(item.get('displayName')) === normalizePatientName(profile.displayName));
+      if (lock.exists || duplicate) throw new HttpsError('already-exists', 'A matching patient record already exists. Search the registry before registering another.');
+      uhid = await allocateUhid(transaction);
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      transaction.set(patientRef, {
+        ...profile, uhid, linkedUids: [], recordSource: 'staff',
+        displayNameLower: normalizePatientName(profile.displayName), phoneNormalized,
+        createdBy: { uid: request.auth.uid, role: actorRole }, createdAt: now, updatedAt: now,
+      });
+      transaction.set(db.collection('patientDirectory').doc(patientRef.id), patientDirectoryRecord({ patientId: patientRef.id, email: '', profile, uhid, linkedUids: [] }));
+      transaction.set(lockRef, { patientId: patientRef.id, createdAt: now });
+      transaction.set(db.collection('auditLogs').doc(), {
+        at: now, actor: { uid: request.auth.uid, role: actorRole }, action: 'patient_registered',
+        resource: { type: 'patient', id: patientRef.id }, meta: { source: 'staff_registration' },
+      });
+    });
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    throw new HttpsError('internal', 'The patient record could not be registered. Please try again.');
+  }
+  return { patientId: patientRef.id, uhid, message: 'Patient record registered.' };
 });
 
 // Privileged staff lifecycle operations. This endpoint is deliberately callable only by
@@ -357,7 +401,86 @@ exports.getBookingCatalog = onCall({ region: 'asia-south1', timeoutSeconds: 30, 
   }));
   const branches = branchSnapshot.docs.filter((item) => item.get('active') === true).map((item) => ({ id: item.id, name: trimmed(item.get('name'), 120), timezone: item.get('timezone') || 'Asia/Kolkata' }));
   const config = bookingConfig(configSnapshot);
-  return { branches, departments, doctors, booking: { bookingWindowDays: config.bookingWindowDays, visitTypes: config.visitTypes.length ? config.visitTypes.map((item) => ({ id: trimmed(item.id, 60), label: trimmed(item.label, 100), minutes: item.minutes })) : [{ id: 'consultation', label: 'Consultation', minutes: config.slotMinutes }] } };
+  return { branches, departments, doctors, booking: { bookingWindowDays: config.bookingWindowDays, visitTypes: config.visitTypes.filter((item) => item.active).map((item) => ({ id: item.id, label: item.label, minutes: item.minutes, mode: item.mode })) } };
+});
+
+const catalogId = (value, label) => {
+  const id = trimmed(value, 80);
+  if (!/^[a-z][a-z0-9_-]{1,79}$/.test(id)) throw new HttpsError('invalid-argument', `${label} must use lowercase letters, numbers, hyphens, or underscores.`);
+  return id;
+};
+const catalogText = (value, label, max = 160, required = true) => {
+  const text = trimmed(value, max);
+  if (required && !text) throw new HttpsError('invalid-argument', `${label} is required.`);
+  return text;
+};
+
+// Public catalog documents are deliberately read-only in Firestore rules. This
+// callable gives administrators the narrow, validated write path so a clinic can
+// grow beyond the original seed provider without a client-side privilege hole.
+exports.getAdminBookingCatalog = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  requireAdmin(request);
+  const [branchSnapshot, departmentSnapshot, doctorSnapshot] = await Promise.all([
+    db.collection('branches').orderBy('name').get(),
+    db.collection('departments').orderBy('sortOrder').get(),
+    db.collection('doctors').orderBy('name').get(),
+  ]);
+  return {
+    branches: branchSnapshot.docs.map((item) => ({ id: item.id, name: trimmed(item.get('name'), 120), code: trimmed(item.get('code'), 40), timezone: item.get('timezone') || 'Asia/Kolkata', active: item.get('active') === true })),
+    departments: departmentSnapshot.docs.map((item) => ({ id: item.id, branchId: trimmed(item.get('branchId'), 80), name: trimmed(item.get('name'), 120), description: trimmed(item.get('description'), 300), active: item.get('active') === true, publicBookingEnabled: item.get('publicBookingEnabled') === true, sortOrder: Number(item.get('sortOrder')) || 0 })),
+    doctors: doctorSnapshot.docs.map((item) => ({ id: item.id, branchId: trimmed(item.get('branchId'), 80), departmentIds: Array.isArray(item.get('departmentIds')) ? item.get('departmentIds').map((value) => trimmed(value, 80)).filter(Boolean) : [], name: trimmed(item.get('name'), 160), qualification: trimmed(item.get('qualification'), 160), active: item.get('active') === true, bookingEnabled: item.get('bookingEnabled') === true })),
+  };
+});
+
+exports.manageBookingCatalog = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  requireAdmin(request);
+  const { action, record = {} } = request.data || {};
+  if (action === 'branch') {
+    const id = catalogId(record.id, 'Branch ID');
+    const payload = { name: catalogText(record.name, 'Branch name', 120), code: catalogText(record.code, 'Branch code', 40), timezone: 'Asia/Kolkata', active: record.active === true, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid };
+    await db.collection('branches').doc(id).set(payload, { merge: true });
+    await auditStaffAccess({ actorUid: request.auth.uid, action: 'booking_catalog_branch_saved', targetUid: id, meta: { active: payload.active } });
+    return { message: 'Branch saved.' };
+  }
+  if (action === 'department') {
+    const id = catalogId(record.id, 'Department ID'); const branchId = catalogId(record.branchId, 'Branch ID');
+    if (!(await db.collection('branches').doc(branchId).get()).exists) throw new HttpsError('failed-precondition', 'Choose an existing branch.');
+    const sortOrder = Number(record.sortOrder);
+    if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 9999) throw new HttpsError('invalid-argument', 'Sort order must be a whole number between 0 and 9999.');
+    const payload = { branchId, name: catalogText(record.name, 'Department name', 120), description: catalogText(record.description, 'Description', 300, false), active: record.active === true, publicBookingEnabled: record.publicBookingEnabled === true, sortOrder, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid };
+    await db.collection('departments').doc(id).set(payload, { merge: true });
+    await auditStaffAccess({ actorUid: request.auth.uid, action: 'booking_catalog_department_saved', targetUid: id, meta: { branchId, active: payload.active, publicBookingEnabled: payload.publicBookingEnabled } });
+    return { message: 'Department saved.' };
+  }
+  if (action === 'doctor') {
+    const id = isDoctorId(record.id) ? record.id : catalogId(record.id, 'Doctor ID'); const branchId = catalogId(record.branchId, 'Branch ID');
+    const departmentIds = Array.isArray(record.departmentIds) ? [...new Set(record.departmentIds.map((value) => catalogId(value, 'Department ID')))] : [];
+    if (!departmentIds.length || departmentIds.length > 12) throw new HttpsError('invalid-argument', 'Choose between one and twelve departments.');
+    const [branchSnapshot, ...departmentSnapshots] = await Promise.all([db.collection('branches').doc(branchId).get(), ...departmentIds.map((departmentId) => db.collection('departments').doc(departmentId).get())]);
+    if (!branchSnapshot.exists || departmentSnapshots.some((item) => !item.exists || item.get('branchId') !== branchId)) throw new HttpsError('failed-precondition', 'Every selected department must belong to the selected branch.');
+    const payload = { branchId, departmentIds, name: catalogText(record.name, 'Doctor name', 160), qualification: catalogText(record.qualification, 'Qualification', 160, false), active: record.active === true, bookingEnabled: record.bookingEnabled === true, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid };
+    await db.collection('doctors').doc(id).set(payload, { merge: true });
+    await auditStaffAccess({ actorUid: request.auth.uid, action: 'booking_catalog_doctor_saved', targetUid: id, meta: { branchId, active: payload.active, bookingEnabled: payload.bookingEnabled } });
+    return { message: 'Doctor saved.' };
+  }
+  throw new HttpsError('invalid-argument', 'Unsupported catalogue action.');
+});
+
+// Visit formats are configuration rather than a client-side convention. This
+// keeps the public selector, appointment record and staff video workflow on one
+// server-validated contract, and makes a future data-store migration explicit.
+exports.getAdminBookingConfiguration = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  requireAdmin(request);
+  const config = bookingConfig(await db.collection('clinic').doc('publicConfig').get());
+  return { visitTypes: config.visitTypes };
+});
+
+exports.saveBookingVisitTypes = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  requireAdmin(request);
+  const visitTypes = normaliseVisitTypes(request.data?.visitTypes, { requireAtLeastOne: true });
+  await db.collection('clinic').doc('publicConfig').set({ visitTypes, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
+  await auditStaffAccess({ actorUid: request.auth.uid, action: 'booking_visit_types_saved', targetUid: 'publicConfig', meta: { count: visitTypes.length } });
+  return { message: 'Appointment formats saved.', visitTypes };
 });
 
 // --- Appointment engine ----------------------------------------------------
@@ -375,6 +498,10 @@ const DEFAULT_BOOKING_CONFIG = Object.freeze({
   autoConfirm: false,
   patientCancellationCutoffHours: 2,
 });
+const DEFAULT_VISIT_TYPES = Object.freeze([
+  Object.freeze({ id: 'consultation', label: 'In-clinic consultation', minutes: 20, mode: 'in_person', active: true }),
+  Object.freeze({ id: 'video-consultation', label: 'Online video consultation', minutes: 20, mode: 'video', active: true }),
+]);
 
 const asDate = (value) => {
   if (!value) return null;
@@ -382,6 +509,77 @@ const asDate = (value) => {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
 };
+
+// Audit records deliberately remain unreadable from the browser in Firestore
+// rules. This is the one narrow, admin-only projection used by the operations
+// UI; it excludes free-form metadata, which can contain unnecessary personal
+// or clinical context.
+exports.getAuditLog = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  requireAdmin(request);
+  const requestedLimit = Number(request.data?.limit);
+  const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 50) : 30;
+  const snapshot = await db.collection('auditLogs').orderBy('at', 'desc').limit(limit).get();
+  const events = snapshot.docs.map((item) => {
+    const data = item.data();
+    const at = asDate(data.at);
+    return {
+      id: item.id,
+      at: at ? at.toISOString() : null,
+      action: trimmed(data.action, 120) || 'activity_recorded',
+      actorRole: trimmed(data.actor?.role, 40) || 'system',
+      resourceType: trimmed(data.resource?.type, 80) || 'system',
+    };
+  });
+  return { events };
+});
+
+// Experience feedback is never public by default. A patient may submit one
+// review only after a completed appointment; an administrator must explicitly
+// publish it before the public site can receive its minimal projection.
+exports.submitPatientFeedback = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  if (!request.auth || isStaffRole(request.auth.token.role)) throw new HttpsError('permission-denied', 'Patient sign-in is required.');
+  const appointmentId = String(request.data?.appointmentId || '').trim();
+  const rating = Number(request.data?.rating);
+  const comment = String(request.data?.comment || '').trim().replace(/\s+/g, ' ').slice(0, 800);
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(appointmentId) || !Number.isInteger(rating) || rating < 1 || rating > 5 || comment.length < 10) throw new HttpsError('invalid-argument', 'Choose a rating and write at least 10 characters of feedback.');
+  const appointmentRef = db.collection('appointments').doc(appointmentId);
+  const feedbackRef = db.collection('patientFeedback').doc(appointmentId);
+  await db.runTransaction(async (transaction) => {
+    const [appointment, existing] = await Promise.all([transaction.get(appointmentRef), transaction.get(feedbackRef)]);
+    if (!appointment.exists || appointment.get('patientId') !== request.auth.uid || appointment.get('status') !== 'completed') throw new HttpsError('permission-denied', 'Feedback is available after your completed appointment.');
+    if (existing.exists) throw new HttpsError('already-exists', 'Feedback was already submitted for this appointment.');
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    transaction.set(feedbackRef, { appointmentId, patientId: request.auth.uid, rating, comment, status: 'pending', createdAt: now, updatedAt: now });
+    transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: request.auth.uid, role: 'patient' }, action: 'patient_feedback_submitted', resource: { type: 'patient_feedback', id: feedbackRef.id }, meta: { rating } });
+  });
+  return { message: 'Thank you. Your feedback has been submitted for review.' };
+});
+
+exports.getPublicTestimonials = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async () => {
+  const snapshot = await db.collection('patientFeedback').where('status', '==', 'published').orderBy('publishedAt', 'desc').limit(6).get();
+  return { testimonials: snapshot.docs.map((item) => ({ id: item.id, rating: item.get('rating'), comment: item.get('comment') })) };
+});
+
+exports.getFeedbackModerationQueue = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  requireAdmin(request);
+  const snapshot = await db.collection('patientFeedback').where('status', '==', 'pending').orderBy('createdAt', 'desc').limit(30).get();
+  return { feedback: snapshot.docs.map((item) => ({ id: item.id, appointmentId: item.get('appointmentId'), rating: item.get('rating'), comment: item.get('comment') })) };
+});
+
+exports.moderatePatientFeedback = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  requireAdmin(request);
+  const feedbackId = String(request.data?.feedbackId || '').trim();
+  const action = String(request.data?.action || '').trim();
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(feedbackId) || !['publish', 'reject', 'unpublish'].includes(action)) throw new HttpsError('invalid-argument', 'Choose a valid feedback moderation action.');
+  const ref = db.collection('patientFeedback').doc(feedbackId);
+  const snapshot = await ref.get();
+  if (!snapshot.exists) throw new HttpsError('not-found', 'Feedback was not found.');
+  const status = action === 'publish' ? 'published' : action === 'reject' ? 'rejected' : 'unpublished';
+  await ref.set({ status, reviewedAt: admin.firestore.FieldValue.serverTimestamp(), reviewedBy: request.auth.uid, publishedAt: action === 'publish' ? admin.firestore.FieldValue.serverTimestamp() : admin.firestore.FieldValue.delete() }, { merge: true });
+  await auditPatientAccess({ actorUid: request.auth.uid, action: `patient_feedback_${status}`, targetUid: snapshot.get('patientId'), meta: { feedbackId } });
+  return { message: `Feedback ${status}.` };
+});
+
 const publicError = (code, message) => new HttpsError(code, message);
 const roleFor = (authContext) => authContext?.token?.role || 'patient';
 const trimmed = (value, max) => String(value || '').trim().slice(0, max);
@@ -405,15 +603,35 @@ const bookingConfig = (data) => {
     bufferAfterMinutes: number('bufferAfterMinutes', DEFAULT_BOOKING_CONFIG.bufferAfterMinutes, 0, 120),
     autoConfirm: configured.autoConfirm === true,
     patientCancellationCutoffHours: number('patientCancellationCutoffHours', DEFAULT_BOOKING_CONFIG.patientCancellationCutoffHours, 0, 168),
-    visitTypes: Array.isArray(configured.visitTypes) ? configured.visitTypes : [],
+    visitTypes: normaliseVisitTypes(configured.visitTypes),
   };
 };
 
+const normaliseVisitTypes = (value, { requireAtLeastOne = false } = {}) => {
+  const configured = Array.isArray(value) && value.length ? value : DEFAULT_VISIT_TYPES;
+  if (!Array.isArray(configured) || configured.length > 12) throw new HttpsError('invalid-argument', 'Choose between one and twelve appointment formats.');
+  const seen = new Set();
+  const types = configured.map((item) => {
+    const id = catalogId(item?.id, 'Appointment format ID');
+    if (seen.has(id)) throw new HttpsError('invalid-argument', 'Appointment format IDs must be unique.');
+    seen.add(id);
+    const label = catalogText(item?.label, 'Appointment format label', 100);
+    const minutes = Number(item?.minutes);
+    if (!Number.isInteger(minutes) || minutes < 5 || minutes > 240) throw new HttpsError('invalid-argument', 'Appointment duration must be between 5 and 240 minutes.');
+    const mode = item?.mode === 'video' ? 'video' : item?.mode === 'in_person' || !item?.mode ? 'in_person' : null;
+    if (!mode) throw new HttpsError('invalid-argument', 'Appointment format must be in-clinic or video.');
+    return { id, label, minutes, mode, active: item?.active !== false };
+  });
+  const active = types.filter((item) => item.active);
+  if (requireAtLeastOne && !active.length) throw new HttpsError('invalid-argument', 'Keep at least one appointment format available.');
+  return types;
+};
+
 const visitTypeFor = (config, visitTypeId) => {
-  const visitType = config.visitTypes.find((item) => item && item.id === visitTypeId);
-  if (visitType && Number.isInteger(visitType.minutes) && visitType.minutes >= 5 && visitType.minutes <= 240) return visitType;
-  if (visitTypeId && visitTypeId !== 'consultation') throw publicError('invalid-argument', 'The selected visit type is unavailable.');
-  return { id: 'consultation', label: 'Consultation', minutes: config.slotMinutes };
+  const visitType = config.visitTypes.find((item) => item.id === visitTypeId && item.active);
+  if (visitType) return visitType;
+  if (visitTypeId && visitTypeId !== 'consultation') throw publicError('invalid-argument', 'The selected appointment format is unavailable.');
+  return config.visitTypes.find((item) => item.id === 'consultation' && item.active) || { id: 'consultation', label: 'In-clinic consultation', minutes: config.slotMinutes, mode: 'in_person', active: true };
 };
 
 const slotBusyRanges = async (doctorId, dateKey) => {
@@ -490,7 +708,7 @@ exports.getAvailability = onCall({ region: 'asia-south1', timeoutSeconds: 30, me
   if (!doctorId || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || ''))) throw publicError('invalid-argument', 'Choose a doctor and appointment date.');
   const context = await availabilityContext({ doctorId, dateKey, visitTypeId });
   const slots = buildAvailability({ doctorId, dateKey, weeklySessions: context.weeklySessions, exception: context.exception, durationMinutes: context.visitType.minutes, intervalMinutes: context.config.intervalMinutes, bufferBeforeMinutes: context.config.bufferBeforeMinutes, bufferAfterMinutes: context.config.bufferAfterMinutes, leadMinutes: context.config.leadMinutes, bookingWindowDays: context.config.bookingWindowDays, busyRanges: context.busyRanges });
-  return { timezone: context.config.timezone, visitType: { id: context.visitType.id, label: context.visitType.label, minutes: context.visitType.minutes }, calendar: context.externalCalendar, slots: slots.map((slot) => ({ slotId: slot.slotId, startsAt: slot.startsAt.toISOString(), endsAt: slot.endsAt.toISOString(), time: slot.time })) };
+  return { timezone: context.config.timezone, visitType: { id: context.visitType.id, label: context.visitType.label, minutes: context.visitType.minutes, mode: context.visitType.mode }, calendar: context.externalCalendar, slots: slots.map((slot) => ({ slotId: slot.slotId, startsAt: slot.startsAt.toISOString(), endsAt: slot.endsAt.toISOString(), time: slot.time })) };
 });
 
 const syncAppointmentToGoogle = async (appointmentId) => {
@@ -524,6 +742,7 @@ exports.createBooking = onCall({ region: 'asia-south1', timeoutSeconds: 30, memo
   if (!branchSnapshot.exists || branchSnapshot.get('active') !== true || !departmentSnapshot.exists || departmentSnapshot.get('branchId') !== branchId || departmentSnapshot.get('active') !== true || departmentSnapshot.get('publicBookingEnabled') !== true || !doctorSnapshot.exists || doctorSnapshot.get('branchId') !== branchId || !(doctorSnapshot.get('departmentIds') || []).includes(departmentId)) throw publicError('failed-precondition', 'The selected clinic service is not available.');
 
   const requestRef = db.collection('bookingRequests').doc(clientRequestId);
+  const exceptionRef = db.collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`);
   const appointmentRef = db.collection('appointments').doc();
   const slotRef = db.collection('appointmentSlots').doc(makeSlotId(doctorId, dateKey, time));
   const reference = appointmentReference();
@@ -531,22 +750,23 @@ exports.createBooking = onCall({ region: 'asia-south1', timeoutSeconds: 30, memo
   let result;
   try {
     await db.runTransaction(async (transaction) => {
-      const [prior, slot] = await Promise.all([transaction.get(requestRef), transaction.get(slotRef)]);
+      const [prior, slot, currentException] = await Promise.all([transaction.get(requestRef), transaction.get(slotRef), transaction.get(exceptionRef)]);
       if (prior.exists) {
         result = { appointmentId: prior.get('appointmentId'), reference: prior.get('reference'), status: prior.get('status'), idempotent: true };
         return;
       }
       if (slot.exists) throw publicError('already-exists', 'That time has just been booked. Please choose another slot.');
+      if (currentException.exists && currentException.get('type') === 'closed') throw publicError('failed-precondition', 'This clinic day has just been closed. Please choose another time.');
       const status = context.config.autoConfirm ? 'confirmed' : 'scheduled';
       const createdBy = request.auth ? { uid: request.auth.uid, role } : { uid: null, role: 'public' };
       transaction.set(slotRef, { doctorId, dateKey, startsAt: admin.firestore.Timestamp.fromDate(requested.startsAt), endsAt: admin.firestore.Timestamp.fromDate(requested.endsAt), appointmentId: appointmentRef.id, status: 'booked', createdAt: admin.firestore.FieldValue.serverTimestamp() });
       transaction.set(appointmentRef, {
-        reference, branchId, departmentId, doctorId, visitType: context.visitType.id, dateKey,
+        reference, branchId, departmentId, doctorId, visitType: context.visitType.id, visitMode: context.visitType.mode, dateKey,
         startsAt: admin.firestore.Timestamp.fromDate(requested.startsAt), endsAt: admin.firestore.Timestamp.fromDate(requested.endsAt),
         status, source: request.auth ? 'patient_portal' : 'web', patientId: request.auth?.uid || null,
         patientSnapshot: { name, phone }, reason: trimmed(reason, 500) || null, slotIds: [slotRef.id],
         consent: { version: trimmed(consentVersion, 40) || 'booking-v1', acceptedAt: admin.firestore.FieldValue.serverTimestamp() },
-        createdBy, externalCalendar: { provider: 'google', syncStatus: 'not_connected' }, createdAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdBy, externalCalendar: { provider: 'google', syncStatus: 'not_connected' }, videoConsultation: context.visitType.mode === 'video' ? { status: 'awaiting_link' } : null, createdAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       transaction.set(appointmentRef.collection('events').doc(), { from: null, to: status, byUid: createdBy.uid, byRole: createdBy.role, at: admin.firestore.FieldValue.serverTimestamp(), meta: { source: request.auth ? 'patient_portal' : 'web' } });
       transaction.set(db.collection('auditLogs').doc(), { at: admin.firestore.FieldValue.serverTimestamp(), actor: createdBy, action: 'appointment_created', resource: { type: 'appointment', id: appointmentRef.id }, meta: { source: request.auth ? 'patient_portal' : 'web', status } });
@@ -559,6 +779,60 @@ exports.createBooking = onCall({ region: 'asia-south1', timeoutSeconds: 30, memo
   }
   if (!result.idempotent) await syncAppointmentToGoogle(result.appointmentId);
   return result;
+});
+
+const requireVideoStaff = (request) => {
+  const role = ROLE[request.auth?.token?.role];
+  if (!request.auth || !role) throw publicError('permission-denied', 'Staff access is required.');
+  return role;
+};
+const safeVideoUrl = (value) => {
+  const url = trimmed(value, 2000);
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' || !parsed.hostname || parsed.username || parsed.password) throw new Error('unsafe');
+    return parsed.toString();
+  } catch (_error) {
+    throw publicError('invalid-argument', 'Use a valid secure https video meeting link.');
+  }
+};
+
+// Meeting links remain clinic-controlled. The application does not create rooms,
+// transmit appointment data to a video vendor, or enrol the clinic in a paid
+// service; an authorised staff member supplies a secure link only when ready.
+exports.getVideoConsultationQueue = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  const role = requireVideoStaff(request);
+  const now = new Date();
+  const from = admin.firestore.Timestamp.fromDate(new Date(now.getTime() - 24 * 60 * 60 * 1000));
+  const to = admin.firestore.Timestamp.fromDate(new Date(now.getTime() + 31 * 24 * 60 * 60 * 1000));
+  let query = db.collection('appointments').where('visitMode', '==', 'video').where('startsAt', '>=', from).where('startsAt', '<=', to);
+  if (role === 'doctor') query = query.where('doctorId', '==', request.auth.token.doctorId);
+  const snapshot = await query.orderBy('startsAt', 'asc').limit(50).get();
+  return {
+    appointments: snapshot.docs
+      .map((item) => ({ id: item.id, reference: item.get('reference'), doctorId: item.get('doctorId'), startsAt: asDate(item.get('startsAt'))?.toISOString() || null, status: item.get('status'), patient: item.get('patientSnapshot') || {}, videoConsultation: item.get('videoConsultation') || { status: 'awaiting_link' } }))
+      .filter((item) => isActiveAppointment(item.status)),
+  };
+});
+
+exports.setVideoConsultationAccess = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  const role = requireVideoStaff(request);
+  const appointmentId = trimmed(request.data?.appointmentId, 200);
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(appointmentId)) throw publicError('invalid-argument', 'Choose a valid online appointment.');
+  const joinUrl = safeVideoUrl(request.data?.joinUrl);
+  const ref = db.collection('appointments').doc(appointmentId);
+  const snapshot = await ref.get();
+  if (!snapshot.exists || snapshot.get('visitMode') !== 'video') throw publicError('not-found', 'Online appointment not found.');
+  const appointment = snapshot.data();
+  if (role === 'doctor' && appointment.doctorId !== request.auth.token.doctorId) throw publicError('permission-denied', 'You can only prepare access for your own appointments.');
+  if (!isActiveAppointment(appointment.status)) throw publicError('failed-precondition', 'Video access cannot be changed after the appointment is closed.');
+  const videoConsultation = joinUrl
+    ? { status: 'ready', joinUrl, preparedBy: request.auth.uid, preparedAt: admin.firestore.FieldValue.serverTimestamp() }
+    : { status: 'awaiting_link', clearedBy: request.auth.uid, clearedAt: admin.firestore.FieldValue.serverTimestamp() };
+  await ref.set({ videoConsultation, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection('auditLogs').add({ at: admin.firestore.FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role }, action: joinUrl ? 'video_access_prepared' : 'video_access_cleared', resource: { type: 'appointment', id: appointmentId }, meta: { visitMode: 'video' } });
+  return { message: joinUrl ? 'Secure video access is ready for the patient.' : 'Video access was cleared.' };
 });
 
 // All appointment lifecycle changes happen on the trusted server. Browser clients
@@ -613,6 +887,102 @@ exports.cancelPatientAppointment = onCall({ region: 'asia-south1', timeoutSecond
     transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: request.auth.uid, role: 'patient' }, action: 'appointment_cancelled', resource: { type: 'appointment', id: ref.id }, meta: { source: 'patient_portal' } });
   });
   return { ok: true, status: 'cancelled' };
+});
+
+// Patients may move an eligible future appointment, but all availability and
+// slot ownership decisions remain on the trusted server.
+exports.reschedulePatientAppointment = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+  if (!request.auth || isStaffRole(request.auth.token.role)) throw publicError('permission-denied', 'Sign in to reschedule your appointment.');
+  const appointmentId = trimmed(request.data?.appointmentId, 200);
+  const dateKey = trimmed(request.data?.dateKey, 10);
+  const time = trimmed(request.data?.time, 5);
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(appointmentId) || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw publicError('invalid-argument', 'Choose a valid new appointment time.');
+
+  const config = bookingConfig(await db.collection('clinic').doc('publicConfig').get());
+  const ref = db.collection('appointments').doc(appointmentId);
+  const initial = await ref.get();
+  if (!initial.exists) throw publicError('not-found', 'Appointment not found.');
+  const initialAppointment = initial.data();
+  if (!canPatientCancel({ appointment: initialAppointment, uid: request.auth.uid, cutoffHours: config.patientCancellationCutoffHours })) throw publicError('failed-precondition', 'This appointment can no longer be changed online. Please contact the clinic.');
+  const context = await availabilityContext({ doctorId: initialAppointment.doctorId, dateKey, visitTypeId: initialAppointment.visitType });
+  const availableSlots = buildAvailability({ doctorId: initialAppointment.doctorId, dateKey, weeklySessions: context.weeklySessions, exception: context.exception, durationMinutes: context.visitType.minutes, intervalMinutes: context.config.intervalMinutes, bufferBeforeMinutes: context.config.bufferBeforeMinutes, bufferAfterMinutes: context.config.bufferAfterMinutes, leadMinutes: context.config.leadMinutes, bookingWindowDays: context.config.bookingWindowDays, busyRanges: context.busyRanges });
+  const requested = availableSlots.find((slot) => slot.time === time);
+  if (!requested) throw publicError('failed-precondition', 'That time is no longer available. Please choose another slot.');
+  const newSlotRef = db.collection('appointmentSlots').doc(makeSlotId(initialAppointment.doctorId, dateKey, time));
+  let result;
+  await db.runTransaction(async (transaction) => {
+    const [snapshot, newSlot] = await Promise.all([transaction.get(ref), transaction.get(newSlotRef)]);
+    if (!snapshot.exists) throw publicError('not-found', 'Appointment not found.');
+    const appointment = snapshot.data();
+    if (!canPatientCancel({ appointment, uid: request.auth.uid, cutoffHours: config.patientCancellationCutoffHours })) throw publicError('failed-precondition', 'This appointment can no longer be changed online. Please contact the clinic.');
+    const existingSlotIds = Array.isArray(appointment.slotIds) && appointment.slotIds.length ? appointment.slotIds : (appointment.slotId ? [appointment.slotId] : []);
+    if (existingSlotIds.includes(newSlotRef.id)) throw publicError('failed-precondition', 'Choose a different appointment time.');
+    if (newSlot.exists) throw publicError('already-exists', 'That time has just been booked. Please choose another slot.');
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    existingSlotIds.forEach((slotId) => transaction.delete(db.collection('appointmentSlots').doc(slotId)));
+    transaction.set(newSlotRef, { doctorId: appointment.doctorId, dateKey, startsAt: admin.firestore.Timestamp.fromDate(requested.startsAt), endsAt: admin.firestore.Timestamp.fromDate(requested.endsAt), appointmentId: ref.id, status: 'booked', createdAt: now });
+    transaction.update(ref, { dateKey, startsAt: admin.firestore.Timestamp.fromDate(requested.startsAt), endsAt: admin.firestore.Timestamp.fromDate(requested.endsAt), slotIds: [newSlotRef.id], updatedAt: now, externalCalendar: { ...(appointment.externalCalendar || {}), syncStatus: appointment.externalCalendar?.eventId ? 'pending' : 'not_connected' } });
+    transaction.set(ref.collection('events').doc(), { from: appointment.status, to: appointment.status, byUid: request.auth.uid, byRole: 'patient', at: now, meta: { action: 'rescheduled', fromDateKey: appointment.dateKey, toDateKey: dateKey, toTime: time } });
+    transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: request.auth.uid, role: 'patient' }, action: 'appointment_rescheduled', resource: { type: 'appointment', id: ref.id }, meta: { fromDateKey: appointment.dateKey, toDateKey: dateKey } });
+    result = { appointmentId: ref.id, dateKey, time, status: appointment.status };
+  });
+
+  // Calendar synchronization is a mirror of the clinic's appointment record;
+  // a transient Google failure never rolls back a successfully reserved slot.
+  try {
+    const appointment = (await ref.get()).data();
+    if (appointment.externalCalendar?.eventId) {
+      const connection = await calendarConnection(appointment.doctorId);
+      if (connection) {
+        const { accessToken, calendarId } = await calendarAccess(connection);
+        await updateEventTime({ accessToken, calendarId, eventId: appointment.externalCalendar.eventId, startsAt: asDate(appointment.startsAt).toISOString(), endsAt: asDate(appointment.endsAt).toISOString() });
+        await ref.set({ externalCalendar: { ...appointment.externalCalendar, syncStatus: 'synced', lastSyncedAt: admin.firestore.FieldValue.serverTimestamp() }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+      }
+    }
+  } catch (_error) {
+    await ref.set({ externalCalendar: { provider: 'google', syncStatus: 'pending', lastSyncError: 'Calendar event could not be updated.' }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  }
+  return { ok: true, ...result };
+});
+
+// Closing a day must be deliberate: staff first preview affected appointments,
+// then explicitly keep them or cancel every appointment they are permitted to cancel.
+exports.closeDay = onCall({ region: 'asia-south1', timeoutSeconds: 60, memory: '256MiB' }, async (request) => {
+  const role = ROLE[request.auth?.token?.role];
+  const { doctorId, dateKey, mode = 'preview', action = 'keep', reason } = request.data || {};
+  if (!role || !['admin', 'doctor'].includes(role)) throw publicError('permission-denied', 'Administrator or doctor access is required.');
+  if (!isDoctorId(doctorId) || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || '')) || !['preview', 'apply'].includes(mode) || !['keep', 'cancel'].includes(action)) throw publicError('invalid-argument', 'Choose a valid clinic day action.');
+  if (role === 'doctor' && request.auth.token.doctorId !== doctorId) throw publicError('permission-denied', 'You can only close your own clinic day.');
+  const closeReason = trimmed(reason, 300);
+  if (mode === 'apply' && action === 'cancel' && !closeReason) throw publicError('invalid-argument', 'A cancellation reason is required.');
+  const appointments = (await db.collection('appointments').where('doctorId', '==', doctorId).where('dateKey', '==', dateKey).get()).docs
+    .map((snapshot) => ({ ref: snapshot.ref, id: snapshot.id, ...snapshot.data() }))
+    .filter((appointment) => isActiveAppointment(appointment.status));
+  const summary = appointments.map((appointment) => ({ id: appointment.id, reference: appointment.reference || null, status: appointment.status, startsAt: asDate(appointment.startsAt)?.toISOString() || null, canCancel: canTransition(appointment.status, 'cancelled', role) }));
+  if (mode === 'preview') return { doctorId, dateKey, appointments: summary };
+  if (appointments.length > 100) throw publicError('failed-precondition', 'This day has too many appointments to close at once. Please contact clinic support.');
+  if (action === 'cancel' && appointments.some((appointment) => !canTransition(appointment.status, 'cancelled', role))) throw publicError('failed-precondition', 'Some appointments cannot be cancelled by your role. Keep them or ask an administrator to close the day.');
+  const exceptionRef = db.collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`);
+  await db.runTransaction(async (transaction) => {
+    const currentAppointments = await Promise.all(appointments.map((appointment) => transaction.get(appointment.ref)));
+    await transaction.get(exceptionRef);
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    transaction.set(exceptionRef, { doctorId, dateKey, type: 'closed', sessions: [], note: closeReason || null, updatedAt: now, updatedBy: request.auth.uid }, { merge: true });
+    currentAppointments.forEach((snapshot) => {
+      if (!snapshot.exists) return;
+      const appointment = snapshot.data();
+      if (!isActiveAppointment(appointment.status)) return;
+      if (action === 'cancel') {
+        if (!canTransition(appointment.status, 'cancelled', role)) throw publicError('failed-precondition', 'An appointment changed and cannot be cancelled by your role. Review the day again.');
+        transaction.update(snapshot.ref, { status: 'cancelled', cancellation: { byUid: request.auth.uid, byRole: role, reason: closeReason, at: now }, updatedAt: now });
+        const slotIds = Array.isArray(appointment.slotIds) && appointment.slotIds.length ? appointment.slotIds : (appointment.slotId ? [appointment.slotId] : []);
+        slotIds.forEach((slotId) => transaction.delete(db.collection('appointmentSlots').doc(slotId)));
+        transaction.set(snapshot.ref.collection('events').doc(), { from: appointment.status, to: 'cancelled', byUid: request.auth.uid, byRole: role, reason: closeReason, at: now, meta: { source: 'close_day', dateKey } });
+      }
+    });
+    transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: request.auth.uid, role }, action: 'clinic_day_closed', resource: { type: 'schedule_exception', id: exceptionRef.id }, meta: { doctorId, dateKey, action, affectedAppointments: appointments.length } });
+  });
+  return { ok: true, doctorId, dateKey, action, affectedAppointments: appointments.length };
 });
 
 // --- Google Calendar connection -------------------------------------------
