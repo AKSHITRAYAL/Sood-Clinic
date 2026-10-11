@@ -1,15 +1,15 @@
-const STAFF_ROLES = Object.freeze(['admin', 'doctor', 'receptionist']);
+const STAFF_ROLES = Object.freeze(['admin', 'doctor', 'manager']);
 
 const isStaffRole = (value) => STAFF_ROLES.includes(value);
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 const isEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 const isDoctorId = (value) => /^[A-Za-z0-9_-]{2,80}$/.test(String(value || ''));
 
-// Firebase Authentication has its own password policy. This local gate provides a
-// conservative baseline for administrator-created temporary credentials.
+// Firebase Authentication has its own password policy. This local gate keeps
+// administrator-created credentials consistent with the patient portal policy.
 const isStrongTemporaryPassword = (value) => {
   const password = String(value || '');
-  return password.length >= 12 && /[A-Za-z]/.test(password) && /\d/.test(password);
+  return password.length >= 8 && /[A-Z]/.test(password) && /[a-z]/.test(password) && /\d/.test(password) && /[!@#$]/.test(password);
 };
 
 const staffClaims = ({ existingClaims = {}, role, doctorId, forcePasswordChange = false }) => {

@@ -1,6 +1,14 @@
-export const passwordPolicyMessage = 'Use at least 12 characters, including a letter and a number.';
+export const passwordPolicyMessage = 'Use at least 8 characters with an uppercase letter, lowercase letter, number, and one of ! @ # $.';
 
-export const hasStrongPassword = (value) => {
+export const passwordRequirements = (value) => {
   const password = String(value || '');
-  return password.length >= 12 && /[A-Za-z]/.test(password) && /\d/.test(password);
+  return {
+    minimumLength: password.length >= 8,
+    uppercase: /[A-Z]/.test(password),
+    lowercase: /[a-z]/.test(password),
+    number: /\d/.test(password),
+    special: /[!@#$]/.test(password),
+  };
 };
+
+export const hasStrongPassword = (value) => Object.values(passwordRequirements(value)).every(Boolean);

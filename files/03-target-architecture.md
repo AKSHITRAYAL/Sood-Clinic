@@ -20,7 +20,7 @@ This is the design the backlog (`04-backlog.md`) builds toward. It fixes the fin
 |---|---|---|
 | Firebase site id | `sood-clinic` (existing) | `sood-clinic-staff` (new) |
 | Custom domain | `https://<clinicdomain>` (+ `www` → redirect) | `https://staff.<clinicdomain>` |
-| Contains | marketing pages, booking, login, patient portal | admin, doctor, reception workspaces, staff account |
+| Contains | marketing pages, booking, login, patient portal | admin, doctor, manager workspaces, staff account |
 | Robots | indexable (except `/login`, `/patient/*`) | `noindex` on everything, `X-Robots-Tag: noindex` |
 | Analytics | public marketing pages only, after consent | none |
 | CSP | allows Maps embed, fonts if not self-hosted | strict, no third-party scripts, no framing |
@@ -43,7 +43,7 @@ Frontend/
     services/   bookingService.js appointmentService.js patientService.js
                 scheduleService.js staffService.js …   # ONLY place that calls Firestore/Functions
     hooks/      useAuthClaims.js useAvailability.js useAppointments.js …
-    features/   booking/ patient-portal/ reception/ doctor/ admin/ auth/   # screens (container + view)
+    features/   booking/ patient-portal/ manager/ doctor/ admin/ auth/   # screens (container + view)
     ui/         Button Field Card Badge Modal Table Toast … # design-system components (UI phase)
     styles/     tokens.css  base.css
 ```
@@ -68,11 +68,11 @@ Requests to `/staff*` on the public site 301 to the staff domain.
 
 ## 3. Roles and permission matrix
 
-Roles: **public** (no auth), **patient** (authenticated, no staff claim), **reception**, **doctor**, **admin**. Claims: `role`; doctor also `doctorId` (must equal the record's `doctorId` for doctor-scoped access).
+Roles: **public** (no auth), **patient** (authenticated, no staff claim), **manager**, **doctor**, **admin**. Claims: `role`; doctor also `doctorId` (must equal the record's `doctorId` for doctor-scoped access).
 
 `R` read, `W` write via rules, `C` via callable only, `—` none.
 
-| Resource | public | patient | reception | doctor | admin |
+| Resource | public | patient | manager | doctor | admin |
 |---|---|---|---|---|---|
 | `clinic/publicConfig`, `clinic/profile`, `branches`, `departments`, `doctors` | R | R | R | R | R/W |
 | `clinic/settings` | — | — | — | — | R/W |
@@ -105,15 +105,15 @@ Use snake_case values. Migrate old `checked-in` → `checked_in`.
 
 | From → To | Who | Conditions |
 |---|---|---|
-| (create) → `scheduled` | public/patient (via `createBooking`), reception/doctor/admin (`createStaffAppointment`) | slot free; within booking window; not in the past |
-| `scheduled` → `confirmed` | reception, admin, doctor; or auto (setting `autoConfirm`) | |
-| `scheduled`/`confirmed` → `checked_in` | reception, admin | same IST day |
+| (create) → `scheduled` | public/patient (via `createBooking`), manager/doctor/admin (`createStaffAppointment`) | slot free; within booking window; not in the past |
+| `scheduled` → `confirmed` | manager, admin, doctor; or auto (setting `autoConfirm`) | |
+| `scheduled`/`confirmed` → `checked_in` | manager, admin | same IST day |
 | `checked_in` → `in_consultation` | doctor | |
 | `in_consultation` → `completed` | doctor | writes/links a visit record when clinical module exists |
-| `scheduled`/`confirmed` → `cancelled` | patient (until cutoff, setting `cancelCutoffHours`), reception, doctor, admin | **`reason` required**; frees slot if in the future |
-| `checked_in` → `cancelled` | reception, admin | patient left; reason required |
-| `scheduled`/`confirmed` → `no_show` | reception, admin, system job | `now > startsAt + graceMinutes` |
-| `scheduled`/`confirmed` reschedule | patient (until cutoff), reception, doctor, admin | new slot free; old slot released; event `rescheduled` |
+| `scheduled`/`confirmed` → `cancelled` | patient (until cutoff, setting `cancelCutoffHours`), manager, doctor, admin | **`reason` required**; frees slot if in the future |
+| `checked_in` → `cancelled` | manager, admin | patient left; reason required |
+| `scheduled`/`confirmed` → `no_show` | manager, admin, system job | `now > startsAt + graceMinutes` |
+| `scheduled`/`confirmed` reschedule | patient (until cutoff), manager, doctor, admin | new slot free; old slot released; event `rescheduled` |
 
 Every transition writes `appointments/{id}/events/{eventId}` = `{ from, to, byUid, byRole, at (serverTimestamp), reason?, meta? }` and an `auditLogs` entry, and may enqueue a notification.
 
@@ -145,7 +145,7 @@ doctors/{doctorId}       { branchId, departmentIds[], name, qualification, regis
 doctorSchedules/{doctorId}    { doctorId, slotMinutes?, sessions:[{weekday:0-6, start:'HH:mm', end:'HH:mm'}], updatedAt, updatedBy }
 scheduleExceptions/{doctorId}_{dateKey}  { doctorId, dateKey, type:'closed'|'extra'|'replace', sessions:[{start,end}], note, createdBy, createdAt }
 appointments/{id}        { reference:'SC-8XKQ2M', doctorId, branchId, departmentId, visitType, startsAt, endsAt, dateKey,
-                           status, source:'web'|'reception'|'walk_in'|'phone', tokenNumber?,
+                           status, source:'web'|'manager'|'walk_in'|'phone', tokenNumber?, phoneKey:E.164,
                            patientId, patientSnapshot:{name,phone,sex?,ageYears?}, reason?, 
                            cancel?:{byRole,reason,at}, consent?:{version,acceptedAt},
                            createdBy:{uid|null,role}, createdAt, updatedAt }
@@ -173,17 +173,17 @@ staffProfiles/{uid}      { uid, email, name, role, active, updatedAt, updatedBy 
 
 ### 5.1 Rules design (write tests first)
 
-- Helpers: `isSignedIn()`, `role()`, `isAdmin()`, `isDoctor()`, `isReception()`, `isStaff()`, `isDoctorOf(doctorId)` (`token.role=='doctor' && token.doctorId==doctorId`), `isLinkedPatient(patientDoc)`.
+- Helpers: `isSignedIn()`, `role()`, `isAdmin()`, `isDoctor()`, `isManager()`, `isStaff()`, `isDoctorOf(doctorId)` (`token.role=='doctor' && token.doctorId==doctorId`), `isLinkedPatient(patientDoc)`.
 - `appointments`, `appointmentSlots`, `auditLogs`, `notifications`, `counters`, `events`: `allow write: if false` (Admin SDK bypasses rules).
 - `appointments` read: owner (`patientId` in the caller's linked patients — implement by storing `patientUids: [uid]` on the appointment at creation, so rules need no cross-document lookups), staff, doctor of that `doctorId`.
 - `doctorSchedules`, `scheduleExceptions`: write only admin/own doctor **and** validate shape (`sessions` is a list of maps with `weekday` 0–6 and `HH:mm` strings; `type` in enum; `dateKey` matches doc id; `doctorId` matches path).
-- `patients`: reception/admin create+update via callable only (UHID allocation); patient may update an allow-listed subset (`name`, `altPhone`, `email`, `address`, `bloodGroup`) of a patient they are linked to; no client delete.
-- `visits`, `prescriptions`, `documents`: role-scoped per §3, `visits` never readable by reception, patients only when `publishedToPatient == true`.
+- `patients`: manager/admin create+update via callable only (UHID allocation); patient may update an allow-listed subset (`name`, `altPhone`, `email`, `address`, `bloodGroup`) of a patient they are linked to; no client delete.
+- `visits`, `prescriptions`, `documents`: role-scoped per §3, `visits` never readable by manager, patients only when `publishedToPatient == true`.
 - Each rule needs positive and negative emulator tests (`08` §3).
 
 ### 5.2 Indexes (must be in `firestore.indexes.json`)
 
-- `appointments`: (`doctorId`,`dateKey`,`startsAt`) · (`dateKey`,`startsAt`) · (`status`,`dateKey`,`startsAt`) · (`patientUids` array-contains, `startsAt` desc)
+- `appointments`: (`doctorId`,`dateKey`,`startsAt`) · (`dateKey`,`startsAt`) · (`status`,`dateKey`,`startsAt`) · (`phoneKey`,`status`,`startsAt`) · (`patientUids` array-contains, `startsAt` desc)
 - `appointmentSlots`: (`doctorId`,`dateKey`)
 - `patients`: (`linkedUids` array-contains) — single-field (auto); `phone`, `nameLower` — single-field (auto)
 - `invoices`: (`patientId`,`createdAt` desc), (`status`,`createdAt` desc)
@@ -201,12 +201,12 @@ Conventions: input validated field by field (reject unknown fields); IST via `li
 | `cancelAppointment` | patient/guest/staff | `{appointmentId|reference, reason, phone?}` | Patient until `cancelCutoffHours`. Frees slot. |
 | `rescheduleAppointment` | patient/guest/staff | `{appointmentId|reference, dateKey, time, phone?}` | Same appointment id; swap slot atomically; event `rescheduled`. |
 | `transitionAppointment` | staff | `{appointmentId, to, reason?}` | Enforces §4.2 per role. |
-| `createStaffAppointment` | reception/doctor/admin | `{patientId | newPatient, doctorId, dateKey, time | walkIn:true, visitType, reason?, source}` | Walk-in: `tokenNumber` from `counters/token-{dateKey}`, `startsAt=now`, no slot. |
-| `registerPatient` | reception/admin | patient fields → `{patientId, uhid}` | Duplicate check; allocates UHID transactionally. |
+| `createStaffAppointment` | manager/doctor/admin | `{patientId | newPatient, doctorId, dateKey, time | walkIn:true, visitType, reason?, source}` | Walk-in: `tokenNumber` from `counters/token-{dateKey}`, `startsAt=now`, no slot. |
+| `registerPatient` | manager/admin | patient fields → `{patientId, uhid}` | Duplicate check; allocates UHID transactionally. |
 | `closeDay` | doctor/admin | `{doctorId, dateKey, mode:'preview'|'apply', reason, action:'cancel'|'keep'}` | `preview` returns affected appointments; `apply` writes the exception and (if chosen) cancels + notifies. |
 | `manageStaffAccount` | admin | existing actions + `invite` | Changes: `provision` refuses existing staff accounts; `invite` sends a password-set link instead of typing a temp password; `disable` and `role` call `revokeRefreshTokens`; last-admin and self-demotion guards; audit entries; strong-password policy. |
 | `finalizeVisit` (P2) | doctor | `{visitId}` | Locks note (`lockedAt`), audit. |
-| `createInvoice`, `recordPayment` (P2) | reception/admin | … | Sequential invoice numbers per financial year. |
+| `createInvoice`, `recordPayment` (P2) | manager/admin | … | Sequential invoice numbers per financial year. |
 | `sendReminders` | schedule (every 15 min) | — | Enqueue reminders at `reminderOffsetsHours`. |
 | `processNotification` | Firestore trigger on `notifications` create | — | Provider adapter, retries/backoff, idempotent by doc id. |
 | `markNoShows` | schedule (nightly) | — | Optional; per `graceMinutes`. |
@@ -235,7 +235,7 @@ Unit tests must cover: Sunday closed by default, extra Sunday, closed weekday, r
 
 ## 9. Files (Storage)
 
-`storage.rules` (new): `patients/{patientId}/documents/{docId}` — read: doctor; owning linked patient if `visibleToPatient`; write: doctor, reception (upload), owning patient (upload); limits: ≤ 10 MB, `application/pdf`, `image/jpeg`, `image/png`; a matching Firestore metadata doc must exist. Downloads via short-lived URLs. No public buckets.
+`storage.rules` (new): `patients/{patientId}/documents/{docId}` — read: doctor; owning linked patient if `visibleToPatient`; write: doctor, manager (upload), owning patient (upload); limits: ≤ 10 MB, `application/pdf`, `image/jpeg`, `image/png`; a matching Firestore metadata doc must exist. Downloads via short-lived URLs. No public buckets.
 
 ## 10. Audit and observability
 

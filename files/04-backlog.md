@@ -40,14 +40,14 @@ How to use: pick the lowest-numbered unblocked task, do it, tick the box, fix an
   - Move project to Blaze with budget alerts; confirm Firestore location (India preferred; record it in `01`); enable PITR and scheduled backups; set Functions runtime to `nodejs22` (or 24) after checking Google's runtime-support page; create `sood-clinic-staging` project and `.firebaserc` alias.
   - **Accept:** checklist in the PR with console screenshots/values; `firebase deploy --only functions --project staging` works.
 
-- [ ] **P0-06 Deploy pipeline, indexes, headers, listener errors** — *implementation complete; deploy verification pending; fixes BUG-06, BUG-07, SEC-06*; depends on P0-00
+- [x] **P0-06 Deploy pipeline, indexes, headers, listener errors** — *deployed; fixes BUG-06, BUG-07, SEC-06*; depends on P0-00
   - Added appointment indexes, hosting CSP/security headers, patient listener error handling, and a coordinated-release README command.
   - **Pending:** deploy rules/indexes/hosting, check live response headers and confirm a fresh Doctor calendar receives its composite index; do not tick until then.
 
 - [ ] **P0-04 Rules hardening + App Check + tests** — *fixes SEC-01/02/04/12 (with P0-02)*; depends on P0-00
-  - Implement `03 §5.1`: no client writes to `appointments`, `appointmentSlots`, `auditLogs`, `notifications`, `counters`; reception cannot read `medicalHistory/visits/documents`; `patients` field allow-list; schedule shape validation.
+  - Implement `03 §5.1`: no client writes to `appointments`, `appointmentSlots`, `auditLogs`, `notifications`, `counters`; manager cannot read `medicalHistory/visits/documents`; `patients` field allow-list; schedule shape validation.
   - Enable App Check (reCAPTCHA Enterprise or v3) in the web app and enforce on Firestore and Functions; restrict the browser API key by referrer (console step, document it).
-  - **Accept:** full permission-matrix test suite (`03 §3`) green; a scripted anonymous write to `appointments` is denied; a receptionist read of `patients/*/medicalHistory` is denied.
+  - **Accept:** full permission-matrix test suite (`03 §3`) green; a scripted anonymous write to `appointments` is denied; a manager read of `patients/*/medicalHistory` is denied.
 
 - [ ] **P0-02 Server-side booking (`getAvailability`, `createBooking`) and new slot model** — *fixes BUG-02, BUG-04, BUG-19, SEC-01*; depends on P0-05, P0-01, P0-04
   - Implement `03 §4.3`, `§6`, `§7` (availability engine as a pure, unit-tested module). Public booking page switches to the callable; remove direct Firestore writes; success screen shows the server `reference`.
@@ -55,11 +55,11 @@ How to use: pick the lowest-numbered unblocked task, do it, tick the box, fix an
   - **Accept:** function tests: normal booking; double-book race (two parallel calls → one success, one `SLOT_TAKEN`); past time, closed day, outside window, invalid phone, missing consent rejected; book → cancel → rebook works; no client can write appointment/slot docs.
 
 - [ ] **P0-03 Appointment state machine and `transitionAppointment`** — *fixes BUG-03, SEC-03*; depends on P0-02
-  - Implement `03 §4.1–4.2` in `functions/lib/stateMachine.js` and a mirrored `allowedTransitions(status, role)` in the frontend (shared test vectors). Events subcollection. Doctor/Reception/Admin screens call the callable and render legal actions only. Fix counts (exclude cancelled).
+  - Implement `03 §4.1–4.2` in `functions/lib/stateMachine.js` and a mirrored `allowedTransitions(status, role)` in the frontend (shared test vectors). Events subcollection. Doctor/Manager/Admin screens call the callable and render legal actions only. Fix counts (exclude cancelled).
   - Add `cancelAppointment` and `rescheduleAppointment`.
   - **Accept:** transition table test (every legal/illegal pair per role); check-in → in_consultation → completed flow works end-to-end; cancel requires a reason and frees the slot; `no_show` only after start+grace.
 
-- [ ] **P0-09 Remove dead code** — *fixes BUG-04, SEC-10, ENG-06*; depends on P0-02
+- [x] **P0-09 Remove dead code** — *deployed; fixes BUG-04, SEC-10, ENG-06*; depends on P0-02
   - Delete `clinicApi`, Express/CORS deps, unused seed data paths that the new model does not use (keep a **new** seed for `clinic/*`, `doctors`, `doctorSchedules`), `.env.example` proxy text, dead CSS blocks (`01` §7), unused Tailwind colours.
   - **Accept:** build size decreases; no references to removed symbols; README updated.
 
@@ -79,7 +79,7 @@ How to use: pick the lowest-numbered unblocked task, do it, tick the box, fix an
 
 - [ ] **P1-REG Patient registry** — depends on P0-04, P1-CONFIG
   - `registerPatient`, UHID counter, dedupe rules (`03 §5`), staff search (phone exact / `nameLower` prefix), patient detail page skeleton (demographics + appointment history), patient claim/link flow.
-  - **Accept:** create patient at reception, find by phone and name prefix, duplicates flagged, UHID sequential under parallel creates.
+  - **Accept:** create patient at manager, find by phone and name prefix, duplicates flagged, UHID sequential under parallel creates.
 
 - [ ] **P1-BOOK Booking v2** — *fixes UX-01, BUG-13*; depends on P0-02, P1-REG
   - Steps: choose date/time → your details (name, phone with validation, sex, age/DOB, email optional, new/follow-up, reason) → review + consent (versioned text) → success page with reference, add-to-calendar, cancel/reschedule link. Live/refreshable availability from `getAvailability`; skeleton while loading; explicit "slot just taken" recovery that keeps entered details.
@@ -89,9 +89,9 @@ How to use: pick the lowest-numbered unblocked task, do it, tick the box, fix an
   - Exception types `closed | extra | replace` with clear labels; multiple sessions per day; list/edit/delete upcoming exceptions; `closeDay` preview/apply with reschedule-or-cancel of affected appointments; leave/holiday calendar; slot length per doctor/visit type.
   - **Accept:** closing a day with 3 bookings shows them, forces a decision, and sends notifications; copy matches behaviour.
 
-- [ ] **P1-RECEPTION Reception workspace v2** — *fixes BUG-14, UX-03*; depends on P0-03, P1-REG
+- [ ] **P1-MANAGER Manager workspace v2** — *fixes BUG-14, UX-03*; depends on P0-03, P1-REG
   - Today-first view (bounded by `dateKey`), waiting list/queue with tokens, walk-in registration + `createStaffAppointment`, book-on-behalf with correct `source`, search, printable day sheet, quick actions by legal transitions, cancel with reason.
-  - **Accept:** a receptionist can run a clinic day without leaving the page; read counts stay bounded (verify listener queries).
+  - **Accept:** a manager can run a clinic day without leaving the page; read counts stay bounded (verify listener queries).
 
 - [ ] **P1-DOCTOR Doctor workspace v2** — depends on P0-03, P1-REG
   - Today's patient list in queue order, "call next / start / complete", patient summary panel (demographics, past visits list), calendar for week planning (fix week logic), exceptions via P1-AVAIL.
@@ -137,7 +137,7 @@ How to use: pick the lowest-numbered unblocked task, do it, tick the box, fix an
 
 - [ ] **P2-CLINICAL Consultation record and prescriptions** — *SEC-08*; depends on P1-DOCTOR
   - `visits` (complaints, history, examination, vitals, diagnosis, advice, follow-up), autosave drafts, `finalizeVisit` lock, addenda instead of edits after lock; prescriptions with drug list templates; **printable prescription PDF on letterhead** (client-side print stylesheet first); follow-up date creates a reminder; patient sees only `publishedToPatient` summaries.
-- [ ] **P2-FILES Documents and reports** — Storage rules per `03 §9`; upload from reception/patient/doctor; category, visibility flag; download via signed URLs; size/type limits.
+- [ ] **P2-FILES Documents and reports** — Storage rules per `03 §9`; upload from manager/patient/doctor; category, visibility flag; download via signed URLs; size/type limits.
 - [ ] **P2-BILLING Billing and payments** — fee schedule (config), invoice numbers per financial year, receipt PDF, cash/UPI/card, optional online payment (D-05), daily collection report and day-close.
 - [ ] **P2-REPORTS Admin reports and settings** — visits per day/month, no-show rate, cancellations, revenue, busiest slots; settings screen for `clinic/settings` and `clinic/profile`.
 - [ ] **P2-GASTRO Gastroenterology workflow** (client-specific, D-08) — procedure scheduling (endoscopy/colonoscopy) with longer slots and prep instructions, procedure consent forms, pathology/biopsy result tracking, follow-up recalls.
@@ -152,7 +152,7 @@ How to use: pick the lowest-numbered unblocked task, do it, tick the box, fix an
 - [ ] **P3-SEO** — prerender/static-generate public pages, unique titles/descriptions, Open Graph, JSON-LD `MedicalClinic`/`Physician`, `sitemap.xml`, `robots.txt`, canonical, Google Business Profile linked; `noindex` for patient/staff/login. *Fixes SEO-01.*
 - [ ] **P3-PERF** — self-host fonts (`font-display: swap`), responsive WebP/AVIF images with `srcset`, self-hosted favicon set, lazy images; Lighthouse targets ≥ 90 mobile on public pages. *Fixes PERF-02.*
 - [ ] **P3-A11Y** — pass WCAG 2.2 AA on public and staff: carousel pause/remove, focus management, `aria-pressed`/`aria-describedby`, `:focus-visible`, contrast, reduced motion, keyboard-only booking. *Fixes A11Y-01.* (Design-side items are in `06` §6.)
-- [ ] **P3-E2E** — Playwright e2e against emulators: booking, cancel, reception day, doctor flow, patient portal.
+- [ ] **P3-E2E** — Playwright e2e against emulators: booking, cancel, manager day, doctor flow, patient portal.
 - [ ] **P3-DOMAIN** — custom domains (public + staff), DNS, email deliverability (SPF/DKIM/DMARC), Auth authorized domains, App Check site keys for the domains.
 - [ ] **P3-MONITORING** — error-rate and latency alerts, uptime checks, budget alerts, log-based metrics without PHI.
 - [ ] **P3-I18N** (if D-09) — Hindi (and/or Punjabi) UI strings for public site and booking.

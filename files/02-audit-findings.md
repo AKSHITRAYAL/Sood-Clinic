@@ -32,7 +32,7 @@ Baseline: commit `76477ff`, 2026-09-30. Facts about the current code are in `01-
 - **Task:** P0-02.
 
 ### BUG-03 [P0] Appointment status workflow dead-ends — Confirmed
-- **Where:** `ReceptionWorkspace.jsx` sets `confirmed` / `checked-in`; `DoctorSchedule.jsx` and `StaffAdmin.jsx` only show Complete/Cancel when `status === 'scheduled'`.
+- **Where:** `ManagerWorkspace.jsx` sets `confirmed` / `checked-in`; `DoctorSchedule.jsx` and `StaffAdmin.jsx` only show Complete/Cancel when `status === 'scheduled'`.
 - **Problems:** after check-in nobody can complete the visit; no `no_show` or `in_consultation`; admin filter/metrics ignore confirmed/checked-in; doctor's "N scheduled" and week grid count cancelled appointments; status strings use a hyphen (`checked-in`) inconsistent with a normal enum.
 - **Fix:** single state machine (`03` §4) enforced by the `transitionAppointment` callable; shared `<StatusBadge>`/actions driven by allowed-transition data.
 - **Accept:** every state in the table is reachable and every UI shows only legal actions for the viewer's role; counts exclude cancelled.
@@ -81,7 +81,7 @@ Baseline: commit `76477ff`, 2026-09-30. Facts about the current code are in `01-
 - One `getDoc` per candidate slot per day change; initial render uses hard-coded `HOURS` until the schedule loads. **Fix:** one ranged query or a server `getAvailability`; show a skeleton until loaded. **Task:** P1-BOOK.
 
 ### BUG-14 [P2] Staff lists are unbounded — Confirmed
-- Reception, Admin and Doctor subscribe to **all appointments ever** (`orderBy startsAt`, no range/limit). Cost and render time grow forever; Reception's copy says "Today's schedule" but shows everything. **Fix:** date-bounded queries via `dateKey`, pagination for history. **Task:** P1-RECEPTION.
+- Manager, Admin and Doctor subscribe to **all appointments ever** (`orderBy startsAt`, no range/limit). Cost and render time grow forever; Manager's copy says "Today's schedule" but shows everything. **Fix:** date-bounded queries via `dateKey`, pagination for history. **Task:** P1-MANAGER.
 
 ### BUG-15 [P2] Patient portal small logic issues — Confirmed
 - Appointment counter includes cancelled; bookings made while signed out are never linked to a later account; the booking form is not pre-filled from the profile. **Task:** P1-PATIENT.
@@ -96,19 +96,19 @@ Baseline: commit `76477ff`, 2026-09-30. Facts about the current code are in `01-
 - `manageStaffAccount` with `action:'provision'` on an existing user resets their password and replaces their claims (including another admin's). **Fix:** refuse if the user already has a staff claim unless `action:'role'`; email invite flow instead of typed passwords. **Task:** P1-STAFFSEC.
 
 ### BUG-19 [P2] Booking "reference" is meaningless — Confirmed
-- Shows `id.slice(-10)` (e.g. `05_08-00`), not unique, not usable at reception. **Fix:** server-issued short reference (`SC-XXXXXX`). **Task:** P0-02.
+- Shows `id.slice(-10)` (e.g. `05_08-00`), not unique, not usable at manager. **Fix:** server-issued short reference (`SC-XXXXXX`). **Task:** P0-02.
 
 ---
 
 ## B. Security, privacy, compliance
 
 ### SEC-01 [P0] Unauthenticated writes with weak validation — Confirmed
-- Anyone can create `appointments` and `appointmentSlots`. Rules check shape only: `startsAt` is "a string" (any date, any time, Sundays, 2030, the past); `slotId` is unrelated to `startsAt`; unlimited volume from bots floods reception and fills the calendar.
+- Anyone can create `appointments` and `appointmentSlots`. Rules check shape only: `startsAt` is "a string" (any date, any time, Sundays, 2030, the past); `slotId` is unrelated to `startsAt`; unlimited volume from bots floods manager and fills the calendar.
 - **The slot lock is optional:** the `appointments` create rule does not require a matching slot doc to be created, so a client using a random appointment id and no slot doc bypasses the double-booking guard.
 - **Fix:** no client writes to these collections; `createBooking` callable with validation, transaction, rate limits and App Check. **Task:** P0-02, P0-04.
 
-### SEC-02 [P0] Receptionist can read medical history and documents — Confirmed
-- `isClinicStaff()` (includes receptionist) grants read on `patients/*/medicalHistory` and `medicalDocuments`. **Fix:** doctor (and owning patient where allowed) only; reception gets a minimal demographics view. **Task:** P0-04.
+### SEC-02 [P0] Manager can read medical history and documents — Confirmed
+- `isClinicStaff()` (includes manager) grants read on `patients/*/medicalHistory` and `medicalDocuments`. **Fix:** doctor (and owning patient where allowed) only; manager gets a minimal demographics view. **Task:** P0-04.
 
 ### SEC-03 [P1] Staff can edit any appointment field; no audit trail — Confirmed
 - Update rule only checks `doctorId`. `updatedBy` is set by the client. Slots updatable by any staff. **Fix:** status changes only via callable; server writes `events` subcollection and `auditLogs`. **Task:** P0-03, P1-AUDIT.
@@ -160,11 +160,11 @@ Baseline: commit `76477ff`, 2026-09-30. Facts about the current code are in `01-
 - **[P2]** No family/dependents (one phone commonly serves several patients).
 
 ### UX-03 Staff workspaces
-- **[P1]** Reception: no walk-in registration, no token/queue, no search by name/phone, no day sheet, "New booking" sends staff to the public page and tags it `patient_portal`.
+- **[P1]** Manager: no walk-in registration, no token/queue, no search by name/phone, no day sheet, "New booking" sends staff to the public page and tags it `patient_portal`.
 - **[P1]** No cancellation reason or patient notification on staff cancel.
 - **[P2]** Date exceptions: single window only, no delete/edit list, no upcoming-exceptions view.
 - **[P2]** Developer wording leaks into UI ("Check the administrator role assignment", "needs Blaze"). Show human messages; log details.
-- **[P2]** No filters/pagination/print on lists; no keyboard shortcuts for a reception desk.
+- **[P2]** No filters/pagination/print on lists; no keyboard shortcuts for a manager desk.
 - **[P1]** Admin has no reports, no clinic settings screen (rule exists, UI does not).
 
 ### UX-04 Public site content and trust

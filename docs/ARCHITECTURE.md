@@ -1,3 +1,4 @@
+Historical document, written before the Firebase functions migration; see `files/` for current docs.
 # Architecture
 
 ## Runtime model
@@ -38,7 +39,7 @@ The obsolete Express/Mongo `Backend/` implementation was deliberately removed. D
 | `/staff`, `/staff/login` | Staff entry and role-aware staff login |
 | `/staff/admin` | Admin operations workspace |
 | `/staff/doctor` | Doctor calendar and availability workspace |
-| `/staff/reception` | Reception appointment workspace |
+| `/staff/manager` | Manager appointment workspace |
 | `/staff/account` | Authenticated staff account/profile/password settings |
 
 `Frontend/src/App.jsx` is the authoritative route map. `Frontend/src/lib/firebase.js` explicitly sets `browserLocalPersistence`, so sessions survive browser refreshes.
@@ -50,7 +51,7 @@ The obsolete Express/Mongo `Backend/` implementation was deliberately removed. D
 - Staff authorization uses Firebase custom claims:
   - `role: "admin"`
   - `role: "doctor", doctorId: "brig-ak-sood"`
-  - `role: "receptionist"`
+  - `role: "manager"`
 - The browser must never set custom claims. The trusted script `functions/assign-staff-role.js` or the `manageStaffAccount` callable Function does that.
 - Password reset uses Firebase Authentication's `sendPasswordResetEmail`. Password changes in account settings reauthenticate the user before calling `updatePassword`.
 

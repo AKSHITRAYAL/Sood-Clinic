@@ -5,7 +5,7 @@ import StaffSessionGuard from '../components/StaffSessionGuard';
 
 const AccountSettings = lazy(() => import('../pages/AccountSettings'));
 const DoctorSchedule = lazy(() => import('../pages/DoctorSchedule'));
-const ReceptionWorkspace = lazy(() => import('../pages/ReceptionWorkspace'));
+const ManagerWorkspace = lazy(() => import('../pages/ManagerWorkspace'));
 const StaffAdmin = lazy(() => import('../pages/StaffAdmin'));
 const StaffAccess = lazy(() => import('../pages/StaffAccess'));
 const AdminPatients = lazy(() => import('../pages/AdminPatients'));
@@ -32,7 +32,7 @@ const StaffApp = () => <BrowserRouter><AppErrorBoundary staff><StaffSessionGuard
   <Route path="/staff/admin/visit-types" element={<AdminVisitTypes />} />
   <Route path="/staff/video" element={<VideoConsultations />} />
   <Route path="/staff/doctor" element={<DoctorSchedule />} />
-  <Route path="/staff/reception" element={<ReceptionWorkspace />} />
+  <Route path="/staff/manager" element={<ManagerWorkspace />} />
   <Route path="*" element={<Navigate to="/" replace />} />
 </Routes></Suspense></StaffSessionGuard></AppErrorBoundary></BrowserRouter>;
 

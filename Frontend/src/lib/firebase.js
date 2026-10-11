@@ -2,6 +2,7 @@ import { browserLocalPersistence, getAuth, setPersistence } from 'firebase/auth'
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
+import { initializeOptionalAppCheck } from './appCheck';
 
 // Firebase web configuration identifies this public web app; it is not a server secret.
 const firebaseConfig = {
@@ -15,6 +16,7 @@ const firebaseConfig = {
 };
 
 export const firebaseApp = initializeApp(firebaseConfig);
+initializeOptionalAppCheck(firebaseApp);
 export const firestore = getFirestore(firebaseApp);
 export const functions = getFunctions(firebaseApp, 'asia-south1');
 export const auth = getAuth(firebaseApp);

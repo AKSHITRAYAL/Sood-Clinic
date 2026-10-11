@@ -1,3 +1,4 @@
+Historical document, written before the Firebase functions migration; see `files/` for current docs.
 # Development and Deployment Runbook
 
 ## Prerequisites
@@ -55,7 +56,7 @@ CLINIC_STAFF_ROLE="admin" \
 npm run assign-staff-role
 ```
 
-Valid roles are `admin`, `doctor`, and `receptionist`. For the doctor, the script also assigns `doctorId: "brig-ak-sood"` by default. The user must sign out and sign in again afterward.
+Valid roles are `admin`, `doctor`, and `manager`. For the doctor, the script also assigns `doctorId: "brig-ak-sood"` by default. The user must sign out and sign in again afterward.
 
 ## Firebase Functions
 

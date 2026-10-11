@@ -36,7 +36,6 @@ const PublicApp = () => <BrowserRouter><AppErrorBoundary><Suspense fallback={<Ro
   <Route path="/patient/account" element={<PatientPortal view="profile" />} />
   <Route path="/patient/security" element={<PatientPortal view="security" />} />
   <Route path="/staff/*" element={<StaffRedirect />} />
-  <Route path="/doctor/schedule" element={<StaffRedirect />} />
   <Route path="*" element={<PublicNotFound />} />
 </Routes></Suspense></AppErrorBoundary></BrowserRouter>;
 

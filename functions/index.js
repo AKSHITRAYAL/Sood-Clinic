@@ -5,11 +5,12 @@ const admin = require('firebase-admin');
 const crypto = require('crypto');
 const { istDateKey, toIstParts, weekdayIst } = require('./lib/ist');
 const { buildAvailability, makeSlotId } = require('./lib/availability');
-const { buildAuthorizationUrl, createEvent, decrypt, encrypt, exchangeAuthorizationCode, freeBusy, refreshAccessToken, updateEventTime } = require('./lib/googleCalendar');
+const { buildAuthorizationUrl, createEvent, deleteEvent, decrypt, encrypt, exchangeAuthorizationCode, freeBusy, refreshAccessToken, updateEventTime } = require('./lib/googleCalendar');
 const { ROLE, canTransition } = require('./lib/stateMachine');
 const { isDoctorId, isEmail, isStaffRole, isStrongTemporaryPassword, normalizeEmail, staffClaims } = require('./lib/staffAccess');
 const { canPatientCancel } = require('./lib/appointmentPolicy');
 const { formatUhid, isUhid, normalizePatientName, normalizePhone } = require('./lib/patientRegistry');
+const { toE164 } = require('./lib/phone');
 
 admin.initializeApp();
 setGlobalOptions({ region: 'asia-south1', maxInstances: 10 });
@@ -18,21 +19,27 @@ const db = admin.firestore();
 const GOOGLE_CALENDAR_CLIENT_ID = defineSecret('GOOGLE_CALENDAR_CLIENT_ID');
 const GOOGLE_CALENDAR_CLIENT_SECRET = defineSecret('GOOGLE_CALENDAR_CLIENT_SECRET');
 const GOOGLE_CALENDAR_TOKEN_KEY = defineSecret('GOOGLE_CALENDAR_TOKEN_KEY');
+const callableOptions = { region: 'asia-south1', enforceAppCheck: process.env.ENFORCE_APP_CHECK === 'true' };
+const assertPasswordChanged = (request) => {
+  if (request.auth?.token?.forcePasswordChange === true) throw new HttpsError('permission-denied', 'Change your temporary password first.');
+};
 const requireAdmin = (request) => {
+  assertPasswordChanged(request);
   if (!request.auth || request.auth.token.role !== 'admin') throw new HttpsError('permission-denied', 'Administrator access is required.');
 };
 
 const requireRegistrationStaff = (request) => {
+  assertPasswordChanged(request);
   const role = request.auth?.token?.role;
-  if (!request.auth || !['admin', 'receptionist'].includes(role)) throw new HttpsError('permission-denied', 'Reception or administrator access is required.');
+  if (!request.auth || !['admin', 'manager'].includes(role)) throw new HttpsError('permission-denied', 'Manager or administrator access is required.');
   return role;
 };
 
-const auditStaffAccess = async ({ actorUid, action, targetUid, meta = {} }) => db.collection('auditLogs').add({
+const auditStaffAccess = async ({ actorUid, actorRole = 'admin', action, targetUid, resourceType = 'staff_account', meta = {} }) => db.collection('auditLogs').add({
   at: admin.firestore.FieldValue.serverTimestamp(),
-  actor: { uid: actorUid, role: 'admin' },
+  actor: { uid: actorUid, role: actorRole },
   action,
-  resource: { type: 'staff_account', id: targetUid },
+  resource: { type: resourceType, id: targetUid },
   meta,
 });
 
@@ -53,6 +60,61 @@ const preventSelfOrLastAdminLockout = async ({ actorUid, target, nextRole, nextD
   if (target.uid === actorUid && changingAdminAuthority) throw new HttpsError('failed-precondition', 'Use a different active administrator to change your own administrator access.');
   if (changingAdminAuthority && await activeAdminCount() <= 1) throw new HttpsError('failed-precondition', 'At least one active administrator must remain assigned.');
 };
+
+const isClinicTime = (value) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || ''));
+const timeToMinutes = (value) => {
+  const [hour, minute] = String(value).split(':').map(Number);
+  return hour * 60 + minute;
+};
+const scheduleAuthority = (request, doctorId) => {
+  assertPasswordChanged(request);
+  const role = request.auth?.token?.role;
+  if (!request.auth || !['admin', 'doctor'].includes(role)) throw new HttpsError('permission-denied', 'Administrator or doctor access is required.');
+  if (role === 'doctor' && request.auth.token.doctorId !== doctorId) throw new HttpsError('permission-denied', 'You can only manage your own schedule.');
+  return role;
+};
+const normaliseScheduleSessions = (value) => {
+  if (!Array.isArray(value) || value.length > 14) throw new HttpsError('invalid-argument', 'Provide at most fourteen weekly clinic hours.');
+  const sessions = value.map((session) => ({ weekday: Number(session?.weekday), start: String(session?.start || ''), end: String(session?.end || '') }));
+  if (sessions.some((session) => !Number.isInteger(session.weekday) || session.weekday < 0 || session.weekday > 6 || !isClinicTime(session.start) || !isClinicTime(session.end) || timeToMinutes(session.start) >= timeToMinutes(session.end))) throw new HttpsError('invalid-argument', 'Each weekly session needs a valid weekday and start/end time.');
+  sessions.sort((left, right) => left.weekday - right.weekday || timeToMinutes(left.start) - timeToMinutes(right.start));
+  if (sessions.some((session, index) => index > 0 && session.weekday === sessions[index - 1].weekday && timeToMinutes(session.start) < timeToMinutes(sessions[index - 1].end))) throw new HttpsError('invalid-argument', 'Weekly clinic sessions cannot overlap.');
+  return sessions;
+};
+const normaliseExceptionSessions = (value) => {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 4) throw new HttpsError('invalid-argument', 'Provide between one and four special-hours sessions.');
+  const sessions = value.map((session) => ({ start: String(session?.start || ''), end: String(session?.end || '') }));
+  if (sessions.some((session) => !isClinicTime(session.start) || !isClinicTime(session.end) || timeToMinutes(session.start) >= timeToMinutes(session.end))) throw new HttpsError('invalid-argument', 'Each special-hours session needs a valid start and end time.');
+  sessions.sort((left, right) => timeToMinutes(left.start) - timeToMinutes(right.start));
+  if (sessions.some((session, index) => index > 0 && timeToMinutes(session.start) < timeToMinutes(sessions[index - 1].end))) throw new HttpsError('invalid-argument', 'Special clinic sessions cannot overlap.');
+  return sessions;
+};
+
+// Scheduling writes are server-owned so browser-supplied audit fields and
+// closed-day safeguards cannot be bypassed. A closure always goes through
+// closeDay, which previews and resolves affected appointments first.
+exports.saveDoctorSchedule = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  const doctorId = trimmed(request.data?.doctorId, 120);
+  if (!isDoctorId(doctorId)) throw new HttpsError('invalid-argument', 'Choose a valid doctor.');
+  const role = scheduleAuthority(request, doctorId);
+  const sessions = normaliseScheduleSessions(request.data?.sessions);
+  await db.collection('doctorSchedules').doc(doctorId).set({ doctorId, sessions, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
+  await db.collection('auditLogs').add({ at: admin.firestore.FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role }, action: 'doctor_schedule_saved', resource: { type: 'doctor_schedule', id: doctorId }, meta: { sessionCount: sessions.length } });
+  return { message: 'Regular clinic hours saved.' };
+});
+
+exports.saveScheduleException = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  const doctorId = trimmed(request.data?.doctorId, 120);
+  const dateKey = trimmed(request.data?.dateKey, 10);
+  const type = request.data?.type;
+  if (!isDoctorId(doctorId) || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !['extra', 'replace'].includes(type)) throw new HttpsError('invalid-argument', 'Choose valid special clinic hours.');
+  const role = scheduleAuthority(request, doctorId);
+  const sessions = normaliseExceptionSessions(request.data?.sessions);
+  const ref = db.collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`);
+  await ref.set({ doctorId, dateKey, type, sessions, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid, createdBy: request.auth.uid, createdAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection('auditLogs').add({ at: admin.firestore.FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role }, action: 'schedule_exception_saved', resource: { type: 'schedule_exception', id: ref.id }, meta: { doctorId, dateKey, type, sessionCount: sessions.length } });
+  return { message: 'Special clinic hours saved.' };
+});
 
 // Patient identifiers are indexed on the trusted server. The browser never gets
 // permission to enumerate the patients collection, which prevents an accidental
@@ -105,7 +167,7 @@ const patientIdentityLockId = ({ displayName, phone }) => crypto.createHash('sha
   .update(`${normalizePatientName(displayName)}\u0000${normalizePhone(phone)}`)
   .digest('hex');
 
-exports.syncPatientDirectory = onCall({ region: 'asia-south1', timeoutSeconds: 120, memory: '256MiB' }, async (request) => {
+exports.syncPatientDirectory = onCall({ ...callableOptions, timeoutSeconds: 120, memory: '256MiB' }, async (request) => {
   requireAdmin(request);
   const snapshot = await db.collection('patients').get();
   let batch = db.batch(); let writes = 0; let indexed = 0;
@@ -124,8 +186,8 @@ exports.syncPatientDirectory = onCall({ region: 'asia-south1', timeoutSeconds: 1
   return { indexed };
 });
 
-exports.searchPatients = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
-  requireRegistrationStaff(request);
+exports.searchPatients = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  const actorRole = requireRegistrationStaff(request);
   const rawTerm = trimmed(request.data?.term, 120);
   const term = rawTerm.toLowerCase();
   const phone = normalizePhone(rawTerm);
@@ -135,23 +197,26 @@ exports.searchPatients = onCall({ region: 'asia-south1', timeoutSeconds: 30, mem
   else if (term.includes('@')) snapshot = await db.collection('patientDirectory').where('emailLower', '==', term).limit(20).get();
   else if (phone) snapshot = await db.collection('patientDirectory').where('phoneNormalized', '==', phone).limit(20).get();
   else snapshot = await db.collection('patientDirectory').orderBy('displayNameLower').startAt(term).endAt(`${term}\uf8ff`).limit(20).get();
-  return { patients: snapshot.docs.map((item) => ({
+  const patients = snapshot.docs.map((item) => ({
     uid: item.get('uid') || item.id,
     patientId: item.get('patientId') || item.id,
     uhid: item.get('uhid') || '',
     displayName: item.get('displayName'),
     email: item.get('email'),
     phone: item.get('phone') || '',
-  })) };
+  }));
+  await db.collection('auditLogs').add({ at: admin.firestore.FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role: actorRole }, action: 'patient_searched', resource: { type: 'patient_search', id: 'directory' } });
+  return { patients };
 });
 
-exports.getAdminPatientProfile = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+exports.getAdminPatientProfile = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   requireAdmin(request);
   const uid = trimmed(request.data?.uid, 128);
   if (!uid) throw new HttpsError('invalid-argument', 'Select a patient first.');
   const snapshot = await db.collection('patients').doc(uid).get();
   if (!snapshot.exists) throw new HttpsError('not-found', 'Patient record not found.');
   const data = snapshot.data();
+  await db.collection('auditLogs').add({ at: admin.firestore.FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role: 'admin' }, action: 'patient_profile_viewed', resource: { type: 'patient', id: uid } });
   return {
     uid,
     patientId: uid,
@@ -161,7 +226,7 @@ exports.getAdminPatientProfile = onCall({ region: 'asia-south1', timeoutSeconds:
   };
 });
 
-exports.updateAdminPatientProfile = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+exports.updateAdminPatientProfile = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   requireAdmin(request);
   const uid = trimmed(request.data?.uid, 128);
   if (!uid) throw new HttpsError('invalid-argument', 'Select a patient first.');
@@ -189,11 +254,11 @@ exports.updateAdminPatientProfile = onCall({ region: 'asia-south1', timeoutSecon
 // Patient-side profile writes also use the trusted boundary. This keeps the
 // private directory current while preserving a patient’s right to manage only
 // their own information.
-exports.registerPatientProfile = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+exports.registerPatientProfile = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   if (!request.auth || isStaffRole(request.auth.token.role)) throw new HttpsError('permission-denied', 'Patient sign-in is required.');
   const user = await admin.auth().getUser(request.auth.uid);
   const displayName = trimmed(request.data?.displayName, 160);
-  if (!displayName || !isEmail(user.email)) throw new HttpsError('invalid-argument', 'A patient name and verified email are required.');
+  if (!displayName || !isEmail(user.email) || user.emailVerified !== true) throw new HttpsError('failed-precondition', 'Verify the email address on this account before creating a patient profile.');
   const patientRef = db.collection('patients').doc(user.uid);
   let uhid;
   await db.runTransaction(async (transaction) => {
@@ -213,9 +278,10 @@ exports.registerPatientProfile = onCall({ region: 'asia-south1', timeoutSeconds:
   return { message: 'Patient profile created.', uhid };
 });
 
-exports.updateOwnPatientProfile = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+exports.updateOwnPatientProfile = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   if (!request.auth || isStaffRole(request.auth.token.role)) throw new HttpsError('permission-denied', 'Patient sign-in is required.');
   const user = await admin.auth().getUser(request.auth.uid);
+  if (user.emailVerified !== true) throw new HttpsError('failed-precondition', 'Verify the email address on this account before updating a patient profile.');
   const patientRef = db.collection('patients').doc(user.uid);
   const profile = patientProfile(request.data?.profile);
   let uhid;
@@ -237,9 +303,9 @@ exports.updateOwnPatientProfile = onCall({ region: 'asia-south1', timeoutSeconds
 });
 
 // Staff registration deliberately creates a clinical record only. Linking it to
-// a future patient login is a separate, verified workflow so a receptionist can
+// a future patient login is a separate, verified workflow so a manager can
 // never take over an existing Firebase account by entering an email address.
-exports.registerPatient = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+exports.registerPatient = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   const actorRole = requireRegistrationStaff(request);
   const profile = patientProfile(request.data?.profile);
   const phoneNormalized = normalizePhone(profile.phone);
@@ -278,19 +344,34 @@ exports.registerPatient = onCall({ region: 'asia-south1', timeoutSeconds: 30, me
 
 // Privileged staff lifecycle operations. This endpoint is deliberately callable only by
 // Firebase users carrying the trusted admin custom claim; the browser never sets roles.
-exports.manageStaffAccount = onCall({ region: 'asia-south1', enforceAppCheck: false }, async (request) => {
-  requireAdmin(request);
+exports.completeOwnPasswordChange = onCall({ ...callableOptions }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in to change your password.');
+  const actorRole = request.auth.token.role;
+  if (!isStaffRole(actorRole)) throw new HttpsError('permission-denied', 'Staff access is required.');
+  const user = await admin.auth().getUser(request.auth.uid);
+  if (user.customClaims?.forcePasswordChange !== true) throw new HttpsError('failed-precondition', 'A mandatory password change is not pending for this account.');
+  await admin.auth().setCustomUserClaims(user.uid, { ...user.customClaims, forcePasswordChange: false });
+  await db.collection('staffProfiles').doc(user.uid).set({ requiresPasswordChange: false, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: user.uid }, { merge: true });
+  await auditStaffAccess({ actorUid: user.uid, actorRole, action: 'staff_password_changed', targetUid: user.uid, resourceType: 'staff' });
+  return { ok: true };
+});
+
+exports.manageStaffAccount = onCall({ ...callableOptions }, async (request) => {
   const { action, email, password, displayName = '', role, doctorId, disabled } = request.data || {};
+
+  requireAdmin(request);
   const normalizedEmail = normalizeEmail(email);
   if (!isEmail(normalizedEmail)) throw new HttpsError('invalid-argument', 'Enter a valid staff email address.');
   if (action === 'provision') {
-    if (!isStaffRole(role) || !isStrongTemporaryPassword(password) || !String(displayName).trim()) throw new HttpsError('invalid-argument', 'Enter a name, valid role, and a temporary password with at least 12 characters including letters and numbers.');
+    if (!isStaffRole(role) || !isStrongTemporaryPassword(password) || !String(displayName).trim()) throw new HttpsError('invalid-argument', 'Enter a name, valid role, and a temporary password with at least 8 characters, uppercase and lowercase letters, a number, and ! @ # or $.');
     if (role === 'doctor' && !isDoctorId(doctorId)) throw new HttpsError('invalid-argument', 'Enter a stable doctor ID using letters, numbers, hyphens, or underscores.');
     let user;
     try {
       user = await admin.auth().getUserByEmail(normalizedEmail);
       const existingProfile = await db.collection('staffProfiles').doc(user.uid).get();
       if (!existingProfile.exists && !isStaffRole(user.customClaims?.role)) throw new HttpsError('already-exists', 'This email already belongs to an account. Do not convert an existing account into staff access from this screen.');
+      if (user.uid === request.auth.uid) throw new HttpsError('failed-precondition', 'You cannot re-provision your own account.');
+      await preventSelfOrLastAdminLockout({ actorUid: request.auth.uid, target: user, nextRole: role, nextDisabled: false });
       await admin.auth().updateUser(user.uid, { displayName: String(displayName).trim(), password: String(password), disabled: false });
     } catch (error) {
       if (error instanceof HttpsError) throw error;
@@ -318,7 +399,7 @@ exports.manageStaffAccount = onCall({ region: 'asia-south1', enforceAppCheck: fa
     return { message: 'Staff access updated and active sessions were revoked.' };
   }
   if (action === 'temporaryPassword') {
-    if (!isStrongTemporaryPassword(password)) throw new HttpsError('invalid-argument', 'Temporary password must have at least 12 characters including letters and numbers.');
+    if (!isStrongTemporaryPassword(password)) throw new HttpsError('invalid-argument', 'Temporary password must have at least 8 characters, uppercase and lowercase letters, a number, and ! @ # or $.');
     await admin.auth().updateUser(user.uid, { password: String(password) });
     await admin.auth().setCustomUserClaims(user.uid, { ...user.customClaims, forcePasswordChange: true });
     await admin.auth().revokeRefreshTokens(user.uid);
@@ -341,20 +422,13 @@ exports.manageStaffAccount = onCall({ region: 'asia-south1', enforceAppCheck: fa
     await auditStaffAccess({ actorUid: request.auth.uid, action: 'staff_sessions_revoked', targetUid: user.uid });
     return { message: 'Active refresh sessions were revoked. Existing ID tokens expire within one hour.' };
   }
-  if (action === 'completeMandatoryPasswordChange') {
-    if (user.uid !== request.auth.uid) throw new HttpsError('permission-denied', 'You can only complete your own password change.');
-    await admin.auth().setCustomUserClaims(user.uid, { ...user.customClaims, forcePasswordChange: false });
-    await db.collection('staffProfiles').doc(user.uid).set({ requiresPasswordChange: false, passwordChangedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
-    await auditStaffAccess({ actorUid: request.auth.uid, action: 'staff_mandatory_password_change_completed', targetUid: user.uid });
-    return { message: 'Password requirement cleared.' };
-  }
   throw new HttpsError('invalid-argument', 'Unsupported staff account action.');
 });
 
 // Imports only accounts that already carry a trusted staff custom claim. It never
 // grants a role and exists to migrate the original command-created staff accounts
 // into the protected directory before stricter lifecycle enforcement is enabled.
-exports.syncManagedStaffDirectory = onCall({ region: 'asia-south1' }, async (request) => {
+exports.syncManagedStaffDirectory = onCall({ ...callableOptions }, async (request) => {
   requireAdmin(request);
   let pageToken;
   let imported = 0;
@@ -386,7 +460,7 @@ exports.syncManagedStaffDirectory = onCall({ region: 'asia-south1' }, async (req
 // Public booking reads its catalogue through this narrow contract rather than
 // embedding clinic/doctor IDs in the client. It is intentionally provider-agnostic
 // so a future database adapter only has to preserve this response shape.
-exports.getBookingCatalog = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async () => {
+exports.getBookingCatalog = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async () => {
   const [branchSnapshot, departmentSnapshot, doctorSnapshot, configSnapshot] = await Promise.all([
     db.collection('branches').get(),
     db.collection('departments').get(),
@@ -418,7 +492,7 @@ const catalogText = (value, label, max = 160, required = true) => {
 // Public catalog documents are deliberately read-only in Firestore rules. This
 // callable gives administrators the narrow, validated write path so a clinic can
 // grow beyond the original seed provider without a client-side privilege hole.
-exports.getAdminBookingCatalog = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+exports.getAdminBookingCatalog = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   requireAdmin(request);
   const [branchSnapshot, departmentSnapshot, doctorSnapshot] = await Promise.all([
     db.collection('branches').orderBy('name').get(),
@@ -432,7 +506,7 @@ exports.getAdminBookingCatalog = onCall({ region: 'asia-south1', timeoutSeconds:
   };
 });
 
-exports.manageBookingCatalog = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+exports.manageBookingCatalog = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   requireAdmin(request);
   const { action, record = {} } = request.data || {};
   if (action === 'branch') {
@@ -469,13 +543,13 @@ exports.manageBookingCatalog = onCall({ region: 'asia-south1', timeoutSeconds: 3
 // Visit formats are configuration rather than a client-side convention. This
 // keeps the public selector, appointment record and staff video workflow on one
 // server-validated contract, and makes a future data-store migration explicit.
-exports.getAdminBookingConfiguration = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+exports.getAdminBookingConfiguration = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   requireAdmin(request);
   const config = bookingConfig(await db.collection('clinic').doc('publicConfig').get());
   return { visitTypes: config.visitTypes };
 });
 
-exports.saveBookingVisitTypes = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+exports.saveBookingVisitTypes = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   requireAdmin(request);
   const visitTypes = normaliseVisitTypes(request.data?.visitTypes, { requireAtLeastOne: true });
   await db.collection('clinic').doc('publicConfig').set({ visitTypes, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
@@ -514,7 +588,7 @@ const asDate = (value) => {
 // rules. This is the one narrow, admin-only projection used by the operations
 // UI; it excludes free-form metadata, which can contain unnecessary personal
 // or clinical context.
-exports.getAuditLog = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+exports.getAuditLog = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   requireAdmin(request);
   const requestedLimit = Number(request.data?.limit);
   const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 50) : 30;
@@ -527,7 +601,10 @@ exports.getAuditLog = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory
       at: at ? at.toISOString() : null,
       action: trimmed(data.action, 120) || 'activity_recorded',
       actorRole: trimmed(data.actor?.role, 40) || 'system',
+      actorUid: trimmed(data.actor?.uid, 200) || null,
       resourceType: trimmed(data.resource?.type, 80) || 'system',
+      resourceId: trimmed(data.resource?.id, 200) || null,
+      targetUid: trimmed(data.targetUid, 200) || null,
     };
   });
   return { events };
@@ -536,7 +613,7 @@ exports.getAuditLog = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory
 // Experience feedback is never public by default. A patient may submit one
 // review only after a completed appointment; an administrator must explicitly
 // publish it before the public site can receive its minimal projection.
-exports.submitPatientFeedback = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+exports.submitPatientFeedback = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   if (!request.auth || isStaffRole(request.auth.token.role)) throw new HttpsError('permission-denied', 'Patient sign-in is required.');
   const appointmentId = String(request.data?.appointmentId || '').trim();
   const rating = Number(request.data?.rating);
@@ -555,18 +632,18 @@ exports.submitPatientFeedback = onCall({ region: 'asia-south1', timeoutSeconds: 
   return { message: 'Thank you. Your feedback has been submitted for review.' };
 });
 
-exports.getPublicTestimonials = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async () => {
+exports.getPublicTestimonials = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async () => {
   const snapshot = await db.collection('patientFeedback').where('status', '==', 'published').orderBy('publishedAt', 'desc').limit(6).get();
   return { testimonials: snapshot.docs.map((item) => ({ id: item.id, rating: item.get('rating'), comment: item.get('comment') })) };
 });
 
-exports.getFeedbackModerationQueue = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+exports.getFeedbackModerationQueue = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   requireAdmin(request);
   const snapshot = await db.collection('patientFeedback').where('status', '==', 'pending').orderBy('createdAt', 'desc').limit(30).get();
   return { feedback: snapshot.docs.map((item) => ({ id: item.id, appointmentId: item.get('appointmentId'), rating: item.get('rating'), comment: item.get('comment') })) };
 });
 
-exports.moderatePatientFeedback = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+exports.moderatePatientFeedback = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   requireAdmin(request);
   const feedbackId = String(request.data?.feedbackId || '').trim();
   const action = String(request.data?.action || '').trim();
@@ -589,6 +666,43 @@ const isActiveAppointment = (status) => !['cancelled', 'completed', 'no_show'].i
 const appointmentReference = () => `SC-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
 const functionsProject = () => process.env.GCLOUD_PROJECT || 'sood-clinic';
 const googleCallbackUrl = () => `https://asia-south1-${functionsProject()}.cloudfunctions.net/googleCalendarCallback`;
+const BOOKING_RATE_LIMIT = 10;
+const BOOKING_RATE_WINDOW_MS = 60 * 60 * 1000;
+
+const enforceBookingRateLimit = async (request) => {
+  const ip = String(request.rawRequest?.ip || '');
+  const rateLimitId = crypto.createHash('sha256').update(ip).digest('hex').slice(0, 32);
+  const rateLimitRef = db.collection('rateLimits').doc(rateLimitId);
+  const now = new Date();
+  const resetAt = new Date(now.getTime() + BOOKING_RATE_WINDOW_MS);
+
+  await db.runTransaction(async (transaction) => {
+    const existing = await transaction.get(rateLimitRef);
+    const existingResetAt = asDate(existing.get('resetAt'));
+    const count = existing.exists && existingResetAt && existingResetAt > now
+      ? Number(existing.get('count')) || 0
+      : 0;
+    if (count >= BOOKING_RATE_LIMIT) {
+      throw publicError('resource-exhausted', 'Too many booking attempts. Please try again in an hour.');
+    }
+    transaction.set(rateLimitRef, {
+      count: count + 1,
+      resetAt: admin.firestore.Timestamp.fromDate(resetAt),
+    });
+  });
+};
+
+const assertPhoneBookingCapacity = async (phoneKey, now = new Date()) => {
+  const activeBookings = await db.collection('appointments')
+    .where('phoneKey', '==', phoneKey)
+    .where('status', 'in', ['scheduled', 'confirmed'])
+    .where('startsAt', '>', admin.firestore.Timestamp.fromDate(now))
+    .limit(2)
+    .get();
+  if (activeBookings.size >= 2) {
+    throw publicError('resource-exhausted', 'You already have two upcoming appointments. Please contact the clinic to make another booking.');
+  }
+};
 
 const bookingConfig = (data) => {
   const configured = data?.data() || {};
@@ -635,11 +749,8 @@ const visitTypeFor = (config, visitTypeId) => {
 };
 
 const slotBusyRanges = async (doctorId, dateKey) => {
-  const snapshot = await db.collection('appointmentSlots').where('doctorId', '==', doctorId).get();
-  return snapshot.docs.map((item) => item.data()).filter((item) => {
-    const legacyDateKey = asDate(item.startsAt) ? istDateKey(asDate(item.startsAt)) : null;
-    return (item.dateKey || legacyDateKey) === dateKey && ['booked', 'blocked', 'held'].includes(item.status);
-  })
+  const snapshot = await db.collection('appointmentSlots').where('doctorId', '==', doctorId).where('dateKey', '==', dateKey).get();
+  return snapshot.docs.map((item) => item.data()).filter((item) => ['booked', 'blocked', 'held'].includes(item.status))
     .map((item) => {
       const startsAt = asDate(item.startsAt);
       return startsAt ? { startsAt, endsAt: asDate(item.endsAt) || new Date(startsAt.getTime() + 20 * 60 * 1000) } : null;
@@ -703,7 +814,7 @@ const availabilityContext = async ({ doctorId, dateKey, visitTypeId }) => {
   };
 };
 
-exports.getAvailability = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+exports.getAvailability = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
   const { doctorId, dateKey, visitTypeId } = request.data || {};
   if (!doctorId || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || ''))) throw publicError('invalid-argument', 'Choose a doctor and appointment date.');
   const context = await availabilityContext({ doctorId, dateKey, visitTypeId });
@@ -727,13 +838,30 @@ const syncAppointmentToGoogle = async (appointmentId) => {
   }
 };
 
-exports.createBooking = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+const deleteAppointmentFromGoogle = async ({ ref, appointment }) => {
+  if (!appointment.externalCalendar?.eventId) return;
+  try {
+    const connection = await calendarConnection(appointment.doctorId);
+    if (!connection) return;
+    const { accessToken, calendarId } = await calendarAccess(connection);
+    await deleteEvent({ accessToken, calendarId, eventId: appointment.externalCalendar.eventId });
+    await ref.set({ externalCalendar: { ...appointment.externalCalendar, syncStatus: 'deleted', eventId: admin.firestore.FieldValue.delete(), lastSyncedAt: admin.firestore.FieldValue.serverTimestamp() }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  } catch (_error) {
+    await ref.set({ externalCalendar: { ...appointment.externalCalendar, syncStatus: 'pending', lastSyncError: 'Calendar event could not be removed.' }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  }
+};
+
+exports.createBooking = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
   const { branchId, departmentId, doctorId, dateKey, time, visitTypeId, patient, reason, consentVersion, clientRequestId } = request.data || {};
   if (!branchId || !departmentId || !doctorId || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || '')) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(time || ''))) throw publicError('invalid-argument', 'Choose a valid appointment time.');
   if (!validClientRequestId(clientRequestId)) throw publicError('invalid-argument', 'Please refresh and try booking again.');
   const name = trimmed(patient?.name, 120);
   const phone = trimmed(patient?.phone, 30);
   if (!name || !validPhone(phone) || patient?.consentToTreatment !== true) throw publicError('invalid-argument', 'Enter your name, a valid phone number, and consent to the appointment terms.');
+  const phoneKey = toE164(phone);
+  if (!phoneKey) throw publicError('invalid-argument', 'Enter a valid Indian phone number.');
+  await enforceBookingRateLimit(request);
+  await assertPhoneBookingCapacity(phoneKey);
   const context = await availabilityContext({ doctorId, dateKey, visitTypeId });
   const appointmentSlots = buildAvailability({ doctorId, dateKey, weeklySessions: context.weeklySessions, exception: context.exception, durationMinutes: context.visitType.minutes, intervalMinutes: context.config.intervalMinutes, bufferBeforeMinutes: context.config.bufferBeforeMinutes, bufferAfterMinutes: context.config.bufferAfterMinutes, leadMinutes: context.config.leadMinutes, bookingWindowDays: context.config.bookingWindowDays, busyRanges: context.busyRanges });
   const requested = appointmentSlots.find((slot) => slot.time === time);
@@ -764,7 +892,7 @@ exports.createBooking = onCall({ region: 'asia-south1', timeoutSeconds: 30, memo
         reference, branchId, departmentId, doctorId, visitType: context.visitType.id, visitMode: context.visitType.mode, dateKey,
         startsAt: admin.firestore.Timestamp.fromDate(requested.startsAt), endsAt: admin.firestore.Timestamp.fromDate(requested.endsAt),
         status, source: request.auth ? 'patient_portal' : 'web', patientId: request.auth?.uid || null,
-        patientSnapshot: { name, phone }, reason: trimmed(reason, 500) || null, slotIds: [slotRef.id],
+        patientSnapshot: { name, phone }, phoneKey, reason: trimmed(reason, 500) || null, slotIds: [slotRef.id],
         consent: { version: trimmed(consentVersion, 40) || 'booking-v1', acceptedAt: admin.firestore.FieldValue.serverTimestamp() },
         createdBy, externalCalendar: { provider: 'google', syncStatus: 'not_connected' }, videoConsultation: context.visitType.mode === 'video' ? { status: 'awaiting_link' } : null, createdAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
@@ -782,6 +910,7 @@ exports.createBooking = onCall({ region: 'asia-south1', timeoutSeconds: 30, memo
 });
 
 const requireVideoStaff = (request) => {
+  assertPasswordChanged(request);
   const role = ROLE[request.auth?.token?.role];
   if (!request.auth || !role) throw publicError('permission-denied', 'Staff access is required.');
   return role;
@@ -801,7 +930,7 @@ const safeVideoUrl = (value) => {
 // Meeting links remain clinic-controlled. The application does not create rooms,
 // transmit appointment data to a video vendor, or enrol the clinic in a paid
 // service; an authorised staff member supplies a secure link only when ready.
-exports.getVideoConsultationQueue = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+exports.getVideoConsultationQueue = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   const role = requireVideoStaff(request);
   const now = new Date();
   const from = admin.firestore.Timestamp.fromDate(new Date(now.getTime() - 24 * 60 * 60 * 1000));
@@ -816,7 +945,7 @@ exports.getVideoConsultationQueue = onCall({ region: 'asia-south1', timeoutSecon
   };
 });
 
-exports.setVideoConsultationAccess = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+exports.setVideoConsultationAccess = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   const role = requireVideoStaff(request);
   const appointmentId = trimmed(request.data?.appointmentId, 200);
   if (!/^[A-Za-z0-9_-]{1,200}$/.test(appointmentId)) throw publicError('invalid-argument', 'Choose a valid online appointment.');
@@ -837,7 +966,8 @@ exports.setVideoConsultationAccess = onCall({ region: 'asia-south1', timeoutSeco
 
 // All appointment lifecycle changes happen on the trusted server. Browser clients
 // may read appointments, but Firestore rules intentionally deny direct writes.
-exports.transitionAppointment = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+exports.transitionAppointment = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+  assertPasswordChanged(request);
   const role = ROLE[request.auth?.token?.role];
   if (!role) throw publicError('permission-denied', 'Staff access is required.');
   const { appointmentId, to, reason } = request.data || {};
@@ -845,6 +975,7 @@ exports.transitionAppointment = onCall({ region: 'asia-south1', timeoutSeconds: 
   const cancellationReason = trimmed(reason, 300);
   if (to === 'cancelled' && !cancellationReason) throw publicError('invalid-argument', 'A cancellation reason is required.');
   const ref = db.collection('appointments').doc(appointmentId);
+  let cancelledAppointment;
   await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(ref);
     if (!snapshot.exists) throw publicError('not-found', 'Appointment not found.');
@@ -858,22 +989,25 @@ exports.transitionAppointment = onCall({ region: 'asia-south1', timeoutSeconds: 
     if (to === 'cancelled') {
       const slotIds = Array.isArray(appointment.slotIds) && appointment.slotIds.length ? appointment.slotIds : (appointment.slotId ? [appointment.slotId] : []);
       slotIds.forEach((slotId) => transaction.delete(db.collection('appointmentSlots').doc(slotId)));
+      cancelledAppointment = { ref, appointment };
     }
     transaction.set(ref.collection('events').doc(), { from: appointment.status, to, byUid: request.auth.uid, byRole: role, at: now, reason: to === 'cancelled' ? cancellationReason : null });
     transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: request.auth.uid, role }, action: `appointment_${to}`, resource: { type: 'appointment', id: ref.id } });
   });
+  if (cancelledAppointment) await deleteAppointmentFromGoogle(cancelledAppointment);
   return { ok: true, status: to };
 });
 
 // Patients can release their own future slot before the configured cutoff. The
 // appointment, slot release, event, and audit record are one transaction.
-exports.cancelPatientAppointment = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+exports.cancelPatientAppointment = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
   if (!request.auth || isStaffRole(request.auth.token.role)) throw publicError('permission-denied', 'Sign in to cancel your appointment.');
   const appointmentId = trimmed(request.data?.appointmentId, 200);
   if (!/^[A-Za-z0-9_-]{1,200}$/.test(appointmentId)) throw publicError('invalid-argument', 'Invalid appointment.');
   const reason = trimmed(request.data?.reason, 300) || 'Cancelled by patient';
   const config = bookingConfig(await db.collection('clinic').doc('publicConfig').get());
   const ref = db.collection('appointments').doc(appointmentId);
+  let cancelledAppointment;
   await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(ref);
     if (!snapshot.exists) throw publicError('not-found', 'Appointment not found.');
@@ -883,15 +1017,17 @@ exports.cancelPatientAppointment = onCall({ region: 'asia-south1', timeoutSecond
     transaction.update(ref, { status: 'cancelled', cancellation: { byUid: request.auth.uid, byRole: 'patient', reason, at: now }, updatedAt: now });
     const slotIds = Array.isArray(appointment.slotIds) && appointment.slotIds.length ? appointment.slotIds : (appointment.slotId ? [appointment.slotId] : []);
     slotIds.forEach((slotId) => transaction.delete(db.collection('appointmentSlots').doc(slotId)));
+    cancelledAppointment = { ref, appointment };
     transaction.set(ref.collection('events').doc(), { from: appointment.status, to: 'cancelled', byUid: request.auth.uid, byRole: 'patient', reason, at: now });
     transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: request.auth.uid, role: 'patient' }, action: 'appointment_cancelled', resource: { type: 'appointment', id: ref.id }, meta: { source: 'patient_portal' } });
   });
+  if (cancelledAppointment) await deleteAppointmentFromGoogle(cancelledAppointment);
   return { ok: true, status: 'cancelled' };
 });
 
 // Patients may move an eligible future appointment, but all availability and
 // slot ownership decisions remain on the trusted server.
-exports.reschedulePatientAppointment = onCall({ region: 'asia-south1', timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+exports.reschedulePatientAppointment = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
   if (!request.auth || isStaffRole(request.auth.token.role)) throw publicError('permission-denied', 'Sign in to reschedule your appointment.');
   const appointmentId = trimmed(request.data?.appointmentId, 200);
   const dateKey = trimmed(request.data?.dateKey, 10);
@@ -947,7 +1083,8 @@ exports.reschedulePatientAppointment = onCall({ region: 'asia-south1', timeoutSe
 
 // Closing a day must be deliberate: staff first preview affected appointments,
 // then explicitly keep them or cancel every appointment they are permitted to cancel.
-exports.closeDay = onCall({ region: 'asia-south1', timeoutSeconds: 60, memory: '256MiB' }, async (request) => {
+exports.closeDay = onCall({ ...callableOptions, timeoutSeconds: 60, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+  assertPasswordChanged(request);
   const role = ROLE[request.auth?.token?.role];
   const { doctorId, dateKey, mode = 'preview', action = 'keep', reason } = request.data || {};
   if (!role || !['admin', 'doctor'].includes(role)) throw publicError('permission-denied', 'Administrator or doctor access is required.');
@@ -963,11 +1100,12 @@ exports.closeDay = onCall({ region: 'asia-south1', timeoutSeconds: 60, memory: '
   if (appointments.length > 100) throw publicError('failed-precondition', 'This day has too many appointments to close at once. Please contact clinic support.');
   if (action === 'cancel' && appointments.some((appointment) => !canTransition(appointment.status, 'cancelled', role))) throw publicError('failed-precondition', 'Some appointments cannot be cancelled by your role. Keep them or ask an administrator to close the day.');
   const exceptionRef = db.collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`);
+  const cancelledAppointments = [];
   await db.runTransaction(async (transaction) => {
     const currentAppointments = await Promise.all(appointments.map((appointment) => transaction.get(appointment.ref)));
     await transaction.get(exceptionRef);
     const now = admin.firestore.FieldValue.serverTimestamp();
-    transaction.set(exceptionRef, { doctorId, dateKey, type: 'closed', sessions: [], note: closeReason || null, updatedAt: now, updatedBy: request.auth.uid }, { merge: true });
+    transaction.set(exceptionRef, { doctorId, dateKey, type: 'closed', sessions: [], note: 'Clinic closed', updatedAt: now, updatedBy: request.auth.uid }, { merge: true });
     currentAppointments.forEach((snapshot) => {
       if (!snapshot.exists) return;
       const appointment = snapshot.data();
@@ -977,18 +1115,20 @@ exports.closeDay = onCall({ region: 'asia-south1', timeoutSeconds: 60, memory: '
         transaction.update(snapshot.ref, { status: 'cancelled', cancellation: { byUid: request.auth.uid, byRole: role, reason: closeReason, at: now }, updatedAt: now });
         const slotIds = Array.isArray(appointment.slotIds) && appointment.slotIds.length ? appointment.slotIds : (appointment.slotId ? [appointment.slotId] : []);
         slotIds.forEach((slotId) => transaction.delete(db.collection('appointmentSlots').doc(slotId)));
+        cancelledAppointments.push({ ref: snapshot.ref, appointment });
         transaction.set(snapshot.ref.collection('events').doc(), { from: appointment.status, to: 'cancelled', byUid: request.auth.uid, byRole: role, reason: closeReason, at: now, meta: { source: 'close_day', dateKey } });
       }
     });
     transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: request.auth.uid, role }, action: 'clinic_day_closed', resource: { type: 'schedule_exception', id: exceptionRef.id }, meta: { doctorId, dateKey, action, affectedAppointments: appointments.length } });
   });
+  await Promise.all(cancelledAppointments.map((item) => deleteAppointmentFromGoogle(item)));
   return { ok: true, doctorId, dateKey, action, affectedAppointments: appointments.length };
 });
 
 // --- Google Calendar connection -------------------------------------------
 // This is clinic-admin initiated only. Browser code receives an OAuth URL but
 // never receives a client secret, refresh token, or another calendar's events.
-exports.beginGoogleCalendarConnection = onCall({ region: 'asia-south1', secrets: [GOOGLE_CALENDAR_CLIENT_ID] }, async (request) => {
+exports.beginGoogleCalendarConnection = onCall({ ...callableOptions, secrets: [GOOGLE_CALENDAR_CLIENT_ID] }, async (request) => {
   requireAdmin(request);
   const { doctorId = 'brig-ak-sood', calendarId = 'primary' } = request.data || {};
   if (!doctorId || !/^[A-Za-z0-9_-]{1,120}$/.test(String(doctorId)) || !/^[A-Za-z0-9@._-]{1,240}$/.test(String(calendarId))) throw publicError('invalid-argument', 'Choose a valid doctor and Google Calendar.');
@@ -1018,7 +1158,7 @@ exports.googleCalendarCallback = onRequest({ region: 'asia-south1', timeoutSecon
   }
 });
 
-exports.googleCalendarStatus = onCall({ region: 'asia-south1' }, async (request) => {
+exports.googleCalendarStatus = onCall({ ...callableOptions }, async (request) => {
   requireAdmin(request);
   const snapshot = await db.collection('integrations').doc('googleCalendar').get();
   if (!snapshot.exists) return { connected: false };
@@ -1026,7 +1166,7 @@ exports.googleCalendarStatus = onCall({ region: 'asia-south1' }, async (request)
   return { connected: value.active === true, doctorId: value.doctorId, calendarId: value.calendarId, syncStatus: value.syncStatus || 'unknown', lastSyncError: value.lastSyncError || null };
 });
 
-exports.disconnectGoogleCalendar = onCall({ region: 'asia-south1' }, async (request) => {
+exports.disconnectGoogleCalendar = onCall({ ...callableOptions }, async (request) => {
   requireAdmin(request);
   await db.collection('integrations').doc('googleCalendar').set({ active: false, disconnectedAt: admin.firestore.FieldValue.serverTimestamp(), disconnectedBy: request.auth.uid, syncStatus: 'disconnected' }, { merge: true });
   return { disconnected: true };

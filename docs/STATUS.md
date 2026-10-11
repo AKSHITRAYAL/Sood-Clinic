@@ -1,3 +1,4 @@
+Historical document, written before the Firebase functions migration; see `files/` for current docs.
 # Current Status
 
 Updated: 2026-09-28
@@ -9,7 +10,7 @@ Updated: 2026-09-28
 - Firebase Authentication persists sessions locally in the browser.
 - Password reset is implemented with Firebase Authentication for patient and staff users.
 - Patient portal includes profile, appointment history, and manually entered medical-history/document records in Firestore.
-- Admin, doctor, and reception workspaces are separate routes.
+- Admin, doctor, and manager workspaces are separate routes.
 - Doctor workspace supports recurring Monday-Saturday hours, special-date opening/closure, appointment completion, and cancellation.
 - Admin workspace supports appointment oversight, availability overrides, and the UI for secure staff lifecycle actions.
 - Firestore rules restrict patient data to the patient or authorized clinic staff.
@@ -27,7 +28,7 @@ Updated: 2026-09-28
 ## Firebase state to verify before demos
 
 - Authentication → Email/Password is enabled.
-- The intended administrator, doctor, and reception accounts exist in Firebase Authentication.
+- The intended administrator, doctor, and manager accounts exist in Firebase Authentication.
 - Custom claims are assigned correctly. A user must sign out and sign back in after a claim change.
 - Firestore has the seeded catalogue records (`sood-clinic`, `gastroenterology`, `brig-ak-sood`).
 - Firestore rules are deployed after any rule change.

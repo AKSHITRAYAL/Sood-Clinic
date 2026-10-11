@@ -12,10 +12,10 @@ const admin = require('firebase-admin');
 const email = process.env.CLINIC_STAFF_EMAIL;
 const role = process.env.CLINIC_STAFF_ROLE;
 const doctorId = process.env.CLINIC_DOCTOR_ID || 'brig-ak-sood';
-const allowedRoles = new Set(['admin', 'doctor', 'receptionist']);
+const allowedRoles = new Set(['admin', 'doctor', 'manager']);
 
 if (!email || !allowedRoles.has(role)) {
-  console.error('Set CLINIC_STAFF_EMAIL and CLINIC_STAFF_ROLE (admin, doctor, or receptionist).');
+  console.error('Set CLINIC_STAFF_EMAIL and CLINIC_STAFF_ROLE (admin, doctor, or manager).');
   process.exit(1);
 }
 

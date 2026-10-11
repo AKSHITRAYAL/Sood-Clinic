@@ -1,3 +1,4 @@
+Historical document, written before the Firebase functions migration; see `files/` for current docs.
 # Recommended Next Steps
 
 Work in this order to keep the clinic system safe and demo-ready.
@@ -12,7 +13,7 @@ Work in this order to keep the clinic system safe and demo-ready.
 
 ## 2. Complete staff administration
 
-- Test staff provisioning for admin, doctor, and receptionist roles.
+- Test staff provisioning for admin, doctor, and manager roles.
 - Add a staff-directory edit flow for names/titles and a clear disable/re-enable confirmation.
 - Replace `window.prompt` for temporary passwords with a proper protected form and reauthentication for admins.
 - Add audit events for role changes, appointment changes, cancellations, and schedule changes.

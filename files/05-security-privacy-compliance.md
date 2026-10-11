@@ -8,8 +8,8 @@ This is an engineering checklist, **not legal advice**. The clinic (as data fidu
 |---|---|---|---|
 | **Public** | Clinic profile, hours, doctor bio, slot occupancy (no names) | `clinic/*`, `doctors`, `doctorSchedules`, `appointmentSlots` | Public read; server-only write for slots. |
 | **Personal (contact)** | Name, phone, email, address, DOB | `patients`, `appointments.patientSnapshot` | Staff + linked patient only. Never in logs/analytics/URLs. |
-| **Health (sensitive)** | Reason for visit, history, notes, diagnosis, prescriptions, reports | `appointments.reason`, `patients/*/visits|prescriptions|documents|patientReported` | Doctor (+ owning patient where stated). Reception does **not** read clinical notes. |
-| **Financial** | Invoices, payments | `invoices` | Reception/admin + patient own. No card data ever stored (use a payment provider). |
+| **Health (sensitive)** | Reason for visit, history, notes, diagnosis, prescriptions, reports | `appointments.reason`, `patients/*/visits|prescriptions|documents|patientReported` | Doctor (+ owning patient where stated). Manager does **not** read clinical notes. |
+| **Financial** | Invoices, payments | `invoices` | Manager/admin + patient own. No card data ever stored (use a payment provider). |
 | **Operational secrets** | Provider keys, service accounts | Secret Manager / CI secrets | Never in repo, Firestore or client. |
 
 Treat `reason` (free text) as health data: it is shown only to staff who need it and never in notification texts.
@@ -19,7 +19,7 @@ Treat `reason` (free text) as health data: it is shown only to staff who need it
 | Risk | Control | Task |
 |---|---|---|
 | Bot/abuse of public booking (spam, calendar flooding) | Server-side booking only, App Check, per-phone cap, IP throttle, no client writes | P0-02, P0-04 |
-| Over-broad staff access (reception reading clinical data) | Role matrix (`03 §3`), rules tests | P0-04 |
+| Over-broad staff access (manager reading clinical data) | Role matrix (`03 §3`), rules tests | P0-04 |
 | Tampering with appointment state / audit gaps | State machine in callables, events, audit log | P0-03, P1-AUDIT |
 | Account takeover of staff | MFA, strong passwords, invite flow, token revocation, idle timeout, console/GitHub 2FA | P1-STAFFSEC |
 | Data loss / corruption | PITR + scheduled backups, restore drill | P0-07, P3-HANDOVER |
@@ -32,7 +32,7 @@ Treat `reason` (free text) as health data: it is shown only to staff who need it
 ## 3. Authentication and authorisation checklist
 
 - Roles only via custom claims set by Admin SDK (`manageStaffAccount`); UI checks are convenience, **rules/functions are the enforcement**.
-- Staff: MFA required for admin and doctor; reception strongly recommended; invite by email link (no typed temporary passwords); minimum password length ≥ 12 (or passphrase); `revokeRefreshTokens` on disable/role change; last-admin and self-demotion guards; idle timeout (e.g. 15 min on shared reception PCs) with a visible warning.
+- Staff: MFA required for admin and doctor; manager strongly recommended; invite by email link (no typed temporary passwords); minimum password length ≥ 12 (or passphrase); `revokeRefreshTokens` on disable/role change; last-admin and self-demotion guards; idle timeout (e.g. 15 min on shared manager PCs) with a visible warning.
 - Patients: email verification before portal access to records; password ≥ 10; optional phone OTP for booking/claim flows (cost and DLT implications in D-03); brute-force protection is provided by Firebase Auth, keep enumeration protection on.
 - App Check enforced (reCAPTCHA Enterprise/v3) for Firestore, Functions and Storage; API key restricted by HTTP referrer to the production/staging domains.
 - Separate origins for public and staff sites (`03 §2`); staff site `noindex`, no analytics, strict CSP.

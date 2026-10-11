@@ -10,17 +10,17 @@ describe('staff access safeguards', () => {
     expect(isEmail('not-an-email')).toBe(false);
   });
 
-  it('requires a conservative temporary-password baseline', () => {
+  it('requires the shared temporary-password baseline', () => {
     expect(isStrongTemporaryPassword('short1')).toBe(false);
     expect(isStrongTemporaryPassword('longpasswordonly')).toBe(false);
-    expect(isStrongTemporaryPassword('12345678901234')).toBe(false);
-    expect(isStrongTemporaryPassword('SaferPassword2026')).toBe(true);
+    expect(isStrongTemporaryPassword('Password2026')).toBe(false);
+    expect(isStrongTemporaryPassword('SaferPassword2026!')).toBe(true);
   });
 
   it('keeps doctor scoping only for doctor claims', () => {
     expect(isDoctorId('maharana')).toBe(true);
     expect(isDoctorId('not allowed')).toBe(false);
-    expect(staffClaims({ existingClaims: { locale: 'en-IN', doctorId: 'old' }, role: 'receptionist' })).toEqual({ locale: 'en-IN', role: 'receptionist', forcePasswordChange: false });
+    expect(staffClaims({ existingClaims: { locale: 'en-IN', doctorId: 'old' }, role: 'manager' })).toEqual({ locale: 'en-IN', role: 'manager', forcePasswordChange: false });
     expect(staffClaims({ existingClaims: {}, role: 'doctor', doctorId: 'maharana', forcePasswordChange: true })).toEqual({ role: 'doctor', doctorId: 'maharana', forcePasswordChange: true });
   });
 });

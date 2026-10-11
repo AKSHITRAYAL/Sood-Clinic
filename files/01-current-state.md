@@ -6,7 +6,7 @@ Facts only. Judgements and fixes are in `02-audit-findings.md`. Method: full rea
 
 - Single commit history line: `76477ff "Refactor Firebase clinic application and remove legacy code"` (17 commits total). The project was migrated from a MongoDB/Express design to Firebase; some leftovers remain (see §7).
 - Public GitHub repo (0 stars/forks). It contains real clinic name, address and doctor registration number.
-- Clean install, build and lint now pass with plain `npm ci`. A first emulator-backed Firestore deny-by-default test and emulator configuration are present; CI and `storage.rules` still need to be added.
+- Clean install, build and lint now pass with plain `npm ci`. Emulator-backed Firestore rules tests and a GitHub Actions verification workflow are present; Storage rules remain a future addition.
 
 ## 2. Hosting and Firebase config
 
@@ -32,7 +32,7 @@ Facts only. Judgements and fixes are in `02-audit-findings.md`. Method: full rea
 | `/staff/login` | StaffLogin | staff | Signs out non-staff |
 | `/staff/admin` | StaffAdmin | admin | Metrics, queue, date exceptions, create staff, staff directory |
 | `/staff/doctor` | DoctorSchedule | doctor | Week calendar, day list, weekly hours, date exceptions |
-| `/staff/reception` | ReceptionWorkspace | receptionist | List of all appointments; confirm / check-in / cancel |
+| `/staff/manager` | ManagerWorkspace | manager | List of all appointments; confirm / check-in / cancel |
 | `/staff/account` | AccountSettings(staff) | staff | Same as patient account |
 | `/doctor/schedule` | redirect → `/staff/doctor` | | |
 | `*` | redirect → `/` | | No 404 page |
@@ -71,14 +71,14 @@ Status values in code: `scheduled`, `confirmed`, `checked-in`, `completed`, `can
 - Public read: `branches`, `departments`, `doctors`, `appointmentSlots`, `availabilityOverrides`, `clinicSchedules`.
 - `appointments` create: anyone, with a shape check (`hasOnly` key list, string types, `status=='scheduled'`, `source=='patient_portal'`, consent true, `patientId` empty or own uid). Read: any clinic staff or owning patient. Update: any clinic staff (no field constraints beyond `doctorId`). Delete: never.
 - `appointmentSlots` create: anyone (with the matching-appointment `getAfter` check, doctor id and `status=='booked'`). Update: staff, or anyone re-booking an `available` slot with a matching appointment. Delete: doctor/admin.
-- `patients` (+ `medicalHistory`, `medicalDocuments`): owner full control; **all clinic staff (including receptionist) can read**.
+- `patients` (+ `medicalHistory`, `medicalDocuments`): owner full control; **all clinic staff (including manager) can read**.
 - `staffProfiles`, `clinicSettings`: admin.
 - Default deny for everything else.
 - Helper `isDoctor()` also requires `doctorId == 'brig-ak-sood'`.
 
 ## 7. Dead / unused / legacy code
 
-- `functions/index.js → clinicApi` (Express `/api/v1/public/booking/*`): not called by the frontend, not routed by Hosting, uses a different data shape (Timestamps, `weeklySchedule` on the doctor doc, random slot ids, server-local `getDay()`), and would create data the current UI cannot read.
+- The legacy Express `clinicApi` surface was removed. Booking uses maintained Firebase callable contracts.
 - `firestore.indexes.json`: only one index (for the dead API's `doctors` query). The indexes the live UI needs are missing.
 - `Frontend/.env.example` describes an `/api` proxy that does not exist.
 - `clinicSettings` rule, `branches/departments/doctors` collections (UI-unused).
@@ -89,7 +89,7 @@ Status values in code: `scheduled`, `confirmed`, `checked-in`, `completed`, `can
 ## 8. Frontend structure and styling
 
 - 13 pages, 4 components. Pages are large single components mixing UI, Firestore calls and business rules. Very long lines (prettier-style formatting absent).
-- Duplicated helpers across files: `DOCTOR_ID`, `greeting()`, date-key helpers, auth-guard `onAuthStateChanged` blocks, status-change batches (in Doctor, Reception, Admin).
+- Duplicated helpers across files: `DOCTOR_ID`, `greeting()`, date-key helpers, auth-guard `onAuthStateChanged` blocks, status-change batches (in Doctor, Manager, Admin).
 - Styling: hand-written CSS (`index.css`) for booking, auth, staff, patient screens; Tailwind utilities for Home/About/Contact. Two-plus brand blues in use (`#176dcc`, `#4d8cc6`, `#126bca`, `#173f76`, `#143b70`). Font Manrope via CSS `@import` from Google Fonts. Some `!important` overrides (autofill/input colours). Dark mode configured in Tailwind (`darkMode:'class'`) but not implemented.
 - Responsive: 11 `@media` blocks, all `max-width` (desktop-first). Public, staff and patient areas each have partial mobile rules.
 - Bundle: one JS chunk 818 KB (244 KB gzip): public visitors download all staff/admin code. Images: doctor photo PNG 435 KB; logo PNG 59 KB; hero images and favicon hot-linked from Pexels/Unsplash/icons8.

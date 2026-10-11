@@ -1,9 +1,9 @@
 // Mirror the server transition table for presentation only. The callable remains
 // authoritative and revalidates every requested transition.
 const TRANSITIONS = Object.freeze({
-  scheduled: Object.freeze({ confirmed: ['reception', 'admin', 'doctor'], checked_in: ['reception', 'admin'], cancelled: ['reception', 'admin', 'doctor'], no_show: ['reception', 'admin'] }),
-  confirmed: Object.freeze({ checked_in: ['reception', 'admin'], cancelled: ['reception', 'admin', 'doctor'], no_show: ['reception', 'admin'] }),
-  checked_in: Object.freeze({ in_consultation: ['doctor'], cancelled: ['reception', 'admin'] }),
+  scheduled: Object.freeze({ confirmed: ['manager', 'admin', 'doctor'], checked_in: ['manager', 'admin'], cancelled: ['manager', 'admin', 'doctor'], no_show: ['manager', 'admin'] }),
+  confirmed: Object.freeze({ checked_in: ['manager', 'admin'], cancelled: ['manager', 'admin', 'doctor'], no_show: ['manager', 'admin'] }),
+  checked_in: Object.freeze({ in_consultation: ['doctor'], cancelled: ['manager', 'admin'] }),
   in_consultation: Object.freeze({ completed: ['doctor'] }),
 });
 

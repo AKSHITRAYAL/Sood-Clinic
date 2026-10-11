@@ -54,10 +54,10 @@ Legend: E = exists today, N = new (needs design), Role = who sees it. Data/actio
 | Screen | Role | Status | Purpose | Key states and actions |
 |---|---|---|---|---|
 | Staff login | all staff | E | Sign in, MFA prompt, reset | Wrong role → clear message |
-| Reception – Today | receptionist, admin | E (rebuild) | Run the day: queue with tokens, statuses, quick actions (confirm, check in, cancel with reason, mark no-show), walk-in button, search, next-up | Bounded to today; live updates; legal actions only |
-| Reception – Patient search/registry | receptionist, admin, doctor | N | Find by phone/name, create patient, patient card with appointment history | Duplicate hints |
-| Reception – Book on behalf | receptionist, admin | N | Same booking steps as public but staff-styled and faster | `createStaffAppointment` |
-| Reception – Day sheet / print | receptionist | N | Printable list for the day | Print stylesheet |
+| Manager – Today | manager, admin | E (rebuild) | Run the day: queue with tokens, statuses, quick actions (confirm, check in, cancel with reason, mark no-show), walk-in button, search, next-up | Bounded to today; live updates; legal actions only |
+| Manager – Patient search/registry | manager, admin, doctor | N | Find by phone/name, create patient, patient card with appointment history | Duplicate hints |
+| Manager – Book on behalf | manager, admin | N | Same booking steps as public but staff-styled and faster | `createStaffAppointment` |
+| Manager – Day sheet / print | manager | N | Printable list for the day | Print stylesheet |
 | Doctor – Today | doctor | E (rebuild) | Ordered patient list, call next / start / complete, patient summary drawer | Only legal transitions |
 | Doctor – Calendar & hours | doctor | E | Week view, weekly hours, exceptions list (add/edit/delete), close-day preview | Monday-based weeks |
 | Doctor – Consultation | doctor | N (P2) | Visit note, vitals, diagnosis, advice, prescription builder, follow-up | Autosave, lock, print |
@@ -66,10 +66,10 @@ Legend: E = exists today, N = new (needs design), Role = who sees it. Data/actio
 | Admin – Reports | admin | N (P2) | Volume, no-shows, cancellations, revenue | Date range, export |
 | Admin – Settings | admin | N | Clinic profile, hours defaults, slot length, cutoffs, reminders, templates | |
 | Admin – Audit log | admin | N | Filterable audit trail | Read-only |
-| Billing | reception, admin | N (P2) | Invoice, payment, receipt print, day-close | |
+| Billing | manager, admin | N (P2) | Invoice, payment, receipt print, day-close | |
 | My account | all staff | E | Name, password, MFA | |
 
-Shared shell: top bar with clinic name, role badge, today's date (IST), notifications, account menu; primary nav per role (see §7); global search (patient) for reception/doctor.
+Shared shell: top bar with clinic name, role badge, today's date (IST), notifications, account menu; primary nav per role (see §7); global search (patient) for manager/doctor.
 
 ## 5. Flow specifications
 
@@ -81,7 +81,7 @@ Shared shell: top bar with clinic name, role badge, today's date (IST), notifica
 4. **Success:** reference (large, copyable), add to calendar (.ics), directions, "cancel or reschedule" link, what to bring, phone number, and an SMS/WhatsApp confirmation notice when P1-NOTIFY lands.
 5. **Failure recoveries:** slot taken → keep entered details, show the next free slots; network error → retry without losing data; rate limited → friendly wait message.
 
-### 5.2 Reception day flow (speed matters)
+### 5.2 Manager day flow (speed matters)
 
 Landing = **Today**. Big touch targets (used on desktop and tablet), keyboard shortcuts (`/` search, `N` new walk-in, `Enter` to advance the focused row), status chips with colour + icon + text (never colour alone), one-click primary action per row that follows the state machine (Confirm → Check in → …), destructive actions require a reason dialog, undo toast where legal. Waiting list shows waiting time. Empty day state suggests "Add walk-in".
 
@@ -124,7 +124,7 @@ Hierarchy: next appointment (with cancel/reschedule) → history → documents/p
 
 - **Trust first:** real photos, credentials visible, clear contact details, calm palette, no stock-photo gloss, no aggressive banners.
 - **Older patients and low-bandwidth mobile users:** ≥ 16 px body text, large tap targets (≥ 44 px), high contrast, short forms, plain language, works on 3G, no layout shift.
-- **Reception is a power-user context:** density, speed, keyboard, predictable positions, no modals for routine steps.
+- **Manager is a power-user context:** density, speed, keyboard, predictable positions, no modals for routine steps.
 - **Never blame the user;** every error says what happened and what to do.
 - **Privacy in the UI:** avoid showing full phone/reason in shared-screen contexts unless needed; mask patient names on the public queue display if one is ever added.
 - **Language:** English now; design for Hindi/Punjabi (text expansion, script fonts) if D-09 says yes.
@@ -134,7 +134,7 @@ Hierarchy: next appointment (with cancel/reschedule) → history → documents/p
 **Public nav:** Home · About · Services · Contact · Book appointment (primary button) · Sign in (secondary). Footer: address, phone, hours, links to privacy/terms; **remove "Staff access" from the public footer** (staff use their bookmarked domain).
 
 **Staff nav (by role):**
-- Reception: Today · Search patients · Book · Day sheet · (Billing)
+- Manager: Today · Search patients · Book · Day sheet · (Billing)
 - Doctor: Today · Calendar · Patients · (Visits)
 - Admin: Overview · Staff · Reports · Settings · Audit log
 
@@ -165,5 +165,5 @@ Real clinic photos (exterior, waiting area, doctor), logo files (vector), phone/
 - All components live in `src/ui`, use tokens only (no raw hex in feature code), and are documented (short usage notes or a `/dev/ui` gallery route excluded from production).
 - No Firestore/Function imports in `ui/` or view components.
 - Lighthouse (mobile) ≥ 90 performance/accessibility/best-practices/SEO on Home, About, Contact, Book; axe: 0 serious/critical violations.
-- Visual regression baselines (optional) for booking and reception Today.
+- Visual regression baselines (optional) for booking and manager Today.
 - Data contracts and rules are unchanged from `03` (verified by the existing test suite passing untouched).

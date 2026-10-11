@@ -11,7 +11,7 @@ A **real-client** clinic website and management system for **Sood Clinic, Panchk
 Goal: a high-quality **end-to-end clinic management system** made of:
 
 - a **public website** (marketing, booking, patient portal), and
-- a **staff website** (admin, doctor, reception),
+- a **staff website** (admin, doctor, manager),
 
 both served from **one Firebase project** (`sood-clinic`), one domain name, one billing account.
 
@@ -28,7 +28,7 @@ both served from **one Firebase project** (`sood-clinic`), one domain name, one 
 | `firestore.rules`, `firestore.indexes.json` | Access control and indexes. |
 | `firebase.json`, `.firebaserc` | Hosting (single site `sood-clinic`, serves `Frontend/dist`), Firestore, Functions. Project alias `default` = `sood-clinic`. |
 
-Auth model: Firebase Auth email/password. Staff roles are **custom claims** (`role` = `admin` | `doctor` | `receptionist`, doctor also has `doctorId`). Patients are any authenticated user without a staff role.
+Auth model: Firebase Auth email/password. Staff roles are **custom claims** (`role` = `admin` | `doctor` | `manager`, doctor also has `doctorId`). Patients are any authenticated user without a staff role.
 
 ## 3. Commands (verified 2026-09-30)
 
@@ -50,7 +50,7 @@ That ships **Hosting only**. Rules, indexes and functions are NOT deployed by it
 
 1. **Never trust the browser.** Anything that changes appointments, slots, roles, money or clinical data must be validated server-side (callable Function or tightly constrained rules). Target state: clients cannot write `appointments` / `appointmentSlots` directly.
 2. **Roles come only from custom claims** set by the Admin SDK. Never derive a role from Firestore data the client can write, from localStorage, or from the URL.
-3. **Least privilege.** Receptionist ≠ doctor. Clinical data (visit notes, history, documents, prescriptions) is doctor-only (+ the owning patient where stated in `docs/03`). Do not widen a rule to "make the UI work"; fix the query or the design.
+3. **Least privilege.** Manager ≠ doctor. Clinical data (visit notes, history, documents, prescriptions) is doctor-only (+ the owning patient where stated in `docs/03`). Do not widen a rule to "make the UI work"; fix the query or the design.
 4. **Time is Asia/Kolkata (IST, UTC+05:30, no DST).** Store instants as Firestore `Timestamp`. Also store a `dateKey` (`YYYY-MM-DD`, IST) for day queries. Never use `Date` local getters (`getDay`, `getHours`, `toISOString().slice(0,10)`) for business logic in the browser or in Functions (Functions run in UTC). Use the shared IST helper (task P0-05).
 5. **Firestore has no nested arrays.** Store windows as `[{ start: "08:00", end: "10:00" }]`, never `[["08:00","10:00"]]`.
 6. **No secrets in the repo.** Firebase web config is public by design; service-account keys, `.env`, tokens are not. `.gitignore` already covers them. Do not weaken it.

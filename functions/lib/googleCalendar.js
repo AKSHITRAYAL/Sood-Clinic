@@ -83,4 +83,12 @@ const updateEventTime = async ({ accessToken, calendarId, eventId, startsAt, end
   body: JSON.stringify({ start: { dateTime: startsAt, timeZone: 'Asia/Kolkata' }, end: { dateTime: endsAt, timeZone: 'Asia/Kolkata' } }),
 });
 
-module.exports = { buildAuthorizationUrl, createEvent, decrypt, encrypt, exchangeAuthorizationCode, freeBusy, refreshAccessToken, updateEventTime };
+const deleteEvent = async ({ accessToken, calendarId, eventId }) => {
+  const response = await fetch(`${GOOGLE_API}/calendars/${encodeURIComponent(calendarId || 'primary')}/events/${encodeURIComponent(eventId)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } });
+  if (response.ok || response.status === 404 || response.status === 410) return;
+  const error = new Error('Google Calendar request failed.');
+  error.status = response.status;
+  throw error;
+};
+
+module.exports = { buildAuthorizationUrl, createEvent, deleteEvent, decrypt, encrypt, exchangeAuthorizationCode, freeBusy, refreshAccessToken, updateEventTime };

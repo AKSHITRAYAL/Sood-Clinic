@@ -5,7 +5,7 @@ const { canTransition } = stateMachine;
 
 describe('appointment state machine', () => {
   it('permits only the staff transitions appropriate to each role', () => {
-    expect(canTransition('scheduled', 'confirmed', 'reception')).toBe(true);
+    expect(canTransition('scheduled', 'confirmed', 'manager')).toBe(true);
     expect(canTransition('scheduled', 'checked_in', 'admin')).toBe(true);
     expect(canTransition('checked_in', 'in_consultation', 'doctor')).toBe(true);
     expect(canTransition('in_consultation', 'completed', 'doctor')).toBe(true);

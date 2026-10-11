@@ -37,7 +37,7 @@ Scripts (root `package.json`):
 "test":           "npm run test:rules && npm run test:functions && npm --prefix Frontend run test"
 ```
 
-Seed script (`scripts/seed-emulator.js`): creates `clinic/*`, `doctors`, `doctorSchedules` (Mon–Sat 08:00–10:00 and 17:00–18:30, 20-min slots), one user per role with claims (`admin`, `doctor` with `doctorId`, `receptionist`), and a patient user. Never point seed scripts at production.
+Seed script (`scripts/seed-emulator.js`): creates `clinic/*`, `doctors`, `doctorSchedules` (Mon–Sat 08:00–10:00 and 17:00–18:30, 20-min slots), one user per role with claims (`admin`, `doctor` with `doctorId`, `manager`), and a patient user. Never point seed scripts at production.
 
 ## 3. Rules tests (write first)
 
@@ -58,7 +58,7 @@ beforeEach(() => env.clearFirestore());
 const ctx = {
   anon:      () => env.unauthenticatedContext().firestore(),
   patient:   (uid='p1') => env.authenticatedContext(uid).firestore(),
-  reception: () => env.authenticatedContext('r1', { role: 'receptionist' }).firestore(),
+  manager: () => env.authenticatedContext('r1', { role: 'manager' }).firestore(),
   doctor:    (id='brig-ak-sood') => env.authenticatedContext('d1', { role: 'doctor', doctorId: id }).firestore(),
   admin:     () => env.authenticatedContext('a1', { role: 'admin' }).firestore(),
 };
@@ -68,7 +68,7 @@ const ctx = {
 
 - Anonymous: can read `clinic/publicConfig`, `doctors`, `doctorSchedules`, `scheduleExceptions`, `appointmentSlots`; **cannot** write any of them; cannot read `appointments`, `patients`, `invoices`, `auditLogs`, `notifications`, `counters`; **cannot** create `appointments` or `appointmentSlots`.
 - Patient: reads only appointments/patients linked to their uid; cannot read another patient's data; can update only allow-listed patient fields; cannot write `visits`; reads a visit only when `publishedToPatient == true`.
-- Reception: reads appointments and patients demographics; **cannot** read `visits`, `patientReported` is read-only, `medicalHistory` legacy denied; cannot write `appointments` directly (must use callable); cannot read `auditLogs`, `staffProfiles` of others.
+- Manager: reads appointments and patients demographics; **cannot** read `visits`, `patientReported` is read-only, `medicalHistory` legacy denied; cannot write `appointments` directly (must use callable); cannot read `auditLogs`, `staffProfiles` of others.
 - Doctor: reads/writes own `visits`/`prescriptions`; cannot read another doctor's appointments; writes own `doctorSchedules`/`scheduleExceptions` with valid shape only; nested-array or bad time strings rejected.
 - Admin: reads operations data and `auditLogs`; writes config; cannot read `visits` (D-07 default).
 - Shape validation: `dateKey` must match doc id; `weekday` 0–6; `HH:mm` strings; `type` enum.

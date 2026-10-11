@@ -57,7 +57,7 @@ describe('Firestore default-deny boundary', () => {
     await assertFails(setDoc(doc(db, 'patients', 'patient-one', 'medicalDocuments', 'record-one'), { title: 'Self upload' }));
   });
 
-  it('keeps clinical history and documents out of receptionist/admin reads while allowing the owning patient and doctor', async () => {
+  it('keeps clinical history and documents out of manager/admin reads while allowing the owning patient and doctor', async () => {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
       await setDoc(doc(db, 'patients', 'patient-one', 'medicalHistory', 'entry-one'), { details: 'Clinical history' });
@@ -65,18 +65,18 @@ describe('Firestore default-deny boundary', () => {
     });
     const patient = testEnv.authenticatedContext('patient-one', { email: 'patient@example.com' }).firestore();
     const doctor = testEnv.authenticatedContext('doctor-one', { role: 'doctor', doctorId: 'maharana' }).firestore();
-    const reception = testEnv.authenticatedContext('reception-one', { role: 'receptionist' }).firestore();
+    const manager = testEnv.authenticatedContext('manager-one', { role: 'manager' }).firestore();
     const admin = testEnv.authenticatedContext('admin-one', { role: 'admin' }).firestore();
     const history = doc(patient, 'patients', 'patient-one', 'medicalHistory', 'entry-one');
     const document = doc(patient, 'patients', 'patient-one', 'medicalDocuments', 'document-one');
 
     await assertSucceeds(getDoc(history));
     await assertSucceeds(getDoc(doc(doctor, 'patients', 'patient-one', 'medicalHistory', 'entry-one')));
-    await assertFails(getDoc(doc(reception, 'patients', 'patient-one', 'medicalHistory', 'entry-one')));
+    await assertFails(getDoc(doc(manager, 'patients', 'patient-one', 'medicalHistory', 'entry-one')));
     await assertFails(getDoc(doc(admin, 'patients', 'patient-one', 'medicalDocuments', 'document-one')));
-    await assertFails(getDoc(doc(reception, 'patients', 'patient-one', 'medicalDocuments', 'document-one')));
-    await assertSucceeds(setDoc(doc(reception, 'patients', 'patient-one', 'medicalDocuments', 'new-document'), { title: 'Uploaded by reception' }));
-    await assertFails(setDoc(doc(reception, 'patients', 'patient-one', 'medicalHistory', 'new-history'), { details: 'Not allowed' }));
+    await assertFails(getDoc(doc(manager, 'patients', 'patient-one', 'medicalDocuments', 'document-one')));
+    await assertFails(setDoc(doc(manager, 'patients', 'patient-one', 'medicalDocuments', 'new-document'), { title: 'Uploaded by manager' }));
+    await assertFails(setDoc(doc(manager, 'patients', 'patient-one', 'medicalHistory', 'new-history'), { details: 'Not allowed' }));
     await assertFails(setDoc(doc(admin, 'auditLogs', 'browser-log'), { action: 'not allowed' }));
   });
 
@@ -90,6 +90,25 @@ describe('Firestore default-deny boundary', () => {
     }));
   });
 
+  it('keeps hashed booking rate-limit records server-only', async () => {
+    const db = testEnv.unauthenticatedContext().firestore();
+    await assertFails(getDoc(doc(db, 'rateLimits', 'a1b2c3d4e5f60708a9b0c1d2e3f40506')));
+    await assertFails(setDoc(doc(db, 'rateLimits', 'a1b2c3d4e5f60708a9b0c1d2e3f40506'), { count: 1 }));
+  });
+
+  it('blocks a manager with a mandatory password change from reading appointments', async () => {
+    const manager = testEnv.authenticatedContext('manager-password-change', { role: 'manager', forcePasswordChange: true }).firestore();
+    await assertFails(getDoc(doc(manager, 'appointments', 'appointment-one')));
+  });
+
+  it('allows a manager without a mandatory password change to read appointments', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'appointments', 'appointment-one'), { patientId: 'patient-one', status: 'scheduled' });
+    });
+    const manager = testEnv.authenticatedContext('manager-ready', { role: 'manager', forcePasswordChange: false }).firestore();
+    await assertSucceeds(getDoc(doc(manager, 'appointments', 'appointment-one')));
+  });
+
   it('never lets an administrator browser session write staff access records', async () => {
     const db = testEnv.authenticatedContext('admin-one', { role: 'admin', email: 'admin@example.com' }).firestore();
     await assertFails(setDoc(doc(db, 'staffProfiles', 'staff-one'), {
@@ -97,10 +116,12 @@ describe('Firestore default-deny boundary', () => {
     }));
   });
 
-  it('scopes a doctor schedule to the doctor ID in the trusted claim', async () => {
+  it('denies direct browser schedule and exception writes even for the assigned doctor', async () => {
     const db = testEnv.authenticatedContext('doctor-one', { role: 'doctor', doctorId: 'maharana' }).firestore();
     const schedule = { doctorId: 'maharana', sessions: [{ weekday: 1, start: '09:00', end: '12:00' }], updatedAt: '2026-10-09T00:00:00.000Z', updatedBy: 'doctor-one' };
-    await assertSucceeds(setDoc(doc(db, 'doctorSchedules', 'maharana'), schedule));
+    await assertFails(setDoc(doc(db, 'doctorSchedules', 'maharana'), schedule));
     await assertFails(setDoc(doc(db, 'doctorSchedules', 'another-doctor'), { ...schedule, doctorId: 'another-doctor' }));
+    await assertFails(setDoc(doc(db, 'scheduleExceptions', 'maharana_2026-10-10'), { doctorId: 'maharana', dateKey: '2026-10-10', type: 'closed', sessions: [] }));
+    await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), 'scheduleExceptions', 'maharana_2026-10-10')));
   });
 });
