@@ -2,9 +2,9 @@
   "name": "sood-clinic-tooling",
   "private": true,
   "scripts": {
-    "emulators": "FIREBASE_DEBUG_PATH=/tmp/sood-clinic-firebase-debug.log firebase emulators:start --project demo-sood-clinic",
-    "test:rules": "FIREBASE_DEBUG_PATH=/tmp/sood-clinic-firebase-debug.log firebase emulators:exec --only firestore --project demo-sood-clinic \"vitest run tests/rules\"",
-    "test:functions": "FIREBASE_DEBUG_PATH=/tmp/sood-clinic-firebase-debug.log firebase emulators:exec --only auth,firestore,functions --project demo-sood-clinic \"vitest run functions/test\"",
+    "emulators": "XDG_CONFIG_HOME=/tmp/sood-clinic-firebase-config NO_UPDATE_NOTIFIER=1 FIREBASE_DEBUG_PATH=/tmp/sood-clinic-firebase-debug.log firebase emulators:start --project demo-sood-clinic",
+    "test:rules": "XDG_CONFIG_HOME=/tmp/sood-clinic-firebase-config NO_UPDATE_NOTIFIER=1 FIREBASE_DEBUG_PATH=/tmp/sood-clinic-firebase-debug.log firebase emulators:exec --only firestore --project demo-sood-clinic \"vitest run tests/rules\"",
+    "test:functions": "XDG_CONFIG_HOME=/tmp/sood-clinic-firebase-config NO_UPDATE_NOTIFIER=1 FIREBASE_DEBUG_PATH=/tmp/sood-clinic-firebase-debug.log firebase emulators:exec --only auth,firestore,functions --project demo-sood-clinic \"vitest run functions/test\"",
     "test:time": "vitest run tests/time",
     "test:schedule": "vitest run tests/schedule",
     "test": "npm run test:rules && npm run test:functions"
