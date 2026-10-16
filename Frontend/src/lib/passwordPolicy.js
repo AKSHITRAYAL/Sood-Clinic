@@ -1,4 +1,4 @@
-export const passwordPolicyMessage = 'Use at least 8 characters with an uppercase letter, lowercase letter, number, and one of ! @ # $.';
+export const passwordPolicyMessage = 'Use at least 8 characters with an uppercase letter, lowercase letter, number, and special character.';
 
 export const passwordRequirements = (value) => {
   const password = String(value || '');
@@ -7,7 +7,7 @@ export const passwordRequirements = (value) => {
     uppercase: /[A-Z]/.test(password),
     lowercase: /[a-z]/.test(password),
     number: /\d/.test(password),
-    special: /[!@#$]/.test(password),
+    special: /[^\p{L}\p{N}\s]/u.test(password),
   };
 };
 

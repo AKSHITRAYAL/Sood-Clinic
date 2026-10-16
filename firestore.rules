@@ -116,10 +116,11 @@ service cloud.firestore {
     match /clinicSettings/{settingId} {
       allow read, write: if isClinicAdmin();
     }
-    // Patient-owned data is private to the signed-in patient. Clinic staff may access it
-    // only when clinically required; public visitors cannot read any of it.
+    // Patient profiles are private to the patient and the administrator. Managers use
+    // the audited server-side registry search, while doctors access only the clinical
+    // subcollections below. This prevents browser-wide profile enumeration.
     match /patients/{patientId} {
-      allow read: if isClinicStaff() || (request.auth != null && request.auth.uid == patientId);
+      allow read: if isClinicAdmin() || (request.auth != null && request.auth.uid == patientId);
       // Profile writes go through callables so the private administrator directory
       // remains in sync. Clinical records stay staff-only.
       allow create, update, delete: if false;

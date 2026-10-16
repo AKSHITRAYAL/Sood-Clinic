@@ -57,6 +57,19 @@ describe('Firestore default-deny boundary', () => {
     await assertFails(setDoc(doc(db, 'patients', 'patient-one', 'medicalDocuments', 'record-one'), { title: 'Self upload' }));
   });
 
+  it('keeps patient profiles out of non-admin staff browser sessions', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'patients', 'patient-one'), { displayName: 'Patient One' });
+    });
+    const manager = testEnv.authenticatedContext('manager-one', { role: 'manager' }).firestore();
+    const doctor = testEnv.authenticatedContext('doctor-one', { role: 'doctor', doctorId: 'maharana' }).firestore();
+    const admin = testEnv.authenticatedContext('admin-one', { role: 'admin' }).firestore();
+
+    await assertFails(getDoc(doc(manager, 'patients', 'patient-one')));
+    await assertFails(getDoc(doc(doctor, 'patients', 'patient-one')));
+    await assertSucceeds(getDoc(doc(admin, 'patients', 'patient-one')));
+  });
+
   it('keeps clinical history and documents out of manager/admin reads while allowing the owning patient and doctor', async () => {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();

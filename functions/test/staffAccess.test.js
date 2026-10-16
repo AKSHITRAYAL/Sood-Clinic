@@ -15,6 +15,7 @@ describe('staff access safeguards', () => {
     expect(isStrongTemporaryPassword('longpasswordonly')).toBe(false);
     expect(isStrongTemporaryPassword('Password2026')).toBe(false);
     expect(isStrongTemporaryPassword('SaferPassword2026!')).toBe(true);
+    expect(isStrongTemporaryPassword('SaferPassword2026%^')).toBe(true);
   });
 
   it('keeps doctor scoping only for doctor claims', () => {

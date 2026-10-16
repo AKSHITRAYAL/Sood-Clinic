@@ -9,7 +9,7 @@ const isDoctorId = (value) => /^[A-Za-z0-9_-]{2,80}$/.test(String(value || ''));
 // administrator-created credentials consistent with the patient portal policy.
 const isStrongTemporaryPassword = (value) => {
   const password = String(value || '');
-  return password.length >= 8 && /[A-Z]/.test(password) && /[a-z]/.test(password) && /\d/.test(password) && /[!@#$]/.test(password);
+  return password.length >= 8 && /[A-Z]/.test(password) && /[a-z]/.test(password) && /\d/.test(password) && /[^\p{L}\p{N}\s]/u.test(password);
 };
 
 const staffClaims = ({ existingClaims = {}, role, doctorId, forcePasswordChange = false }) => {

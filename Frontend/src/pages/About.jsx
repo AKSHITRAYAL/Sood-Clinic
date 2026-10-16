@@ -1,6 +1,6 @@
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import drAkSoodProfile from '../assets/brand/dr-ak-sood-profile.png';
+import drAkSoodProfile from '../assets/brand/dr-ak-sood-portrait.jpeg';
 
 const About = () => {
   return (
@@ -8,7 +8,7 @@ const About = () => {
     <Navbar/>
     <main className="bg-[#f7fbff] py-12 md:py-20">
       <section className="mx-auto grid w-[min(1100px,calc(100%-2rem))] items-center gap-10 md:grid-cols-[.9fr_1.1fr]">
-        <img src={drAkSoodProfile} alt="Dr. Brig. A. K. Sood VSM (Retd)" className="h-full min-h-[330px] w-full rounded-3xl object-cover object-top shadow-xl" />
+        <img src={drAkSoodProfile} alt="Dr. Brig. A. K. Sood VSM (Retd)" className="aspect-[4/5] w-full rounded-3xl object-cover object-center shadow-xl" />
         <div>
           <p className="text-xs font-extrabold uppercase tracking-[.18em] text-sky-700">Sood Clinic · Panchkula</p>
           <h1 className="mt-3 text-4xl font-extrabold tracking-tight text-[#173f76] md:text-5xl">Dr. Brig. A. K. Sood VSM (Retd)</h1>

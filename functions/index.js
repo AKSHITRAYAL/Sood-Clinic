@@ -363,7 +363,7 @@ exports.manageStaffAccount = onCall({ ...callableOptions }, async (request) => {
   const normalizedEmail = normalizeEmail(email);
   if (!isEmail(normalizedEmail)) throw new HttpsError('invalid-argument', 'Enter a valid staff email address.');
   if (action === 'provision') {
-    if (!isStaffRole(role) || !isStrongTemporaryPassword(password) || !String(displayName).trim()) throw new HttpsError('invalid-argument', 'Enter a name, valid role, and a temporary password with at least 8 characters, uppercase and lowercase letters, a number, and ! @ # or $.');
+    if (!isStaffRole(role) || !isStrongTemporaryPassword(password) || !String(displayName).trim()) throw new HttpsError('invalid-argument', 'Enter a name, valid role, and a temporary password with at least 8 characters, uppercase and lowercase letters, a number, and a special character.');
     if (role === 'doctor' && !isDoctorId(doctorId)) throw new HttpsError('invalid-argument', 'Enter a stable doctor ID using letters, numbers, hyphens, or underscores.');
     let user;
     try {
@@ -399,7 +399,7 @@ exports.manageStaffAccount = onCall({ ...callableOptions }, async (request) => {
     return { message: 'Staff access updated and active sessions were revoked.' };
   }
   if (action === 'temporaryPassword') {
-    if (!isStrongTemporaryPassword(password)) throw new HttpsError('invalid-argument', 'Temporary password must have at least 8 characters, uppercase and lowercase letters, a number, and ! @ # or $.');
+    if (!isStrongTemporaryPassword(password)) throw new HttpsError('invalid-argument', 'Temporary password must have at least 8 characters, uppercase and lowercase letters, a number, and a special character.');
     await admin.auth().updateUser(user.uid, { password: String(password) });
     await admin.auth().setCustomUserClaims(user.uid, { ...user.customClaims, forcePasswordChange: true });
     await admin.auth().revokeRefreshTokens(user.uid);
@@ -857,7 +857,9 @@ exports.createBooking = onCall({ ...callableOptions, timeoutSeconds: 30, memory:
   if (!validClientRequestId(clientRequestId)) throw publicError('invalid-argument', 'Please refresh and try booking again.');
   const name = trimmed(patient?.name, 120);
   const phone = trimmed(patient?.phone, 30);
+  const email = normalizeEmail(patient?.email);
   if (!name || !validPhone(phone) || patient?.consentToTreatment !== true) throw publicError('invalid-argument', 'Enter your name, a valid phone number, and consent to the appointment terms.');
+  if (email && !isEmail(email)) throw publicError('invalid-argument', 'Enter a valid email address.');
   const phoneKey = toE164(phone);
   if (!phoneKey) throw publicError('invalid-argument', 'Enter a valid Indian phone number.');
   await enforceBookingRateLimit(request);
@@ -892,7 +894,7 @@ exports.createBooking = onCall({ ...callableOptions, timeoutSeconds: 30, memory:
         reference, branchId, departmentId, doctorId, visitType: context.visitType.id, visitMode: context.visitType.mode, dateKey,
         startsAt: admin.firestore.Timestamp.fromDate(requested.startsAt), endsAt: admin.firestore.Timestamp.fromDate(requested.endsAt),
         status, source: request.auth ? 'patient_portal' : 'web', patientId: request.auth?.uid || null,
-        patientSnapshot: { name, phone }, phoneKey, reason: trimmed(reason, 500) || null, slotIds: [slotRef.id],
+        patientSnapshot: { name, phone, email: email || null }, phoneKey, reason: trimmed(reason, 500) || null, slotIds: [slotRef.id],
         consent: { version: trimmed(consentVersion, 40) || 'booking-v1', acceptedAt: admin.firestore.FieldValue.serverTimestamp() },
         createdBy, externalCalendar: { provider: 'google', syncStatus: 'not_connected' }, videoConsultation: context.visitType.mode === 'video' ? { status: 'awaiting_link' } : null, createdAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });

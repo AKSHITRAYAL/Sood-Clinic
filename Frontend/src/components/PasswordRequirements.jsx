@@ -8,7 +8,7 @@ const PasswordRequirements = ({ password }) => {
     ['uppercase', 'At least one capital letter'],
     ['lowercase', 'At least one small letter'],
     ['number', 'At least one number'],
-    ['special', 'At least one special character (! @ # $)'],
+    ['special', 'At least one special character'],
   ];
 
   return <ul className="password-requirements" aria-label="Password requirements">
