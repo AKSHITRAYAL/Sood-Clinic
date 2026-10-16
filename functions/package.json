@@ -6,7 +6,7 @@
   },
   "main": "index.js",
   "scripts": {
-    "lint": "node --check index.js && node --check assign-staff-role.js && node --check migrate-legacy-staff-role.js && node --check lib/staffAccess.js && node --check lib/appointmentPolicy.js && node --check lib/phone.js",
+    "lint": "node --check index.js && node --check assign-staff-role.js && node --check migrate-legacy-staff-role.js && node --check migrate-visit-types.js && node --check migrate-slot-units.js && node --check lib/staffAccess.js && node --check lib/appointmentPolicy.js && node --check lib/phone.js && node --check lib/notifications.js && node --check lib/engine/units.js && node --check lib/engine/availability.js && node --check lib/engine/bookingInput.js && node --check lib/engine/placement.js && node --check lib/engine/reference.js && node --check lib/engine/visitType.js && node --check lib/tokens.js && node --check src/scheduler/index.js && node --check src/scheduler/errors.js && node --check src/scheduler/visitTypes.js && node --check src/scheduler/placement.js && node --check src/scheduler/availabilityCallables.js && node --check src/scheduler/notify.js",
     "seed": "node seed.js",
     "assign-staff-role": "node assign-staff-role.js",
     "migrate-manager-role": "node migrate-legacy-staff-role.js"

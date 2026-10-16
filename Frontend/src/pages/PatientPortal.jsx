@@ -45,6 +45,8 @@ const PatientPortal = ({ view }) => {
   const [newPassword, setNewPassword] = useState('');
   const [portalMenuOpen, setPortalMenuOpen] = useState(false);
   const [dialog, setDialog] = useState(null);
+  const [patientId, setPatientId] = useState('');
+  const [linkForm, setLinkForm] = useState({ uhid: '', phone: '' });
 
   useEffect(() => onAuthStateChanged(auth, (next) => setUser(next || null)), []);
   useEffect(() => {
@@ -70,17 +72,43 @@ const PatientPortal = ({ view }) => {
   }, [portalMenuOpen]);
   useEffect(() => {
     if (!user) return undefined;
-    const patientRef = doc(firestore, 'patients', user.uid);
-    const failed = () => setError('We could not load part of your care information. Please refresh or contact the clinic.');
-    const stopProfile = onSnapshot(patientRef, (snapshot) => {
-      const data = snapshot.exists() ? snapshot.data() : {};
-      setProfile(data);
-      setForm({ ...blankProfile(), ...data, displayName: data.displayName || user.displayName || '' });
-    }, failed);
-    const stopDocuments = onSnapshot(query(collection(patientRef, 'medicalDocuments'), orderBy('createdAt', 'desc')), (snapshot) => setDocuments(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))), failed);
-    const stopAppointments = onSnapshot(query(collection(firestore, 'appointments'), where('patientId', '==', user.uid)), (snapshot) => setAppointments(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (toDate(a.startsAt)?.getTime() || 0) - (toDate(b.startsAt)?.getTime() || 0))), failed);
-    return () => { stopProfile(); stopDocuments(); stopAppointments(); };
+    let active = true;
+    let stopProfile = () => {};
+    let stopDocuments = () => {};
+    let stopAppointments = () => {};
+    const loadLinkedProfile = async () => {
+      try {
+        const result = await httpsCallable(functions, 'getOwnPatientProfile')();
+        if (!active) return;
+        const targetId = result.data.patientId || user.uid;
+        setPatientId(targetId);
+        setProfile(result.data.profile || {});
+        setForm({ ...blankProfile(), ...(result.data.profile || {}), displayName: result.data.profile?.displayName || user.displayName || '' });
+        const patientRef = doc(firestore, 'patients', targetId);
+        const failed = () => setError('We could not load part of your care information. Please refresh or contact the clinic.');
+        stopProfile = onSnapshot(patientRef, (snapshot) => {
+          const data = snapshot.exists() ? snapshot.data() : {};
+          setProfile(data);
+          setForm({ ...blankProfile(), ...data, displayName: data.displayName || user.displayName || '' });
+        }, failed);
+        stopDocuments = onSnapshot(query(collection(patientRef, 'medicalDocuments'), orderBy('createdAt', 'desc')), (snapshot) => setDocuments(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))), failed);
+        stopAppointments = onSnapshot(query(collection(firestore, 'appointments'), where('patientId', '==', targetId)), (snapshot) => setAppointments(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (toDate(a.startsAt)?.getTime() || 0) - (toDate(b.startsAt)?.getTime() || 0))), failed);
+      } catch (caught) {
+        setError(caught.message || 'We could not load your patient profile.');
+      }
+    };
+    loadLinkedProfile();
+    return () => { active = false; stopProfile(); stopDocuments(); stopAppointments(); };
   }, [user]);
+
+  const requestLink = async (event) => {
+    event.preventDefault(); setError(''); setNotice('');
+    try {
+      const result = await httpsCallable(functions, 'requestPatientLink')(linkForm);
+      setNotice(result.data.status === 'linked' ? 'Your clinic record is already linked.' : 'Your request was sent to the clinic for verification.');
+      setLinkForm({ uhid: '', phone: '' });
+    } catch (caught) { setError(caught.message || 'We could not submit the linking request.'); }
+  };
 
   const saveProfile = async (event) => {
     event.preventDefault(); setError(''); setNotice('');
@@ -116,12 +144,12 @@ const PatientPortal = ({ view }) => {
   const navItems = [['overview', '/patient', 'Overview'], ['appointments', '/patient/appointments', 'Appointments'], ['video', '/patient/video', 'Online visits'], ['documents', '/patient/documents', 'Documents'], ['health', '/patient/health', 'Health profile'], ['profile', '/patient/account', 'Personal details'], ['security', '/patient/security', 'Account & security']];
   const titles = { appointments: 'Appointments', video: 'Online visits', documents: 'Documents', health: 'Health profile', profile: 'Personal details', security: 'Account & security' };
 
-  const profileForm = <form className="patient-form" onSubmit={saveProfile}>
+  const profileForm = <><form className="patient-form" onSubmit={saveProfile}>
     <header><p className="section-kicker">Personal details</p><h2>Keep your clinic record current</h2><span>Only use details you are comfortable sharing with Sood Clinic.</span></header>
     <div className="patient-form__grid"><label>Title<select value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })}><option value="">No title</option><option>Mr.</option><option>Mrs.</option><option>Ms.</option><option>Dr.</option></select></label><label>Full name<input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} autoComplete="name" required /></label><label>Email address<input value={user.email || ''} disabled /></label><label>Phone number<input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} autoComplete="tel" inputMode="tel" /></label><label>Date of birth<input type="date" value={form.dateOfBirth} onChange={(event) => setForm({ ...form, dateOfBirth: event.target.value })} /></label><label>Gender<select value={form.gender} onChange={(event) => setForm({ ...form, gender: event.target.value })}><option value="">Prefer not to say</option><option>Female</option><option>Male</option><option>Non-binary</option><option>Prefer to self-describe</option></select></label><label>Marital status<select value={form.maritalStatus} onChange={(event) => setForm({ ...form, maritalStatus: event.target.value })}><option value="">Prefer not to say</option><option>Single</option><option>Married</option><option>Widowed</option><option>Divorced</option></select></label><label>Blood group<select value={form.bloodGroup} onChange={(event) => setForm({ ...form, bloodGroup: event.target.value })}><option value="">Not specified</option>{['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((item) => <option key={item}>{item}</option>)}</select></label></div>
     <fieldset><legend>Address</legend><div className="patient-form__grid"><label className="patient-form__wide">Address line<input value={form.addressLine1} onChange={(event) => setForm({ ...form, addressLine1: event.target.value })} autoComplete="street-address" /></label><label>City<input value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} autoComplete="address-level2" /></label><label>State<input value={form.state} onChange={(event) => setForm({ ...form, state: event.target.value })} autoComplete="address-level1" /></label><label>Postal code<input value={form.postalCode} onChange={(event) => setForm({ ...form, postalCode: event.target.value })} autoComplete="postal-code" inputMode="numeric" /></label></div></fieldset>
     <fieldset><legend>Emergency contact</legend><div className="patient-form__grid"><label>Contact name<input value={form.emergencyContactName} onChange={(event) => setForm({ ...form, emergencyContactName: event.target.value })} /></label><label>Contact phone<input value={form.emergencyContactPhone} onChange={(event) => setForm({ ...form, emergencyContactPhone: event.target.value })} inputMode="tel" /></label></div></fieldset><button type="submit">Save personal details</button>
-  </form>;
+  </form>{!patientId || patientId === user.uid ? <form className="patient-form patient-link-form" onSubmit={requestLink}><header><p className="section-kicker">Existing clinic record</p><h2>Link your clinic ID</h2><span>If the clinic created your record before you made this account, request a verified link using your clinic ID and registered phone.</span></header><div className="patient-form__grid"><label>Clinic ID<input value={linkForm.uhid} onChange={(event) => setLinkForm({ ...linkForm, uhid: event.target.value })} placeholder="SC-000123" required /></label><label>Registered phone<input value={linkForm.phone} onChange={(event) => setLinkForm({ ...linkForm, phone: event.target.value })} inputMode="tel" required /></label></div><button type="submit">Request record link</button></form> : null}</>;
   const healthForm = <form className="patient-form" onSubmit={saveProfile}><header><p className="section-kicker">Health profile</p><h2>Information you choose to share</h2><span>This is self-reported information, not a clinical diagnosis. Clinic staff may use it to prepare for your visit.</span></header><div className="patient-form__stack"><label>Allergies<textarea value={form.allergies} onChange={(event) => setForm({ ...form, allergies: event.target.value })} placeholder="For example, food, medicine, or other allergies" /></label><label>Current medications<textarea value={form.currentMedications} onChange={(event) => setForm({ ...form, currentMedications: event.target.value })} placeholder="Include medication name and dose if known" /></label><label>Notes for your care team<textarea value={form.healthNotes} onChange={(event) => setForm({ ...form, healthNotes: event.target.value })} placeholder="Anything you would like the clinic to know before your visit" /></label></div><button type="submit">Save health profile</button></form>;
   const list = (items) => items.length ? <div className="patient-visit-list">{items.map((item) => { const date = toDate(item.startsAt); const canChange = isUpcoming(item) && date && date.getTime() > Date.now() + 2 * 60 * 60 * 1000; return <article key={item.id}><div className="patient-visit-list__date"><strong>{date ? date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—'}</strong><span>{date ? date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }) : 'Time unavailable'}</span></div><div><strong>Consultation with {doctorName(item)}</strong><span>{item.reason || 'Clinic consultation'}</span></div><span className={`appointment-status appointment-status--${item.status}`}>{item.status}</span>{canChange && <div className="patient-appointment-actions"><Link to={`/patient/appointments/${item.id}/reschedule`}>Reschedule</Link><button type="button" className="patient-appointment-cancel" onClick={() => requestAppointmentCancellation(item)}>Cancel</button></div>}{item.status === 'completed' && <Link className="patient-feedback-link" to={`/experience?appointment=${item.id}`}>Share feedback</Link>}</article>; })}</div> : <div className="patient-empty-state"><strong>No appointments yet</strong><span>When you book a visit, it will appear here.</span><Link to="/book">Book appointment</Link></div>;
 

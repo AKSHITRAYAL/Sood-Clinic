@@ -12,6 +12,7 @@
  * This runs with the Admin SDK and is intentionally not deployed as a callable.
  */
 const admin = require('firebase-admin');
+const { FieldValue } = require('firebase-admin/firestore');
 
 const apply = process.env.CLINIC_APPLY_ROLE_MIGRATION === 'true';
 const legacyRole = 'receptionist';
@@ -53,8 +54,8 @@ async function migrate() {
     const batch = db.batch();
     profiles.docs.slice(index, index + batchSize).forEach((profile) => batch.set(profile.ref, {
       role: replacementRole,
-      doctorId: admin.firestore.FieldValue.delete(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      doctorId: FieldValue.delete(),
+      updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true }));
     await batch.commit();
   }

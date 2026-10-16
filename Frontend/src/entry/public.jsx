@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import AppErrorBoundary from '../components/AppErrorBoundary';
 import { staffUrl } from '../lib/portals';
+import ConsentBanner from '../components/ConsentBanner';
 
 const About = lazy(() => import('../pages/About'));
 const Bookappointment = lazy(() => import('../pages/Bookappointment'));
@@ -14,6 +15,8 @@ const PasswordReset = lazy(() => import('../pages/PasswordReset'));
 const PatientPortal = lazy(() => import('../pages/PatientPortal'));
 const RescheduleAppointment = lazy(() => import('../pages/RescheduleAppointment'));
 const PublicNotFound = lazy(() => import('../pages/PublicNotFound'));
+const Legal = lazy(() => import('../pages/Legal'));
+const ConfirmationPage = lazy(() => import('../features/scheduler/ConfirmationPage'));
 const StaffRedirect = () => { window.location.replace(staffUrl('/staff')); return null; };
 const RouteLoading = () => <main className="route-loading" aria-live="polite">Loading…</main>;
 
@@ -21,9 +24,12 @@ const PublicApp = () => <BrowserRouter><AppErrorBoundary><Suspense fallback={<Ro
   <Route path="/" element={<Home />} />
   <Route path="/about" element={<About />} />
   <Route path="/contact" element={<Contact />} />
+  <Route path="/privacy" element={<Legal type="privacy" />} />
+  <Route path="/terms" element={<Legal type="terms" />} />
   <Route path="/guides" element={<HealthGuides />} />
   <Route path="/experience" element={<PatientExperience />} />
   <Route path="/book" element={<Bookappointment />} />
+  <Route path="/booking/:reference" element={<ConfirmationPage />} />
   <Route path="/Booknow" element={<Navigate to="/book" replace />} />
   <Route path="/login" element={<Login />} />
   <Route path="/reset-password" element={<PasswordReset />} />
@@ -37,6 +43,6 @@ const PublicApp = () => <BrowserRouter><AppErrorBoundary><Suspense fallback={<Ro
   <Route path="/patient/security" element={<PatientPortal view="security" />} />
   <Route path="/staff/*" element={<StaffRedirect />} />
   <Route path="*" element={<PublicNotFound />} />
-</Routes></Suspense></AppErrorBoundary></BrowserRouter>;
+</Routes></Suspense><ConsentBanner /></AppErrorBoundary></BrowserRouter>;
 
 export default PublicApp;

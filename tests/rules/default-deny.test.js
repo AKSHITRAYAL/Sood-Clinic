@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 import { assertFails, assertSucceeds, initializeTestEnvironment } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { deleteDoc, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 
 const projectId = 'demo-sood-clinic';
 let testEnv;
@@ -90,6 +90,18 @@ describe('Firestore default-deny boundary', () => {
     }));
   });
 
+  it('allows a verified linked patient to read the registry record and appointments', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'patients', 'clinic-record'), { displayName: 'Clinic Patient', linkedUids: ['account-one'] });
+      await setDoc(doc(db, 'appointments', 'linked-appointment'), { patientId: 'clinic-record', status: 'scheduled' });
+    });
+    const db = testEnv.authenticatedContext('account-one', { email: 'patient@example.com' }).firestore();
+    await assertSucceeds(getDoc(doc(db, 'patients', 'clinic-record')));
+    await assertSucceeds(getDoc(doc(db, 'appointments', 'linked-appointment')));
+    await assertFails(getDoc(doc(db, 'patientLinkRequests', 'request-one')));
+  });
+
   it('keeps hashed booking rate-limit records server-only', async () => {
     const db = testEnv.unauthenticatedContext().firestore();
     await assertFails(getDoc(doc(db, 'rateLimits', 'a1b2c3d4e5f60708a9b0c1d2e3f40506')));
@@ -123,5 +135,57 @@ describe('Firestore default-deny boundary', () => {
     await assertFails(setDoc(doc(db, 'doctorSchedules', 'another-doctor'), { ...schedule, doctorId: 'another-doctor' }));
     await assertFails(setDoc(doc(db, 'scheduleExceptions', 'maharana_2026-10-10'), { doctorId: 'maharana', dateKey: '2026-10-10', type: 'closed', sessions: [] }));
     await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), 'scheduleExceptions', 'maharana_2026-10-10')));
+  });
+
+  it('keeps scheduler-private collections server-only and limits staff reads', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'calendarBlocks', 'block-one'), { doctorId: 'maharana' });
+      await setDoc(doc(db, 'appointments', 'appointment-one', 'staffNotes', 'note-one'), { text: 'Internal note' });
+    });
+    const anonymous = testEnv.unauthenticatedContext().firestore();
+    const patient = testEnv.authenticatedContext('patient-one').firestore();
+    const manager = testEnv.authenticatedContext('manager-one', { role: 'manager' }).firestore();
+
+    await assertFails(getDoc(doc(anonymous, 'calendarBlocks', 'block-one')));
+    await assertFails(getDoc(doc(patient, 'calendarBlocks', 'block-one')));
+    await assertSucceeds(getDoc(doc(manager, 'calendarBlocks', 'block-one')));
+    await assertSucceeds(getDoc(doc(manager, 'appointments', 'appointment-one', 'staffNotes', 'note-one')));
+    for (const collection of ['appointmentPrivate', 'waitlist', 'visitTypes', 'bookingReferences', 'calendarFeeds']) {
+      await assertFails(getDoc(doc(manager, collection, 'record-one')));
+      await assertFails(setDoc(doc(manager, collection, 'record-two'), { value: true }));
+    }
+    await assertFails(setDoc(doc(manager, 'calendarBlocks', 'browser-block'), { doctorId: 'maharana' }));
+    await assertFails(setDoc(doc(manager, 'appointments', 'appointment-one', 'staffNotes', 'browser-note'), { text: 'No' }));
+  });
+
+  it('keeps every server-only scheduler collection out of reach for all five roles', async () => {
+    const serverOnly = ['appointmentPrivate', 'waitlist', 'visitTypes', 'bookingReferences', 'calendarFeeds'];
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'appointments', 'appointment-one'), { patientId: 'patient-one', doctorId: 'maharana', status: 'scheduled' });
+      for (const collection of serverOnly) await setDoc(doc(db, collection, 'record-one'), { value: true });
+    });
+    const patient = testEnv.authenticatedContext('patient-one', { email: 'patient@example.com' }).firestore();
+    const roles = [
+      ['anonymous', testEnv.unauthenticatedContext().firestore()],
+      ['patient', patient],
+      ['manager', testEnv.authenticatedContext('manager-one', { role: 'manager' }).firestore()],
+      ['doctor', testEnv.authenticatedContext('doctor-one', { role: 'doctor', doctorId: 'maharana' }).firestore()],
+      ['admin', testEnv.authenticatedContext('admin-one', { role: 'admin' }).firestore()],
+    ];
+
+    for (const [, db] of roles) {
+      for (const collection of serverOnly) {
+        await assertFails(getDoc(doc(db, collection, 'record-one')));
+        await assertFails(setDoc(doc(db, collection, 'record-two'), { value: true }));
+        await assertFails(deleteDoc(doc(db, collection, 'record-one')));
+      }
+    }
+
+    // The owning patient may read the appointment itself, but never its internal side
+    // document, which holds the manage-token hash, the creator uid and the calendar ids.
+    await assertSucceeds(getDoc(doc(patient, 'appointments', 'appointment-one')));
+    await assertFails(getDoc(doc(patient, 'appointmentPrivate', 'appointment-one')));
   });
 });

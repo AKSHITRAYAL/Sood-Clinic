@@ -1,25 +1,140 @@
 const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
+const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { setGlobalOptions } = require('firebase-functions/v2');
 const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
+const { FieldValue, Timestamp } = require('firebase-admin/firestore');
 const crypto = require('crypto');
-const { istDateKey, toIstParts, weekdayIst } = require('./lib/ist');
-const { buildAvailability, makeSlotId } = require('./lib/availability');
+const { istDateKey, istInstant, toIstParts } = require('./lib/ist');
+const { istUnitId, unitSlotsForRange } = require('./lib/engine/units');
+const { computeDaySlots } = require('./lib/engine/availability');
+const { placeAppointmentInTransaction, releaseUnitsInTransaction } = require('./src/scheduler/placement');
+const { createAvailabilityCallables } = require('./src/scheduler/availabilityCallables');
+const { schedulerError } = require('./src/scheduler/errors');
+const { enqueueForAppointment } = require('./src/scheduler/notify');
 const { buildAuthorizationUrl, createEvent, deleteEvent, decrypt, encrypt, exchangeAuthorizationCode, freeBusy, refreshAccessToken, updateEventTime } = require('./lib/googleCalendar');
 const { ROLE, canTransition } = require('./lib/stateMachine');
 const { isDoctorId, isEmail, isStaffRole, isStrongTemporaryPassword, normalizeEmail, staffClaims } = require('./lib/staffAccess');
-const { canPatientCancel } = require('./lib/appointmentPolicy');
+const { canPatientCancel, isActiveAppointment } = require('./lib/appointmentPolicy');
 const { formatUhid, isUhid, normalizePatientName, normalizePhone } = require('./lib/patientRegistry');
 const { toE164 } = require('./lib/phone');
-
+const { hashToken, newManageToken, tokensEqual } = require('./lib/tokens');
+const { newReference } = require('./lib/engine/reference');
+const { CONSENT_VERSION, validateBookingInput } = require('./lib/engine/bookingInput');
+const { canAttempt, nextRetryAt, notificationState, providerConfig } = require('./lib/notifications');
 admin.initializeApp();
+Object.assign(exports, require('./src/scheduler'));
 setGlobalOptions({ region: 'asia-south1', maxInstances: 10 });
 
 const db = admin.firestore();
 const GOOGLE_CALENDAR_CLIENT_ID = defineSecret('GOOGLE_CALENDAR_CLIENT_ID');
 const GOOGLE_CALENDAR_CLIENT_SECRET = defineSecret('GOOGLE_CALENDAR_CLIENT_SECRET');
 const GOOGLE_CALENDAR_TOKEN_KEY = defineSecret('GOOGLE_CALENDAR_TOKEN_KEY');
+const EMAIL_WEBHOOK_URL = defineSecret('EMAIL_WEBHOOK_URL');
+const WHATSAPP_WEBHOOK_URL = defineSecret('WHATSAPP_WEBHOOK_URL');
 const callableOptions = { region: 'asia-south1', enforceAppCheck: process.env.ENFORCE_APP_CHECK === 'true' };
+
+const notificationPayload = ({ notification, appointment }) => ({
+  type: notification.type,
+  channel: notification.channel,
+  to: notification.to,
+  reference: appointment.reference || '',
+  dateKey: appointment.dateKey || '',
+  time: appointment.startsAt?.toDate ? appointment.startsAt.toDate().toISOString() : '',
+});
+
+const sendNotification = async ({ notification, appointment }) => {
+  const urls = { email: EMAIL_WEBHOOK_URL.value(), whatsapp: WHATSAPP_WEBHOOK_URL.value() };
+  const url = urls[notification.channel];
+  if (!url) throw new Error(`No ${notification.channel} notification provider is configured.`);
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(notificationPayload({ notification, appointment })),
+  });
+  if (!response.ok) throw new Error(`Notification provider returned HTTP ${response.status}.`);
+};
+
+const deliverNotificationRef = async (ref) => {
+  const initialSnapshot = await ref.get();
+  if (!initialSnapshot.exists) return;
+  const initial = initialSnapshot.data() || {};
+  if (!canAttempt(initial)) return;
+  const claimed = await db.runTransaction(async (transaction) => {
+    const current = await transaction.get(ref);
+    const data = current.data() || {};
+    if (!canAttempt(data)) return null;
+    const state = notificationState(data);
+    transaction.update(ref, { status: 'processing', attempts: state.attempts + 1, processingAt: FieldValue.serverTimestamp() });
+    return { ...data, attempts: state.attempts + 1 };
+  });
+  if (!claimed) return;
+  try {
+    const appointmentSnapshot = await db.collection('appointments').doc(claimed.appointmentId).get();
+    if (!appointmentSnapshot.exists) throw new Error('The appointment for this notification no longer exists.');
+    await sendNotification({ notification: claimed, appointment: appointmentSnapshot.data() });
+    await ref.update({ status: 'sent', sentAt: FieldValue.serverTimestamp(), lastError: FieldValue.delete() });
+  } catch (error) {
+    const state = notificationState(claimed);
+    const exhausted = state.attempts >= state.maxAttempts;
+    await ref.update({
+      status: exhausted ? 'dead_letter' : 'queued',
+      sendAfter: exhausted ? FieldValue.delete() : Timestamp.fromDate(nextRetryAt(state.attempts)),
+      lastError: String(error.message || 'Notification provider failed').slice(0, 240),
+      failedAt: FieldValue.serverTimestamp(),
+    });
+  }
+};
+
+exports.processNotification = onDocumentCreated({
+  document: 'notifications/{notificationId}',
+  region: 'asia-south1',
+  secrets: [EMAIL_WEBHOOK_URL, WHATSAPP_WEBHOOK_URL],
+  retry: false,
+}, async (event) => {
+  if (event.data) await deliverNotificationRef(event.data.ref);
+});
+
+exports.processNotificationQueue = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Asia/Kolkata', region: 'asia-south1', secrets: [EMAIL_WEBHOOK_URL, WHATSAPP_WEBHOOK_URL] }, async () => {
+  const snapshot = await db.collection('notifications')
+    .where('status', '==', 'queued')
+    .where('sendAfter', '<=', Timestamp.now())
+    .orderBy('sendAfter')
+    .limit(50)
+    .get();
+  await Promise.all(snapshot.docs.map((notification) => deliverNotificationRef(notification.ref)));
+});
+
+exports.sendReminders = onSchedule({ schedule: 'every 15 minutes', timeZone: 'Asia/Kolkata', region: 'asia-south1', secrets: [EMAIL_WEBHOOK_URL, WHATSAPP_WEBHOOK_URL] }, async () => {
+  const now = new Date();
+  const horizon = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const snapshot = await db.collection('appointments')
+    .where('status', 'in', ['scheduled', 'confirmed'])
+    .where('startsAt', '>=', Timestamp.fromDate(now))
+    .where('startsAt', '<=', Timestamp.fromDate(horizon))
+    .limit(100)
+    .get();
+  const writes = [];
+  snapshot.docs.forEach((appointment) => {
+    const data = appointment.data();
+    if (!data.patientSnapshot?.email) return;
+    const id = `${appointment.id}_reminder_24h`;
+    writes.push(db.collection('notifications').doc(id).create({
+      type: 'appointment_reminder_24h',
+      channel: 'email',
+      to: data.patientSnapshot.email,
+      appointmentId: appointment.id,
+      status: 'queued',
+      attempts: 0,
+      sendAfter: FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
+    }).catch((error) => {
+      if (error.code !== 6) throw error;
+    }));
+  });
+  await Promise.all(writes);
+});
 const assertPasswordChanged = (request) => {
   if (request.auth?.token?.forcePasswordChange === true) throw new HttpsError('permission-denied', 'Change your temporary password first.');
 };
@@ -36,7 +151,7 @@ const requireRegistrationStaff = (request) => {
 };
 
 const auditStaffAccess = async ({ actorUid, actorRole = 'admin', action, targetUid, resourceType = 'staff_account', meta = {} }) => db.collection('auditLogs').add({
-  at: admin.firestore.FieldValue.serverTimestamp(),
+  at: FieldValue.serverTimestamp(),
   actor: { uid: actorUid, role: actorRole },
   action,
   resource: { type: resourceType, id: targetUid },
@@ -98,8 +213,8 @@ exports.saveDoctorSchedule = onCall({ ...callableOptions, timeoutSeconds: 30, me
   if (!isDoctorId(doctorId)) throw new HttpsError('invalid-argument', 'Choose a valid doctor.');
   const role = scheduleAuthority(request, doctorId);
   const sessions = normaliseScheduleSessions(request.data?.sessions);
-  await db.collection('doctorSchedules').doc(doctorId).set({ doctorId, sessions, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
-  await db.collection('auditLogs').add({ at: admin.firestore.FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role }, action: 'doctor_schedule_saved', resource: { type: 'doctor_schedule', id: doctorId }, meta: { sessionCount: sessions.length } });
+  await db.collection('doctorSchedules').doc(doctorId).set({ doctorId, sessions, updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
+  await db.collection('auditLogs').add({ at: FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role }, action: 'doctor_schedule_saved', resource: { type: 'doctor_schedule', id: doctorId }, meta: { sessionCount: sessions.length } });
   return { message: 'Regular clinic hours saved.' };
 });
 
@@ -111,9 +226,22 @@ exports.saveScheduleException = onCall({ ...callableOptions, timeoutSeconds: 30,
   const role = scheduleAuthority(request, doctorId);
   const sessions = normaliseExceptionSessions(request.data?.sessions);
   const ref = db.collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`);
-  await ref.set({ doctorId, dateKey, type, sessions, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid, createdBy: request.auth.uid, createdAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-  await db.collection('auditLogs').add({ at: admin.firestore.FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role }, action: 'schedule_exception_saved', resource: { type: 'schedule_exception', id: ref.id }, meta: { doctorId, dateKey, type, sessionCount: sessions.length } });
+  await ref.set({ doctorId, dateKey, type, sessions, updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid, createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection('auditLogs').add({ at: FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role }, action: 'schedule_exception_saved', resource: { type: 'schedule_exception', id: ref.id }, meta: { doctorId, dateKey, type, sessionCount: sessions.length } });
   return { message: 'Special clinic hours saved.' };
+});
+
+exports.deleteScheduleException = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  const doctorId = trimmed(request.data?.doctorId, 120);
+  const dateKey = trimmed(request.data?.dateKey, 10);
+  if (!isDoctorId(doctorId) || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) throw new HttpsError('invalid-argument', 'Choose a valid exception date.');
+  const role = scheduleAuthority(request, doctorId);
+  const ref = db.collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`);
+  const snapshot = await ref.get();
+  if (!snapshot.exists) return { deleted: false };
+  await ref.delete();
+  await db.collection('auditLogs').add({ at: FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role }, action: 'schedule_exception_deleted', resource: { type: 'schedule_exception', id: ref.id }, meta: { doctorId, dateKey } });
+  return { deleted: true };
 });
 
 // Patient identifiers are indexed on the trusted server. The browser never gets
@@ -146,10 +274,10 @@ const patientDirectoryRecord = ({ patientId, uid, email, profile, uhid = '', lin
   phone: profile.phone || '',
   phoneNormalized: normalizePhone(profile.phone),
   linkedUids: Array.isArray(linkedUids) ? [...new Set(linkedUids)].slice(0, 10) : [],
-  updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  updatedAt: FieldValue.serverTimestamp(),
 });
 const auditPatientAccess = ({ actorUid, actorRole = 'admin', action, targetUid, meta = {} }) => db.collection('auditLogs').add({
-  at: admin.firestore.FieldValue.serverTimestamp(), actor: { uid: actorUid, role: actorRole }, action,
+  at: FieldValue.serverTimestamp(), actor: { uid: actorUid, role: actorRole }, action,
   resource: { type: 'patient', id: targetUid }, meta,
 });
 
@@ -159,7 +287,7 @@ const allocateUhid = async (transaction) => {
   const current = Number(counter.get('value')) || 0;
   if (!Number.isInteger(current) || current < 0) throw new HttpsError('failed-precondition', 'The patient ID registry requires administrator review.');
   const next = current + 1;
-  transaction.set(counterRef, { value: next, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  transaction.set(counterRef, { value: next, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   return formatUhid(next);
 };
 
@@ -205,7 +333,7 @@ exports.searchPatients = onCall({ ...callableOptions, timeoutSeconds: 30, memory
     email: item.get('email'),
     phone: item.get('phone') || '',
   }));
-  await db.collection('auditLogs').add({ at: admin.firestore.FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role: actorRole }, action: 'patient_searched', resource: { type: 'patient_search', id: 'directory' } });
+  await db.collection('auditLogs').add({ at: FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role: actorRole }, action: 'patient_searched', resource: { type: 'patient_search', id: 'directory' } });
   return { patients };
 });
 
@@ -216,13 +344,26 @@ exports.getAdminPatientProfile = onCall({ ...callableOptions, timeoutSeconds: 30
   const snapshot = await db.collection('patients').doc(uid).get();
   if (!snapshot.exists) throw new HttpsError('not-found', 'Patient record not found.');
   const data = snapshot.data();
-  await db.collection('auditLogs').add({ at: admin.firestore.FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role: 'admin' }, action: 'patient_profile_viewed', resource: { type: 'patient', id: uid } });
+  const appointments = await db.collection('appointments')
+    .where('patientId', '==', uid)
+    .orderBy('startsAt', 'desc')
+    .limit(25)
+    .get();
+  await db.collection('auditLogs').add({ at: FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role: 'admin' }, action: 'patient_profile_viewed', resource: { type: 'patient', id: uid } });
   return {
     uid,
     patientId: uid,
     uhid: data.uhid || '',
     linkedUids: Array.isArray(data.linkedUids) ? data.linkedUids : [uid],
     profile: Object.fromEntries([...PATIENT_PROFILE_FIELDS, 'email', 'createdAt', 'updatedAt'].map((field) => [field, data[field] || ''])),
+    appointments: appointments.docs.map((item) => ({
+      id: item.id,
+      reference: item.get('reference') || '',
+      dateKey: item.get('dateKey') || '',
+      startsAt: item.get('startsAt')?.toDate?.()?.toISOString() || null,
+      status: item.get('status') || 'scheduled',
+      visitType: item.get('visitTypeLabel') || item.get('visitType') || 'Consultation',
+    })),
   };
 });
 
@@ -242,7 +383,7 @@ exports.updateAdminPatientProfile = onCall({ ...callableOptions, timeoutSeconds:
     const linkedUids = Array.isArray(existing.linkedUids) ? existing.linkedUids : [uid];
     transaction.set(patientRef, {
       ...profile, email, uhid, linkedUids, displayNameLower: normalizePatientName(profile.displayName), phoneNormalized: normalizePhone(profile.phone),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid,
+      updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid,
     }, { merge: true });
     transaction.set(db.collection('patientDirectory').doc(uid), patientDirectoryRecord({ patientId: uid, uid, email, profile, uhid, linkedUids }), { merge: true });
   });
@@ -259,7 +400,9 @@ exports.registerPatientProfile = onCall({ ...callableOptions, timeoutSeconds: 30
   const user = await admin.auth().getUser(request.auth.uid);
   const displayName = trimmed(request.data?.displayName, 160);
   if (!displayName || !isEmail(user.email) || user.emailVerified !== true) throw new HttpsError('failed-precondition', 'Verify the email address on this account before creating a patient profile.');
-  const patientRef = db.collection('patients').doc(user.uid);
+  const linked = await db.collection('patientDirectory').where('linkedUids', 'array-contains', request.auth.uid).limit(1).get();
+  const patientId = linked.docs[0]?.get('patientId') || user.uid;
+  const patientRef = db.collection('patients').doc(patientId);
   let uhid;
   await db.runTransaction(async (transaction) => {
     const prior = await transaction.get(patientRef);
@@ -270,10 +413,10 @@ exports.registerPatientProfile = onCall({ ...callableOptions, timeoutSeconds: 30
     transaction.set(patientRef, {
       ...profile, email: normalizeEmail(user.email), uhid, linkedUids,
       displayNameLower: normalizePatientName(profile.displayName), phoneNormalized: normalizePhone(profile.phone),
-      createdAt: prior.exists ? priorData.createdAt || admin.firestore.FieldValue.serverTimestamp() : admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: prior.exists ? priorData.createdAt || FieldValue.serverTimestamp() : FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
-    transaction.set(db.collection('patientDirectory').doc(user.uid), patientDirectoryRecord({ patientId: user.uid, uid: user.uid, email: user.email, profile, uhid, linkedUids }), { merge: true });
+    transaction.set(db.collection('patientDirectory').doc(patientId), patientDirectoryRecord({ patientId, uid: user.uid, email: user.email, profile, uhid, linkedUids }), { merge: true });
   });
   return { message: 'Patient profile created.', uhid };
 });
@@ -293,13 +436,108 @@ exports.updateOwnPatientProfile = onCall({ ...callableOptions, timeoutSeconds: 3
     transaction.set(patientRef, {
       ...profile, email: normalizeEmail(user.email), uhid, linkedUids,
       displayNameLower: normalizePatientName(profile.displayName), phoneNormalized: normalizePhone(profile.phone),
-      createdAt: prior.exists ? priorData.createdAt || admin.firestore.FieldValue.serverTimestamp() : admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: prior.exists ? priorData.createdAt || FieldValue.serverTimestamp() : FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
     transaction.set(db.collection('patientDirectory').doc(user.uid), patientDirectoryRecord({ patientId: user.uid, uid: user.uid, email: user.email, profile, uhid, linkedUids }), { merge: true });
   });
   await admin.auth().updateUser(user.uid, { displayName: `${profile.title ? `${profile.title} ` : ''}${profile.displayName}`.trim() });
   return { message: 'Your profile has been saved.', uhid };
+});
+
+exports.getOwnPatientProfile = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  if (!request.auth || isStaffRole(request.auth.token.role)) throw new HttpsError('permission-denied', 'Patient sign-in is required.');
+  const user = await admin.auth().getUser(request.auth.uid);
+  if (user.emailVerified !== true) throw new HttpsError('failed-precondition', 'Verify your email address before opening the patient portal.');
+  const linked = await db.collection('patientDirectory').where('linkedUids', 'array-contains', request.auth.uid).limit(5).get();
+  const patientId = linked.docs[0]?.get('patientId') || request.auth.uid;
+  const snapshot = await db.collection('patients').doc(patientId).get();
+  if (!snapshot.exists) return { patientId, profile: {}, linked: false };
+  const data = snapshot.data();
+  return { patientId, linked: patientId !== request.auth.uid, profile: Object.fromEntries([...PATIENT_PROFILE_FIELDS, 'email', 'uhid', 'createdAt', 'updatedAt', 'linkedUids'].map((field) => [field, data[field] || ''])) };
+});
+
+exports.getDoctorPatientSummary = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  if (!request.auth || request.auth.token.role !== 'doctor' || request.auth.token.get('forcePasswordChange', false) === true || !request.auth.token.doctorId) {
+    throw new HttpsError('permission-denied', 'Doctor access is required.');
+  }
+  const appointmentId = trimmed(request.data?.appointmentId, 200);
+  if (!appointmentId) throw new HttpsError('invalid-argument', 'Choose an appointment.');
+  const appointmentSnapshot = await db.collection('appointments').doc(appointmentId).get();
+  if (!appointmentSnapshot.exists || appointmentSnapshot.get('doctorId') !== request.auth.token.doctorId) {
+    throw new HttpsError('permission-denied', 'This appointment is outside your clinical workspace.');
+  }
+  const patientId = trimmed(appointmentSnapshot.get('patientId'), 200);
+  if (!patientId) throw new HttpsError('failed-precondition', 'This appointment has no linked patient record.');
+  const [patientSnapshot, appointmentHistory] = await Promise.all([
+    db.collection('patients').doc(patientId).get(),
+    db.collection('appointments').where('patientId', '==', patientId).limit(50).get(),
+  ]);
+  const patient = patientSnapshot.exists ? patientSnapshot.data() : {};
+  const history = appointmentHistory.docs
+    .map((item) => ({ id: item.id, ...item.data() }))
+    .sort((left, right) => (asDate(right.startsAt)?.getTime() || 0) - (asDate(left.startsAt)?.getTime() || 0))
+    .map((item) => ({
+      id: item.id,
+      dateKey: item.dateKey || null,
+      startsAt: asDate(item.startsAt)?.toISOString() || null,
+      status: item.status || 'scheduled',
+      visitKind: item.patientSnapshot?.visitKind || null,
+      reason: item.reason || null,
+      doctorId: item.doctorId || null,
+    }));
+  return {
+    patientId,
+    profile: Object.fromEntries(['displayName', 'title', 'phone', 'email', 'dateOfBirth', 'gender', 'bloodGroup', 'uhid'].map((field) => [field, patient[field] || ''])),
+    history,
+  };
+});
+
+exports.requestPatientLink = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  if (!request.auth || isStaffRole(request.auth.token.role)) throw new HttpsError('permission-denied', 'Patient sign-in is required.');
+  const user = await admin.auth().getUser(request.auth.uid);
+  if (user.emailVerified !== true) throw new HttpsError('failed-precondition', 'Verify your email address before requesting a clinic record link.');
+  const uhid = trimmed(request.data?.uhid, 40).toUpperCase();
+  const phone = normalizePhone(request.data?.phone);
+  if (!isUhid(uhid) || !phone) throw new HttpsError('invalid-argument', 'Enter your clinic ID and the phone number registered with the clinic.');
+  const matches = await db.collection('patientDirectory').where('uhid', '==', uhid).limit(1).get();
+  const record = matches.docs[0];
+  if (!record || record.get('phoneNormalized') !== phone) throw new HttpsError('not-found', 'We could not verify those details. Contact the clinic if you need help.');
+  const linkedUids = Array.isArray(record.get('linkedUids')) ? record.get('linkedUids') : [];
+  if (linkedUids.includes(request.auth.uid)) return { status: 'linked' };
+  if (linkedUids.length) throw new HttpsError('failed-precondition', 'This clinic record is already linked. Contact the clinic to update access.');
+  const requestRef = db.collection('patientLinkRequests').doc(`${record.get('patientId')}_${request.auth.uid}`);
+  await requestRef.set({ patientId: record.get('patientId'), uhid, requesterUid: request.auth.uid, requesterEmail: normalizeEmail(user.email), status: 'pending', expiresAt: Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)), createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  return { status: 'pending' };
+});
+
+exports.listPatientLinkRequests = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  requireAdmin(request);
+  const snapshot = await db.collection('patientLinkRequests').where('status', '==', 'pending').orderBy('createdAt', 'desc').limit(50).get();
+  return { requests: snapshot.docs.map((item) => ({ id: item.id, ...item.data() })) };
+});
+
+exports.approvePatientLinkRequest = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  requireAdmin(request);
+  const requestId = trimmed(request.data?.requestId, 200);
+  if (!requestId) throw new HttpsError('invalid-argument', 'Choose a link request.');
+  const linkRef = db.collection('patientLinkRequests').doc(requestId);
+  await db.runTransaction(async (transaction) => {
+    const link = await transaction.get(linkRef);
+    if (!link.exists || link.get('status') !== 'pending') throw new HttpsError('failed-precondition', 'This link request is no longer pending.');
+    const patientRef = db.collection('patients').doc(link.get('patientId'));
+    const directoryRef = db.collection('patientDirectory').doc(link.get('patientId'));
+    const patient = await transaction.get(patientRef);
+    const directory = await transaction.get(directoryRef);
+    if (!patient.exists || !directory.exists) throw new HttpsError('not-found', 'The clinic record could not be found.');
+    const linkedUids = Array.isArray(patient.get('linkedUids')) ? patient.get('linkedUids') : [];
+    if (linkedUids.length) throw new HttpsError('failed-precondition', 'This clinic record is already linked.');
+    transaction.update(patientRef, { linkedUids: [link.get('requesterUid')], updatedAt: FieldValue.serverTimestamp(), linkedBy: request.auth.uid });
+    transaction.update(directoryRef, { linkedUids: [link.get('requesterUid')], uid: link.get('requesterUid'), updatedAt: FieldValue.serverTimestamp() });
+    transaction.update(linkRef, { status: 'approved', approvedBy: request.auth.uid, approvedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+  });
+  await auditPatientAccess({ actorUid: request.auth.uid, action: 'patient_link_approved', targetUid: requestId, meta: {} });
+  return { status: 'approved' };
 });
 
 // Staff registration deliberately creates a clinical record only. Linking it to
@@ -322,7 +560,7 @@ exports.registerPatient = onCall({ ...callableOptions, timeoutSeconds: 30, memor
       const duplicate = samePhone.docs.some((item) => normalizePatientName(item.get('displayName')) === normalizePatientName(profile.displayName));
       if (lock.exists || duplicate) throw new HttpsError('already-exists', 'A matching patient record already exists. Search the registry before registering another.');
       uhid = await allocateUhid(transaction);
-      const now = admin.firestore.FieldValue.serverTimestamp();
+      const now = FieldValue.serverTimestamp();
       transaction.set(patientRef, {
         ...profile, uhid, linkedUids: [], recordSource: 'staff',
         displayNameLower: normalizePatientName(profile.displayName), phoneNormalized,
@@ -351,7 +589,7 @@ exports.completeOwnPasswordChange = onCall({ ...callableOptions }, async (reques
   const user = await admin.auth().getUser(request.auth.uid);
   if (user.customClaims?.forcePasswordChange !== true) throw new HttpsError('failed-precondition', 'A mandatory password change is not pending for this account.');
   await admin.auth().setCustomUserClaims(user.uid, { ...user.customClaims, forcePasswordChange: false });
-  await db.collection('staffProfiles').doc(user.uid).set({ requiresPasswordChange: false, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: user.uid }, { merge: true });
+  await db.collection('staffProfiles').doc(user.uid).set({ requiresPasswordChange: false, updatedAt: FieldValue.serverTimestamp(), updatedBy: user.uid }, { merge: true });
   await auditStaffAccess({ actorUid: user.uid, actorRole, action: 'staff_password_changed', targetUid: user.uid, resourceType: 'staff' });
   return { ok: true };
 });
@@ -381,7 +619,7 @@ exports.manageStaffAccount = onCall({ ...callableOptions }, async (request) => {
     const claims = staffClaims({ existingClaims: user.customClaims, role, doctorId, forcePasswordChange: true });
     await admin.auth().setCustomUserClaims(user.uid, claims);
     await admin.auth().revokeRefreshTokens(user.uid);
-    await db.collection('staffProfiles').doc(user.uid).set({ uid: user.uid, email: normalizedEmail, name: String(displayName).trim(), role, doctorId: role === 'doctor' ? doctorId : null, active: true, requiresPasswordChange: true, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid, createdAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    await db.collection('staffProfiles').doc(user.uid).set({ uid: user.uid, email: normalizedEmail, name: String(displayName).trim(), role, doctorId: role === 'doctor' ? doctorId : null, active: true, requiresPasswordChange: true, updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid, createdAt: FieldValue.serverTimestamp() }, { merge: true });
     await auditStaffAccess({ actorUid: request.auth.uid, action: 'staff_provisioned', targetUid: user.uid, meta: { role, doctorId: role === 'doctor' ? doctorId : null } });
     return { uid: user.uid, message: 'Staff account provisioned. The temporary password must be changed at first sign-in.' };
   }
@@ -394,7 +632,7 @@ exports.manageStaffAccount = onCall({ ...callableOptions }, async (request) => {
     await admin.auth().updateUser(user.uid, { displayName: String(displayName).trim() });
     await admin.auth().setCustomUserClaims(user.uid, staffClaims({ existingClaims: user.customClaims, role, doctorId, forcePasswordChange: Boolean(user.customClaims?.forcePasswordChange) }));
     await admin.auth().revokeRefreshTokens(user.uid);
-    await db.collection('staffProfiles').doc(user.uid).set({ uid: user.uid, email: normalizedEmail, name: String(displayName).trim(), role, doctorId: role === 'doctor' ? doctorId : null, active: !user.disabled, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
+    await db.collection('staffProfiles').doc(user.uid).set({ uid: user.uid, email: normalizedEmail, name: String(displayName).trim(), role, doctorId: role === 'doctor' ? doctorId : null, active: !user.disabled, updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
     await auditStaffAccess({ actorUid: request.auth.uid, action: 'staff_access_updated', targetUid: user.uid, meta: { role, doctorId: role === 'doctor' ? doctorId : null } });
     return { message: 'Staff access updated and active sessions were revoked.' };
   }
@@ -403,7 +641,7 @@ exports.manageStaffAccount = onCall({ ...callableOptions }, async (request) => {
     await admin.auth().updateUser(user.uid, { password: String(password) });
     await admin.auth().setCustomUserClaims(user.uid, { ...user.customClaims, forcePasswordChange: true });
     await admin.auth().revokeRefreshTokens(user.uid);
-    await db.collection('staffProfiles').doc(user.uid).set({ requiresPasswordChange: true, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
+    await db.collection('staffProfiles').doc(user.uid).set({ requiresPasswordChange: true, updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
     await auditStaffAccess({ actorUid: request.auth.uid, action: 'staff_temporary_password_set', targetUid: user.uid });
     return { message: 'Temporary password set. Existing sessions were revoked; share it through a secure channel.' };
   }
@@ -412,7 +650,7 @@ exports.manageStaffAccount = onCall({ ...callableOptions }, async (request) => {
     await preventSelfOrLastAdminLockout({ actorUid: request.auth.uid, target: user, nextRole: user.customClaims?.role, nextDisabled });
     await admin.auth().updateUser(user.uid, { disabled: nextDisabled });
     await admin.auth().revokeRefreshTokens(user.uid);
-    await db.collection('staffProfiles').doc(user.uid).set({ active: !Boolean(disabled), updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
+    await db.collection('staffProfiles').doc(user.uid).set({ active: !Boolean(disabled), updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
     await auditStaffAccess({ actorUid: request.auth.uid, action: nextDisabled ? 'staff_suspended' : 'staff_restored', targetUid: user.uid });
     return { message: nextDisabled ? 'Staff account suspended and active sessions were revoked.' : 'Staff account restored.' };
   }
@@ -445,7 +683,7 @@ exports.syncManagedStaffDirectory = onCall({ ...callableOptions }, async (reques
         doctorId: role === 'doctor' ? user.customClaims.doctorId || null : null,
         active: !user.disabled,
         requiresPasswordChange: user.customClaims.forcePasswordChange === true,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
         updatedBy: request.auth.uid,
       }, { merge: true });
       imported += 1;
@@ -461,11 +699,12 @@ exports.syncManagedStaffDirectory = onCall({ ...callableOptions }, async (reques
 // embedding clinic/doctor IDs in the client. It is intentionally provider-agnostic
 // so a future database adapter only has to preserve this response shape.
 exports.getBookingCatalog = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async () => {
-  const [branchSnapshot, departmentSnapshot, doctorSnapshot, configSnapshot] = await Promise.all([
+  const [branchSnapshot, departmentSnapshot, doctorSnapshot, configSnapshot, visitTypeSnapshot] = await Promise.all([
     db.collection('branches').get(),
     db.collection('departments').get(),
     db.collection('doctors').get(),
     db.collection('clinic').doc('publicConfig').get(),
+    db.collection('visitTypes').orderBy('sortOrder').get(),
   ]);
   const departments = departmentSnapshot.docs.filter((item) => item.get('active') === true && item.get('publicBookingEnabled') === true).map((item) => ({
     id: item.id, branchId: item.get('branchId'), name: trimmed(item.get('name'), 120), description: trimmed(item.get('description'), 300), sortOrder: Number(item.get('sortOrder')) || 0,
@@ -475,7 +714,16 @@ exports.getBookingCatalog = onCall({ ...callableOptions, timeoutSeconds: 30, mem
   }));
   const branches = branchSnapshot.docs.filter((item) => item.get('active') === true).map((item) => ({ id: item.id, name: trimmed(item.get('name'), 120), timezone: item.get('timezone') || 'Asia/Kolkata' }));
   const config = bookingConfig(configSnapshot);
-  return { branches, departments, doctors, booking: { bookingWindowDays: config.bookingWindowDays, visitTypes: config.visitTypes.filter((item) => item.active).map((item) => ({ id: item.id, label: item.label, minutes: item.minutes, mode: item.mode })) } };
+  const collectionVisitTypes = visitTypeSnapshot.docs.filter((item) => item.get('active') === true).map((item) => ({
+    id: item.id, label: trimmed(item.get('label'), 80), slug: trimmed(item.get('slug') || item.id, 64),
+    description: trimmed(item.get('description'), 300), mode: item.get('mode'), minutes: Number(item.get('minutes')),
+    color: item.get('color') || 'blue', pricePaise: item.get('pricePaise') ?? null,
+    doctorIds: Array.isArray(item.get('doctorIds')) ? item.get('doctorIds') : [],
+    requiresConfirmation: item.get('requiresConfirmation') === true, maxAdvanceDays: Number(item.get('maxAdvanceDays')) || config.bookingWindowDays,
+    intakeQuestions: Array.isArray(item.get('intakeQuestions')) ? item.get('intakeQuestions') : [],
+  }));
+  const visitTypes = collectionVisitTypes.length ? collectionVisitTypes : config.visitTypes.filter((item) => item.active).map((item) => ({ ...item, slug: item.slug || item.id, description: item.description || '', color: item.color || 'blue', pricePaise: item.pricePaise ?? null, doctorIds: item.doctorIds || [], requiresConfirmation: item.requiresConfirmation === true, maxAdvanceDays: item.maxAdvanceDays || config.bookingWindowDays, intakeQuestions: item.intakeQuestions || [] }));
+  return { branches, departments, doctors, visitTypes, booking: { bookingWindowDays: config.bookingWindowDays, visitTypes: visitTypes.map(({ id, label, minutes, mode }) => ({ id, label, minutes, mode })) } };
 });
 
 const catalogId = (value, label) => {
@@ -511,7 +759,7 @@ exports.manageBookingCatalog = onCall({ ...callableOptions, timeoutSeconds: 30, 
   const { action, record = {} } = request.data || {};
   if (action === 'branch') {
     const id = catalogId(record.id, 'Branch ID');
-    const payload = { name: catalogText(record.name, 'Branch name', 120), code: catalogText(record.code, 'Branch code', 40), timezone: 'Asia/Kolkata', active: record.active === true, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid };
+    const payload = { name: catalogText(record.name, 'Branch name', 120), code: catalogText(record.code, 'Branch code', 40), timezone: 'Asia/Kolkata', active: record.active === true, updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid };
     await db.collection('branches').doc(id).set(payload, { merge: true });
     await auditStaffAccess({ actorUid: request.auth.uid, action: 'booking_catalog_branch_saved', targetUid: id, meta: { active: payload.active } });
     return { message: 'Branch saved.' };
@@ -521,7 +769,7 @@ exports.manageBookingCatalog = onCall({ ...callableOptions, timeoutSeconds: 30, 
     if (!(await db.collection('branches').doc(branchId).get()).exists) throw new HttpsError('failed-precondition', 'Choose an existing branch.');
     const sortOrder = Number(record.sortOrder);
     if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 9999) throw new HttpsError('invalid-argument', 'Sort order must be a whole number between 0 and 9999.');
-    const payload = { branchId, name: catalogText(record.name, 'Department name', 120), description: catalogText(record.description, 'Description', 300, false), active: record.active === true, publicBookingEnabled: record.publicBookingEnabled === true, sortOrder, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid };
+    const payload = { branchId, name: catalogText(record.name, 'Department name', 120), description: catalogText(record.description, 'Description', 300, false), active: record.active === true, publicBookingEnabled: record.publicBookingEnabled === true, sortOrder, updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid };
     await db.collection('departments').doc(id).set(payload, { merge: true });
     await auditStaffAccess({ actorUid: request.auth.uid, action: 'booking_catalog_department_saved', targetUid: id, meta: { branchId, active: payload.active, publicBookingEnabled: payload.publicBookingEnabled } });
     return { message: 'Department saved.' };
@@ -532,7 +780,7 @@ exports.manageBookingCatalog = onCall({ ...callableOptions, timeoutSeconds: 30, 
     if (!departmentIds.length || departmentIds.length > 12) throw new HttpsError('invalid-argument', 'Choose between one and twelve departments.');
     const [branchSnapshot, ...departmentSnapshots] = await Promise.all([db.collection('branches').doc(branchId).get(), ...departmentIds.map((departmentId) => db.collection('departments').doc(departmentId).get())]);
     if (!branchSnapshot.exists || departmentSnapshots.some((item) => !item.exists || item.get('branchId') !== branchId)) throw new HttpsError('failed-precondition', 'Every selected department must belong to the selected branch.');
-    const payload = { branchId, departmentIds, name: catalogText(record.name, 'Doctor name', 160), qualification: catalogText(record.qualification, 'Qualification', 160, false), active: record.active === true, bookingEnabled: record.bookingEnabled === true, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid };
+    const payload = { branchId, departmentIds, name: catalogText(record.name, 'Doctor name', 160), qualification: catalogText(record.qualification, 'Qualification', 160, false), active: record.active === true, bookingEnabled: record.bookingEnabled === true, updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid };
     await db.collection('doctors').doc(id).set(payload, { merge: true });
     await auditStaffAccess({ actorUid: request.auth.uid, action: 'booking_catalog_doctor_saved', targetUid: id, meta: { branchId, active: payload.active, bookingEnabled: payload.bookingEnabled } });
     return { message: 'Doctor saved.' };
@@ -552,7 +800,7 @@ exports.getAdminBookingConfiguration = onCall({ ...callableOptions, timeoutSecon
 exports.saveBookingVisitTypes = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   requireAdmin(request);
   const visitTypes = normaliseVisitTypes(request.data?.visitTypes, { requireAtLeastOne: true });
-  await db.collection('clinic').doc('publicConfig').set({ visitTypes, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
+  await db.collection('clinic').doc('publicConfig').set({ visitTypes, updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
   await auditStaffAccess({ actorUid: request.auth.uid, action: 'booking_visit_types_saved', targetUid: 'publicConfig', meta: { count: visitTypes.length } });
   return { message: 'Appointment formats saved.', visitTypes };
 });
@@ -625,7 +873,7 @@ exports.submitPatientFeedback = onCall({ ...callableOptions, timeoutSeconds: 30,
     const [appointment, existing] = await Promise.all([transaction.get(appointmentRef), transaction.get(feedbackRef)]);
     if (!appointment.exists || appointment.get('patientId') !== request.auth.uid || appointment.get('status') !== 'completed') throw new HttpsError('permission-denied', 'Feedback is available after your completed appointment.');
     if (existing.exists) throw new HttpsError('already-exists', 'Feedback was already submitted for this appointment.');
-    const now = admin.firestore.FieldValue.serverTimestamp();
+    const now = FieldValue.serverTimestamp();
     transaction.set(feedbackRef, { appointmentId, patientId: request.auth.uid, rating, comment, status: 'pending', createdAt: now, updatedAt: now });
     transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: request.auth.uid, role: 'patient' }, action: 'patient_feedback_submitted', resource: { type: 'patient_feedback', id: feedbackRef.id }, meta: { rating } });
   });
@@ -652,7 +900,7 @@ exports.moderatePatientFeedback = onCall({ ...callableOptions, timeoutSeconds: 3
   const snapshot = await ref.get();
   if (!snapshot.exists) throw new HttpsError('not-found', 'Feedback was not found.');
   const status = action === 'publish' ? 'published' : action === 'reject' ? 'rejected' : 'unpublished';
-  await ref.set({ status, reviewedAt: admin.firestore.FieldValue.serverTimestamp(), reviewedBy: request.auth.uid, publishedAt: action === 'publish' ? admin.firestore.FieldValue.serverTimestamp() : admin.firestore.FieldValue.delete() }, { merge: true });
+  await ref.set({ status, reviewedAt: FieldValue.serverTimestamp(), reviewedBy: request.auth.uid, publishedAt: action === 'publish' ? FieldValue.serverTimestamp() : FieldValue.delete() }, { merge: true });
   await auditPatientAccess({ actorUid: request.auth.uid, action: `patient_feedback_${status}`, targetUid: snapshot.get('patientId'), meta: { feedbackId } });
   return { message: `Feedback ${status}.` };
 });
@@ -662,17 +910,18 @@ const roleFor = (authContext) => authContext?.token?.role || 'patient';
 const trimmed = (value, max) => String(value || '').trim().slice(0, max);
 const validPhone = (value) => /^\+?[0-9][0-9\s-]{6,18}$/.test(String(value || '').trim());
 const validClientRequestId = (value) => /^[a-zA-Z0-9_-]{16,128}$/.test(String(value || ''));
-const isActiveAppointment = (status) => !['cancelled', 'completed', 'no_show'].includes(status);
-const appointmentReference = () => `SC-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+
 const functionsProject = () => process.env.GCLOUD_PROJECT || 'sood-clinic';
 const googleCallbackUrl = () => `https://asia-south1-${functionsProject()}.cloudfunctions.net/googleCalendarCallback`;
 const BOOKING_RATE_LIMIT = 10;
 const BOOKING_RATE_WINDOW_MS = 60 * 60 * 1000;
 
+// Callers are identified by a truncated hash of their IP: the raw address is never stored,
+// and the same hash is what appointmentPrivate keeps for abuse triage (§4.3b).
+const requestIpHash = (request) => crypto.createHash('sha256').update(String(request.rawRequest?.ip || '')).digest('hex').slice(0, 32);
+
 const enforceBookingRateLimit = async (request) => {
-  const ip = String(request.rawRequest?.ip || '');
-  const rateLimitId = crypto.createHash('sha256').update(ip).digest('hex').slice(0, 32);
-  const rateLimitRef = db.collection('rateLimits').doc(rateLimitId);
+  const rateLimitRef = db.collection('rateLimits').doc(requestIpHash(request));
   const now = new Date();
   const resetAt = new Date(now.getTime() + BOOKING_RATE_WINDOW_MS);
 
@@ -687,7 +936,7 @@ const enforceBookingRateLimit = async (request) => {
     }
     transaction.set(rateLimitRef, {
       count: count + 1,
-      resetAt: admin.firestore.Timestamp.fromDate(resetAt),
+      resetAt: Timestamp.fromDate(resetAt),
     });
   });
 };
@@ -696,13 +945,21 @@ const assertPhoneBookingCapacity = async (phoneKey, now = new Date()) => {
   const activeBookings = await db.collection('appointments')
     .where('phoneKey', '==', phoneKey)
     .where('status', 'in', ['scheduled', 'confirmed'])
-    .where('startsAt', '>', admin.firestore.Timestamp.fromDate(now))
+    .where('startsAt', '>', Timestamp.fromDate(now))
     .limit(2)
     .get();
   if (activeBookings.size >= 2) {
     throw publicError('resource-exhausted', 'You already have two upcoming appointments. Please contact the clinic to make another booking.');
   }
 };
+
+// One safe message per validator reason; the UI maps error.details.reason to its own copy (A0-07).
+const BOOKING_INPUT_MESSAGES = Object.freeze({
+  INVALID_PHONE: 'Enter a valid Indian mobile number.',
+  INVALID_EMAIL: 'Enter a valid email address.',
+  CONSENT_REQUIRED: 'Please accept the consent to continue.',
+  VALIDATION: 'Please check the highlighted fields.',
+});
 
 const bookingConfig = (data) => {
   const configured = data?.data() || {};
@@ -748,13 +1005,151 @@ const visitTypeFor = (config, visitTypeId) => {
   return config.visitTypes.find((item) => item.id === 'consultation' && item.active) || { id: 'consultation', label: 'In-clinic consultation', minutes: config.slotMinutes, mode: 'in_person', active: true };
 };
 
-const slotBusyRanges = async (doctorId, dateKey) => {
+// One lock document per five-minute unit. A legacy single-slot document (written
+// before unit locking) is expanded to the units it covers, so both shapes block
+// availability until the migration script has run.
+const dayOccupiedUnits = async (doctorId, dateKey, now) => {
   const snapshot = await db.collection('appointmentSlots').where('doctorId', '==', doctorId).where('dateKey', '==', dateKey).get();
-  return snapshot.docs.map((item) => item.data()).filter((item) => ['booked', 'blocked', 'held'].includes(item.status))
-    .map((item) => {
-      const startsAt = asDate(item.startsAt);
-      return startsAt ? { startsAt, endsAt: asDate(item.endsAt) || new Date(startsAt.getTime() + 20 * 60 * 1000) } : null;
-    }).filter(Boolean);
+  const occupied = new Set();
+  snapshot.docs.forEach((document) => {
+    const unit = document.data();
+    const expiresAt = asDate(unit.expiresAt);
+    if (expiresAt && expiresAt.getTime() <= now.getTime()) return;
+    if (unit.kind) {
+      occupied.add(document.id);
+      return;
+    }
+    const startsAt = asDate(unit.startsAt);
+    const endsAt = asDate(unit.endsAt);
+    if (!startsAt || !endsAt) {
+      occupied.add(document.id);
+      return;
+    }
+    unitSlotsForRange(doctorId, startsAt, endsAt).forEach((slot) => occupied.add(slot.id));
+  });
+  return occupied;
+};
+
+// §6.6 wants an ISO `startsAt`. The deployed page still sends the interim `dateKey` + `time`
+// pair and `holdToken`, so both shapes are read until A1-03 moves the page and the holds
+// callables to the contract (`startsAt`, `holdId`, `consent`).
+const bookingStartsAt = (data) => {
+  const iso = typeof data?.startsAt === 'string' ? data.startsAt.trim() : '';
+  if (iso) {
+    const parsed = new Date(iso);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  const dateKey = trimmed(data?.dateKey, 10);
+  const time = trimmed(data?.time, 5);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey) && /^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return istInstant(dateKey, time);
+  return null;
+};
+
+const holdSecretFrom = (data) => trimmed(data?.holdId, 200) || trimmed(data?.holdToken, 200);
+
+// §4.3 wants the clinic registry id on the appointment when the booking matches a known
+// patient. The registry is phone-keyed, so the lookup stays server-side.
+const patientRegistryIdForPhone = async (phoneKey) => {
+  const normalized = normalizePhone(phoneKey);
+  if (!normalized) return null;
+  const snapshot = await db.collection('patientDirectory').where('phoneNormalized', '==', normalized).limit(1).get();
+  const uhid = snapshot.empty ? '' : String(snapshot.docs[0].get('uhid') || '');
+  return isUhid(uhid) ? uhid : null;
+};
+
+const holdDurationMs = 5 * 60 * 1000;
+const appointmentUnitIds = (appointment) => (Array.isArray(appointment?.slotIds) && appointment.slotIds.length
+  ? appointment.slotIds
+  : (appointment?.slotId ? [appointment.slotId] : []));
+
+const slotForTime = (dateKey, time, minutes) => {
+  const startsAt = istInstant(dateKey, time);
+  return { startsAt, endsAt: new Date(startsAt.getTime() + minutes * 60 * 1000), time };
+};
+
+const istTimeOf = (value) => {
+  const date = asDate(value);
+  if (!date) return null;
+  const { hour, minute } = toIstParts(date);
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+};
+
+// A guest whose own hold is still alive may confirm a time that availability already
+// hides because of that same hold.
+const unitsHeldByToken = async ({ doctorId, startsAt, endsAt, bufferBefore, bufferAfter, claimHoldId, now }) => {
+  const units = unitSlotsForRange(
+    doctorId,
+    new Date(startsAt.getTime() - bufferBefore * 60 * 1000),
+    new Date(endsAt.getTime() + bufferAfter * 60 * 1000),
+  );
+  if (!units.length) return false;
+  const snapshots = await db.getAll(...units.map((unit) => db.collection('appointmentSlots').doc(unit.id)));
+  return snapshots.every((snapshot) => snapshot.exists
+    && snapshot.get('kind') === 'hold'
+    && snapshot.get('holdId') === claimHoldId
+    && (!asDate(snapshot.get('expiresAt')) || asDate(snapshot.get('expiresAt')).getTime() > now.getTime()));
+};
+
+exports.holdSlot = onCall({ ...callableOptions, timeoutSeconds: 20, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+  const doctorId = trimmed(request.data?.doctorId, 120);
+  const dateKey = trimmed(request.data?.dateKey, 10);
+  const time = trimmed(request.data?.time, 5);
+  const visitTypeId = trimmed(request.data?.visitTypeId, 120);
+  if (!doctorId || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw publicError('invalid-argument', 'Choose a valid appointment time.');
+  await enforceBookingRateLimit(request);
+  const now = new Date();
+  const context = await availabilityContext({ doctorId, dateKey, visitTypeId, now });
+  const requested = daySlotsFor({ doctorId, context, dateKey, now }).find((slot) => slot.time === time);
+  if (!requested) throw publicError('failed-precondition', 'That time is no longer available.');
+  const holdToken = newManageToken();
+  const holdId = hashToken(holdToken);
+  const expiresAt = new Date(now.getTime() + holdDurationMs);
+  let unitIds = [];
+  await db.runTransaction(async (transaction) => {
+    unitIds = await placeAppointmentInTransaction({
+      db,
+      transaction,
+      doctorId,
+      startsAt: requested.startsAt,
+      endsAt: requested.endsAt,
+      bufferBefore: context.visitType.bufferBeforeMinutes,
+      bufferAfter: context.visitType.bufferAfterMinutes,
+      kindForCore: 'hold',
+      kindForBuffer: 'hold',
+      holdId,
+      visitTypeId: context.visitType.id,
+      expiresAt,
+      now,
+    });
+  });
+  return { slotId: unitIds[0] || null, holdToken, expiresAt: expiresAt.toISOString(), time };
+});
+
+// A hold owns every unit it locked, and only the token that created the hold can
+// release them.
+exports.releaseHold = onCall({ ...callableOptions, timeoutSeconds: 20, memory: '256MiB' }, async (request) => {
+  const holdToken = trimmed(request.data?.holdToken, 200);
+  if (holdToken.length < 20) throw publicError('invalid-argument', 'Choose a valid held appointment time.');
+  const snapshot = await db.collection('appointmentSlots').where('holdId', '==', hashToken(holdToken)).get();
+  const heldUnitRefs = snapshot.docs.filter((document) => document.get('kind') === 'hold').map((document) => document.ref);
+  if (heldUnitRefs.length) {
+    const batch = db.batch();
+    heldUnitRefs.forEach((ref) => batch.delete(ref));
+    await batch.commit();
+  }
+  return { ok: true };
+});
+
+const blockBusyRanges = async (doctorId, dateKey) => {
+  const snapshot = await db.collection('calendarBlocks')
+    .where('doctorId', '==', doctorId)
+    .where('dateKey', '==', dateKey)
+    .get();
+  return snapshot.docs.map((item) => item.data()).map((item) => {
+    const startsAt = asDate(item.startsAt);
+    const endsAt = asDate(item.endsAt);
+    return startsAt && endsAt ? { startsAt, endsAt } : null;
+  }).filter(Boolean);
 };
 
 const calendarConnection = async (doctorId) => {
@@ -770,35 +1165,94 @@ const calendarAccess = async (connection) => {
   return { accessToken: token.access_token, calendarId: connection.calendarId || 'primary' };
 };
 
-const externalBusyRanges = async ({ doctorId, dateKey }) => {
+// One free/busy request covers a day or a whole month, so month availability does not
+// need one Google call per day.
+const externalBusyRanges = async ({ doctorId, fromDateKey, toDateKey = fromDateKey }) => {
   const connection = await calendarConnection(doctorId);
   if (!connection) return { ranges: [], calendar: { connected: false } };
   try {
     const { accessToken, calendarId } = await calendarAccess(connection);
-    const start = new Date(`${dateKey}T00:00:00+05:30`);
-    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+    const start = new Date(`${fromDateKey}T00:00:00+05:30`);
+    const end = new Date(new Date(`${toDateKey}T00:00:00+05:30`).getTime() + 24 * 60 * 60 * 1000);
     const ranges = await freeBusy({ accessToken, calendarId, timeMin: start.toISOString(), timeMax: end.toISOString() });
-    await connection.ref.set({ syncStatus: 'healthy', lastAvailabilitySyncAt: admin.firestore.FieldValue.serverTimestamp(), lastSyncError: admin.firestore.FieldValue.delete() }, { merge: true });
+    await connection.ref.set({ syncStatus: 'healthy', lastAvailabilitySyncAt: FieldValue.serverTimestamp(), lastSyncError: FieldValue.delete() }, { merge: true });
     return { ranges, calendar: { connected: true, status: 'healthy' } };
   } catch (_error) {
     // Do not reveal provider detail or fail the clinic's own booking system if
     // Google is temporarily unavailable. The server records only a safe status.
-    await connection.ref.set({ syncStatus: 'degraded', lastSyncError: 'Unable to refresh external calendar availability.', lastSyncErrorAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    await connection.ref.set({ syncStatus: 'degraded', lastSyncError: 'Unable to refresh external calendar availability.', lastSyncErrorAt: FieldValue.serverTimestamp() }, { merge: true });
     return { ranges: [], calendar: { connected: true, status: 'degraded' } };
   }
 };
 
-const availabilityContext = async ({ doctorId, dateKey, visitTypeId }) => {
-  const [doctorSnapshot, scheduleSnapshot, exceptionSnapshot, configSnapshot] = await Promise.all([
+// Visit-type timing lives on each visit type. The collection is the source of truth;
+// until the migration has run, the legacy clinic/publicConfig values are used so
+// availability and booking keep behaving exactly as before.
+const storedVisitTypeTiming = async (visitTypeId) => {
+  const id = trimmed(visitTypeId, 120);
+  if (!id) return null;
+  const snapshot = await db.collection('visitTypes').doc(id).get();
+  if (!snapshot.exists || snapshot.get('active') === false) return null;
+  const data = snapshot.data();
+  const number = (name, fallback) => (Number.isFinite(Number(data[name])) ? Number(data[name]) : fallback);
+  const minutes = number('minutes', DEFAULT_BOOKING_CONFIG.slotMinutes);
+  return {
+    id: snapshot.id,
+    label: String(data.label || snapshot.id).slice(0, 100),
+    mode: data.mode === 'video' ? 'video' : 'in_person',
+    minutes,
+    bufferBeforeMinutes: number('bufferBeforeMinutes', 0),
+    bufferAfterMinutes: number('bufferAfterMinutes', 0),
+    minNoticeMinutes: number('minNoticeMinutes', DEFAULT_BOOKING_CONFIG.leadMinutes),
+    maxAdvanceDays: number('maxAdvanceDays', DEFAULT_BOOKING_CONFIG.bookingWindowDays),
+    intervalMinutes: number('intervalMinutes', minutes),
+    dailyLimit: Number.isInteger(data.dailyLimit) ? data.dailyLimit : null,
+    requiresConfirmation: data.requiresConfirmation !== false,
+  };
+};
+
+const legacyVisitTypeTiming = (config, visitTypeId) => {
+  const visitType = visitTypeFor(config, visitTypeId);
+  return {
+    id: visitType.id,
+    label: visitType.label,
+    mode: visitType.mode,
+    minutes: visitType.minutes,
+    bufferBeforeMinutes: config.bufferBeforeMinutes,
+    bufferAfterMinutes: config.bufferAfterMinutes,
+    minNoticeMinutes: config.leadMinutes,
+    maxAdvanceDays: config.bookingWindowDays,
+    intervalMinutes: config.intervalMinutes,
+    dailyLimit: null,
+    requiresConfirmation: !config.autoConfirm,
+  };
+};
+
+const resolveVisitType = async ({ config, visitTypeId }) => (await storedVisitTypeTiming(visitTypeId))
+  || legacyVisitTypeTiming(config, visitTypeId);
+
+const dayActiveAppointmentCount = async ({ doctorId, dateKey, visitTypeId }) => {
+  const snapshot = await db.collection('appointments').where('doctorId', '==', doctorId).where('dateKey', '==', dateKey).get();
+  return snapshot.docs.filter((document) => isActiveAppointment(document.get('status')) && document.get('visitType') === visitTypeId).length;
+};
+
+const loadPublicBookingConfig = async () => bookingConfig(await db.collection('clinic').doc('publicConfig').get());
+
+const availabilityContext = async ({ doctorId, dateKey, visitTypeId, now = new Date() }) => {
+  const [doctorSnapshot, scheduleSnapshot, exceptionSnapshot, config] = await Promise.all([
     db.collection('doctors').doc(doctorId).get(),
     db.collection('doctorSchedules').doc(doctorId).get(),
     db.collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`).get(),
-    db.collection('clinic').doc('publicConfig').get(),
+    loadPublicBookingConfig(),
   ]);
   if (!doctorSnapshot.exists || doctorSnapshot.get('active') !== true || doctorSnapshot.get('bookingEnabled') !== true) throw publicError('not-found', 'This doctor is not currently available for online bookings.');
-  const config = bookingConfig(configSnapshot);
-  const visitType = visitTypeFor(config, visitTypeId);
-  const [slots, external] = await Promise.all([slotBusyRanges(doctorId, dateKey), externalBusyRanges({ doctorId, dateKey })]);
+  const visitType = await resolveVisitType({ config, visitTypeId });
+  const [occupiedUnitIds, blocks, external, activeCountForType] = await Promise.all([
+    dayOccupiedUnits(doctorId, dateKey, now),
+    blockBusyRanges(doctorId, dateKey),
+    externalBusyRanges({ doctorId, fromDateKey: dateKey }),
+    dayActiveAppointmentCount({ doctorId, dateKey, visitTypeId: visitType.id }),
+  ]);
   return {
     doctor: doctorSnapshot.data(),
     weeklySessions: (scheduleSnapshot.get('sessions') || doctorSnapshot.get('weeklySchedule') || []).map((session) => ({
@@ -809,18 +1263,79 @@ const availabilityContext = async ({ doctorId, dateKey, visitTypeId }) => {
     exception: exceptionSnapshot.exists ? exceptionSnapshot.data() : null,
     config,
     visitType,
-    busyRanges: [...slots, ...external.ranges],
+    blocks: [...blocks, ...external.ranges],
+    occupiedUnitIds,
+    activeCountForType,
     externalCalendar: external.calendar,
   };
 };
 
+// The engine stays pure: the clock and every unit lock are loaded above and passed in.
+// Staff moves bypass the patient notice period.
+const daySlotsFor = ({ doctorId, context, dateKey, now, ignoreNotice = false }) => computeDaySlots({
+  dateKey,
+  now,
+  doctorId,
+  visitType: ignoreNotice ? { ...context.visitType, minNoticeMinutes: 0 } : context.visitType,
+  weeklySessions: context.weeklySessions,
+  exception: context.exception,
+  blocks: context.blocks,
+  occupiedUnitIds: context.occupiedUnitIds,
+  activeCountForType: context.activeCountForType,
+});
+
 exports.getAvailability = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
   const { doctorId, dateKey, visitTypeId } = request.data || {};
   if (!doctorId || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || ''))) throw publicError('invalid-argument', 'Choose a doctor and appointment date.');
-  const context = await availabilityContext({ doctorId, dateKey, visitTypeId });
-  const slots = buildAvailability({ doctorId, dateKey, weeklySessions: context.weeklySessions, exception: context.exception, durationMinutes: context.visitType.minutes, intervalMinutes: context.config.intervalMinutes, bufferBeforeMinutes: context.config.bufferBeforeMinutes, bufferAfterMinutes: context.config.bufferAfterMinutes, leadMinutes: context.config.leadMinutes, bookingWindowDays: context.config.bookingWindowDays, busyRanges: context.busyRanges });
-  return { timezone: context.config.timezone, visitType: { id: context.visitType.id, label: context.visitType.label, minutes: context.visitType.minutes, mode: context.visitType.mode }, calendar: context.externalCalendar, slots: slots.map((slot) => ({ slotId: slot.slotId, startsAt: slot.startsAt.toISOString(), endsAt: slot.endsAt.toISOString(), time: slot.time })) };
+  const now = new Date();
+  const context = await availabilityContext({ doctorId, dateKey, visitTypeId, now });
+  return {
+    timezone: context.config.timezone,
+    visitType: { id: context.visitType.id, label: context.visitType.label, minutes: context.visitType.minutes, mode: context.visitType.mode },
+    calendar: context.externalCalendar,
+    slots: daySlotsFor({ doctorId, context, dateKey, now }).map((slot) => ({
+      slotId: istUnitId(doctorId, slot.startsAt),
+      startsAt: slot.startsAt.toISOString(),
+      endsAt: slot.endsAt.toISOString(),
+      time: slot.time,
+    })),
+  };
 });
+
+// The month-wide public availability callable loads each source once per month, so it lives
+// in its own module (spec 6.2) with the clinic-specific loaders handed in.
+Object.assign(exports, createAvailabilityCallables({
+  db,
+  callableOptions: { ...callableOptions, secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] },
+  loadConfig: loadPublicBookingConfig,
+  resolveVisitType,
+  loadExternalBusy: externalBusyRanges,
+}));
+
+// Calendar identifiers name the clinic's external calendar, and the creator's uid names a
+// staff member. Neither belongs on the appointment, which the owning patient can read, so
+// both live on the server-only appointmentPrivate document.
+const appointmentPrivateRef = (appointmentId) => db.collection('appointmentPrivate').doc(appointmentId);
+
+const calendarIdsFrom = (internals, appointment) => ({
+  calendarId: internals?.calendarId || appointment?.externalCalendar?.calendarId || null,
+  eventId: internals?.eventId || appointment?.externalCalendar?.eventId || null,
+});
+
+const publicSyncState = ({ syncStatus, lastSyncError = null }) => (lastSyncError
+  ? { provider: 'google', syncStatus, lastSyncError }
+  : { provider: 'google', syncStatus });
+
+// Appointments created before this move still carry their calendar identifiers on the
+// appointment itself. They are read once and copied into appointmentPrivate so the
+// clinic's Google events are never orphaned.
+const appointmentCalendarIds = async (appointmentId, appointment) => {
+  const snapshot = await appointmentPrivateRef(appointmentId).get();
+  const stored = snapshot.exists ? snapshot.data() : {};
+  const ids = calendarIdsFrom(stored, appointment);
+  if (ids.eventId && stored.eventId !== ids.eventId) await appointmentPrivateRef(appointmentId).set(ids, { merge: true });
+  return ids;
+};
 
 const syncAppointmentToGoogle = async (appointmentId) => {
   const appointmentRef = db.collection('appointments').doc(appointmentId);
@@ -832,81 +1347,453 @@ const syncAppointmentToGoogle = async (appointmentId) => {
   try {
     const { accessToken, calendarId } = await calendarAccess(connection);
     const event = await createEvent({ accessToken, calendarId, startsAt: asDate(appointment.startsAt).toISOString(), endsAt: asDate(appointment.endsAt).toISOString(), appointmentReference: appointment.reference });
-    await appointmentRef.set({ externalCalendar: { provider: 'google', calendarId, eventId: event.id, syncStatus: 'synced', lastSyncedAt: admin.firestore.FieldValue.serverTimestamp() }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    await appointmentPrivateRef(appointmentId).set({ calendarId, eventId: event.id }, { merge: true });
+    await appointmentRef.set({ externalCalendar: { ...publicSyncState({ syncStatus: 'synced' }), lastSyncedAt: FieldValue.serverTimestamp() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   } catch (_error) {
-    await appointmentRef.set({ externalCalendar: { provider: 'google', syncStatus: 'pending', lastSyncError: 'Calendar event could not be synced.' }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    await appointmentRef.set({ externalCalendar: publicSyncState({ syncStatus: 'pending', lastSyncError: 'Calendar event could not be synced.' }), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   }
 };
 
 const deleteAppointmentFromGoogle = async ({ ref, appointment }) => {
-  if (!appointment.externalCalendar?.eventId) return;
+  const ids = await appointmentCalendarIds(ref.id, appointment);
+  if (!ids.eventId) return;
   try {
     const connection = await calendarConnection(appointment.doctorId);
     if (!connection) return;
     const { accessToken, calendarId } = await calendarAccess(connection);
-    await deleteEvent({ accessToken, calendarId, eventId: appointment.externalCalendar.eventId });
-    await ref.set({ externalCalendar: { ...appointment.externalCalendar, syncStatus: 'deleted', eventId: admin.firestore.FieldValue.delete(), lastSyncedAt: admin.firestore.FieldValue.serverTimestamp() }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    await deleteEvent({ accessToken, calendarId: ids.calendarId || calendarId, eventId: ids.eventId });
+    await appointmentPrivateRef(ref.id).set({ calendarId: FieldValue.delete(), eventId: FieldValue.delete() }, { merge: true });
+    await ref.set({ externalCalendar: { ...publicSyncState({ syncStatus: 'deleted' }), lastSyncedAt: FieldValue.serverTimestamp() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   } catch (_error) {
-    await ref.set({ externalCalendar: { ...appointment.externalCalendar, syncStatus: 'pending', lastSyncError: 'Calendar event could not be removed.' }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    await ref.set({ externalCalendar: publicSyncState({ syncStatus: 'pending', lastSyncError: 'Calendar event could not be removed.' }), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   }
 };
 
 exports.createBooking = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
-  const { branchId, departmentId, doctorId, dateKey, time, visitTypeId, patient, reason, consentVersion, clientRequestId } = request.data || {};
-  if (!branchId || !departmentId || !doctorId || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || '')) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(time || ''))) throw publicError('invalid-argument', 'Choose a valid appointment time.');
-  if (!validClientRequestId(clientRequestId)) throw publicError('invalid-argument', 'Please refresh and try booking again.');
-  const name = trimmed(patient?.name, 120);
-  const phone = trimmed(patient?.phone, 30);
-  if (!name || !validPhone(phone) || patient?.consentToTreatment !== true) throw publicError('invalid-argument', 'Enter your name, a valid phone number, and consent to the appointment terms.');
-  const phoneKey = toE164(phone);
-  if (!phoneKey) throw publicError('invalid-argument', 'Enter a valid Indian phone number.');
+  const data = request.data || {};
+  const doctorId = trimmed(data.doctorId, 120);
+  const visitTypeId = trimmed(data.visitTypeId, 120);
+  if (!doctorId || !visitTypeId) throw publicError('invalid-argument', 'Choose a doctor and appointment format.');
+  if (!validClientRequestId(data.clientRequestId)) throw publicError('invalid-argument', 'Please refresh and try booking again.');
+  const startsAt = bookingStartsAt(data);
+  if (!startsAt) throw publicError('invalid-argument', 'Choose a valid appointment time.');
+  // A retry of the same request (double submit, network retry) returns the original booking
+  // instead of failing on the availability the first attempt already consumed.
+  const requestRef = db.collection('bookingRequests').doc(data.clientRequestId);
+  const priorRequest = await requestRef.get();
+  if (priorRequest.exists) {
+    return { appointmentId: priorRequest.get('appointmentId'), reference: priorRequest.get('reference'), status: priorRequest.get('status'), idempotent: true };
+  }
+  const now = new Date();
+  const dateKey = istDateKey(startsAt);
+  const time = istTimeOf(startsAt);
+  // The visit type is resolved before the patient details: §6.6 validation depends on it (the
+  // intake questions), and availabilityContext re-checks the doctor and resolves it again for the day.
+  const config = await loadPublicBookingConfig();
+  const visitType = await resolveVisitType({ config, visitTypeId });
+  const validated = validateBookingInput(data, visitType, { now });
+  if (!validated.ok) {
+    throw schedulerError('invalid-argument', validated.reason, BOOKING_INPUT_MESSAGES[validated.reason] || BOOKING_INPUT_MESSAGES.VALIDATION);
+  }
+  const { name, phone, phoneKey, email, emailLower, dob, ageYears, sex, visitKind, reason, intake } = validated.value;
   await enforceBookingRateLimit(request);
-  await assertPhoneBookingCapacity(phoneKey);
-  const context = await availabilityContext({ doctorId, dateKey, visitTypeId });
-  const appointmentSlots = buildAvailability({ doctorId, dateKey, weeklySessions: context.weeklySessions, exception: context.exception, durationMinutes: context.visitType.minutes, intervalMinutes: context.config.intervalMinutes, bufferBeforeMinutes: context.config.bufferBeforeMinutes, bufferAfterMinutes: context.config.bufferAfterMinutes, leadMinutes: context.config.leadMinutes, bookingWindowDays: context.config.bookingWindowDays, busyRanges: context.busyRanges });
-  const requested = appointmentSlots.find((slot) => slot.time === time);
-  if (!requested) throw publicError('failed-precondition', 'That time is no longer available. Please choose another slot.');
-  const [branchSnapshot, departmentSnapshot, doctorSnapshot] = await Promise.all([db.collection('branches').doc(branchId).get(), db.collection('departments').doc(departmentId).get(), db.collection('doctors').doc(doctorId).get()]);
-  if (!branchSnapshot.exists || branchSnapshot.get('active') !== true || !departmentSnapshot.exists || departmentSnapshot.get('branchId') !== branchId || departmentSnapshot.get('active') !== true || departmentSnapshot.get('publicBookingEnabled') !== true || !doctorSnapshot.exists || doctorSnapshot.get('branchId') !== branchId || !(doctorSnapshot.get('departmentIds') || []).includes(departmentId)) throw publicError('failed-precondition', 'The selected clinic service is not available.');
+  await assertPhoneBookingCapacity(phoneKey, now);
+  const context = await availabilityContext({ doctorId, dateKey, visitTypeId, now });
+  const holdSecret = holdSecretFrom(data);
+  const claimHoldId = holdSecret.length >= 16 ? hashToken(holdSecret) : null;
+  const appointmentSlots = daySlotsFor({ doctorId, context, dateKey, now });
+  let requested = appointmentSlots.find((slot) => slot.time === time);
+  if (!requested && claimHoldId) {
+    const candidate = slotForTime(dateKey, time, context.visitType.minutes);
+    const held = await unitsHeldByToken({
+      doctorId,
+      startsAt: candidate.startsAt,
+      endsAt: candidate.endsAt,
+      bufferBefore: context.visitType.bufferBeforeMinutes,
+      bufferAfter: context.visitType.bufferAfterMinutes,
+      claimHoldId,
+      now,
+    });
+    if (held) requested = candidate;
+  }
+  // §6.6 dropped branchId/departmentId from the input: the patient picks a doctor, and the
+  // doctor's own branch and primary department keep the stored appointment shape unchanged.
+  // availabilityContext has already refused a doctor who is not active and publicly bookable.
+  const branchId = trimmed(context.doctor.branchId, 80) || null;
+  const departmentId = (context.doctor.departmentIds || [])[0] || null;
+  const patientRegistryId = await patientRegistryIdForPhone(phoneKey);
 
-  const requestRef = db.collection('bookingRequests').doc(clientRequestId);
   const exceptionRef = db.collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`);
   const appointmentRef = db.collection('appointments').doc();
-  const slotRef = db.collection('appointmentSlots').doc(makeSlotId(doctorId, dateKey, time));
-  const reference = appointmentReference();
+  const queueRef = db.collection('counters').doc(`queue_${doctorId}_${dateKey}`);
+  if (!requested) throw schedulerError('failed-precondition', 'SLOT_UNAVAILABLE', 'That time is no longer available. Please choose another slot.');
+  const reference = newReference();
+  const manageToken = newManageToken();
+  const manageTokenHash = hashToken(manageToken);
   const role = roleFor(request.auth);
   let result;
   try {
     await db.runTransaction(async (transaction) => {
-      const [prior, slot, currentException] = await Promise.all([transaction.get(requestRef), transaction.get(slotRef), transaction.get(exceptionRef)]);
+      const [prior, currentException] = await Promise.all([transaction.get(requestRef), transaction.get(exceptionRef)]);
       if (prior.exists) {
         result = { appointmentId: prior.get('appointmentId'), reference: prior.get('reference'), status: prior.get('status'), idempotent: true };
         return;
       }
-      if (slot.exists) throw publicError('already-exists', 'That time has just been booked. Please choose another slot.');
-      if (currentException.exists && currentException.get('type') === 'closed') throw publicError('failed-precondition', 'This clinic day has just been closed. Please choose another time.');
-      const status = context.config.autoConfirm ? 'confirmed' : 'scheduled';
+      if (currentException.exists && currentException.get('type') === 'closed') throw schedulerError('failed-precondition', 'SLOT_UNAVAILABLE', 'This clinic day has just been closed. Please choose another time.');
+      const status = context.visitType.requiresConfirmation ? 'scheduled' : 'confirmed';
       const createdBy = request.auth ? { uid: request.auth.uid, role } : { uid: null, role: 'public' };
-      transaction.set(slotRef, { doctorId, dateKey, startsAt: admin.firestore.Timestamp.fromDate(requested.startsAt), endsAt: admin.firestore.Timestamp.fromDate(requested.endsAt), appointmentId: appointmentRef.id, status: 'booked', createdAt: admin.firestore.FieldValue.serverTimestamp() });
-      transaction.set(appointmentRef, {
-        reference, branchId, departmentId, doctorId, visitType: context.visitType.id, visitMode: context.visitType.mode, dateKey,
-        startsAt: admin.firestore.Timestamp.fromDate(requested.startsAt), endsAt: admin.firestore.Timestamp.fromDate(requested.endsAt),
-        status, source: request.auth ? 'patient_portal' : 'web', patientId: request.auth?.uid || null,
-        patientSnapshot: { name, phone }, phoneKey, reason: trimmed(reason, 500) || null, slotIds: [slotRef.id],
-        consent: { version: trimmed(consentVersion, 40) || 'booking-v1', acceptedAt: admin.firestore.FieldValue.serverTimestamp() },
-        createdBy, externalCalendar: { provider: 'google', syncStatus: 'not_connected' }, videoConsultation: context.visitType.mode === 'video' ? { status: 'awaiting_link' } : null, createdAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      const unitIds = await placeAppointmentInTransaction({
+        db,
+        transaction,
+        doctorId,
+        startsAt: requested.startsAt,
+        endsAt: requested.endsAt,
+        bufferBefore: context.visitType.bufferBeforeMinutes,
+        bufferAfter: context.visitType.bufferAfterMinutes,
+        appointmentRef,
+        visitTypeId: context.visitType.id,
+        claimHoldId,
+        now,
       });
-      transaction.set(appointmentRef.collection('events').doc(), { from: null, to: status, byUid: createdBy.uid, byRole: createdBy.role, at: admin.firestore.FieldValue.serverTimestamp(), meta: { source: request.auth ? 'patient_portal' : 'web' } });
-      transaction.set(db.collection('auditLogs').doc(), { at: admin.firestore.FieldValue.serverTimestamp(), actor: createdBy, action: 'appointment_created', resource: { type: 'appointment', id: appointmentRef.id }, meta: { source: request.auth ? 'patient_portal' : 'web', status } });
-      transaction.set(requestRef, { appointmentId: appointmentRef.id, reference, status, createdAt: admin.firestore.FieldValue.serverTimestamp() });
-      result = { appointmentId: appointmentRef.id, reference, status, idempotent: false };
+      const source = request.auth ? 'portal' : 'web';
+      transaction.set(appointmentRef, {
+        reference, branchId, departmentId, doctorId,
+        // visitType/visitMode stay for the readers that predate §4.3 (queue counters, portal, staff lists).
+        visitTypeId: context.visitType.id, visitType: context.visitType.id, visitTypeLabel: context.visitType.label,
+        visitMode: context.visitType.mode,
+        durationMinutes: context.visitType.minutes,
+        bufferBeforeMinutes: context.visitType.bufferBeforeMinutes,
+        bufferAfterMinutes: context.visitType.bufferAfterMinutes,
+        dateKey,
+        startsAt: Timestamp.fromDate(requested.startsAt), endsAt: Timestamp.fromDate(requested.endsAt),
+        status, source, patientId: request.auth?.uid || null, patientRegistryId,
+        patientSnapshot: { name, phone, sex, ageYears, dob, visitKind, email },
+        phoneKey,
+        contact: { email, emailLower, phoneKey },
+        intake,
+        reason,
+        tokenNumber: null, checkedInAt: null, startedAt: null, completedAt: null,
+        reminders: { t24h: null, t2h: null },
+        slotIds: unitIds,
+        consent: { version: CONSENT_VERSION, acceptedAt: FieldValue.serverTimestamp() },
+        externalCalendar: publicSyncState({ syncStatus: 'not_connected' }),
+        videoConsultation: context.visitType.mode === 'video' ? { status: 'awaiting_link' } : null,
+        createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+      });
+      transaction.set(appointmentPrivateRef(appointmentRef.id), { appointmentId: appointmentRef.id, manageTokenHash, manageCreatedAt: FieldValue.serverTimestamp(), createdByUid: createdBy.uid, ipHash: requestIpHash(request) });
+      // The reference index guarantees a unique reference and lets the token flow resolve it.
+      transaction.create(db.collection('bookingReferences').doc(reference), { appointmentId: appointmentRef.id, createdAt: FieldValue.serverTimestamp() });
+      transaction.set(appointmentRef.collection('events').doc(), { from: null, to: status, byUid: createdBy.uid, byRole: createdBy.role, at: FieldValue.serverTimestamp(), meta: { source } });
+      transaction.set(db.collection('auditLogs').doc(), { at: FieldValue.serverTimestamp(), actor: createdBy, action: 'appointment_created', resource: { type: 'appointment', id: appointmentRef.id }, meta: { source, status } });
+      transaction.set(requestRef, { appointmentId: appointmentRef.id, reference, status, createdAt: FieldValue.serverTimestamp() });
+      result = {
+        appointmentId: appointmentRef.id,
+        reference,
+        status,
+        idempotent: false,
+        startsAt: requested.startsAt.toISOString(),
+        endsAt: requested.endsAt.toISOString(),
+        // Returned once, never stored in clear (§6.6).
+        manageToken,
+        visitType: { id: context.visitType.id, label: context.visitType.label, mode: context.visitType.mode, minutes: context.visitType.minutes },
+        doctor: { name: trimmed(context.doctor.name, 160) },
+      };
     });
   } catch (error) {
     if (error instanceof HttpsError) throw error;
     throw publicError('internal', 'We could not reserve this time. Please try again.');
   }
-  if (!result.idempotent) await syncAppointmentToGoogle(result.appointmentId);
+  if (!result.idempotent) {
+    // After the transaction commits, in the order spec 5.4 sets: outbox first, then the calendar.
+    await enqueueForAppointment('booking_confirmed', result.appointmentId);
+    await syncAppointmentToGoogle(result.appointmentId);
+  }
   return result;
+});
+
+const publicAppointmentView = (appointment) => ({
+  reference: appointment.reference,
+  appointmentId: appointment.id,
+  doctorId: appointment.doctorId,
+  dateKey: appointment.dateKey,
+  startsAt: asDate(appointment.startsAt)?.toISOString() || null,
+  endsAt: asDate(appointment.endsAt)?.toISOString() || null,
+  status: appointment.status,
+  visitType: appointment.visitType,
+  visitMode: appointment.visitMode,
+  patientName: appointment.patientSnapshot?.name || '',
+});
+
+const findGuestAppointment = async (reference, token) => {
+  const cleanReference = trimmed(reference, 32).toUpperCase();
+  const cleanToken = trimmed(token, 200);
+  if (!/^SC-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$/.test(cleanReference) || cleanToken.length < 20) throw publicError('not-found', 'We could not find this booking.');
+  const snapshot = await db.collection('appointments').where('reference', '==', cleanReference).limit(1).get();
+  if (!snapshot.size) throw publicError('not-found', 'We could not find this booking.');
+  const appointment = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+  const privateSnapshot = await db.collection('appointmentPrivate').doc(appointment.id).get();
+  const tokenHash = privateSnapshot.get('manageTokenHash') || appointment.manageTokenHash;
+  if (!tokensEqual(tokenHash, hashToken(cleanToken))) throw publicError('not-found', 'We could not find this booking.');
+  return { ref: snapshot.docs[0].ref, appointment };
+};
+
+exports.getBookingByToken = onCall({ ...callableOptions, timeoutSeconds: 20, memory: '256MiB' }, async (request) => {
+  await enforceBookingRateLimit(request);
+  const { appointment } = await findGuestAppointment(request.data?.reference, request.data?.token);
+  return publicAppointmentView(appointment);
+});
+
+exports.cancelBookingByToken = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+  await enforceBookingRateLimit(request);
+  const { ref, appointment } = await findGuestAppointment(request.data?.reference, request.data?.token);
+  const reason = trimmed(request.data?.reason, 300) || 'Cancelled online by patient';
+  const config = bookingConfig(await db.collection('clinic').doc('publicConfig').get());
+  if (!canPatientCancel({ appointment, uid: null, cutoffHours: config.patientCancellationCutoffHours, allowGuest: true })) throw publicError('failed-precondition', 'This appointment can no longer be cancelled online. Please contact the clinic.');
+  await db.runTransaction(async (transaction) => {
+    const current = await transaction.get(ref);
+    if (!current.exists) throw publicError('not-found', 'We could not find this booking.');
+    const currentAppointment = current.data();
+    if (!canPatientCancel({ appointment: currentAppointment, uid: null, cutoffHours: config.patientCancellationCutoffHours, allowGuest: true })) throw publicError('failed-precondition', 'This appointment can no longer be cancelled online. Please contact the clinic.');
+    const now = FieldValue.serverTimestamp();
+    transaction.update(ref, { status: 'cancelled', cancellation: { byUid: null, byRole: 'guest', reason, at: now }, updatedAt: now });
+    releaseUnitsInTransaction({ db, transaction, slotIds: appointmentUnitIds(currentAppointment) });
+    transaction.set(ref.collection('events').doc(), { from: currentAppointment.status, to: 'cancelled', byUid: null, byRole: 'guest', reason, at: now });
+    transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: null, role: 'guest' }, action: 'appointment_cancelled', resource: { type: 'appointment', id: ref.id }, meta: { source: 'guest_manage' } });
+  });
+  await deleteAppointmentFromGoogle({ ref, appointment });
+  return { ok: true, status: 'cancelled' };
+});
+
+exports.rescheduleBookingByToken = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+  await enforceBookingRateLimit(request);
+  const { ref, appointment } = await findGuestAppointment(request.data?.reference, request.data?.token);
+  const dateKey = trimmed(request.data?.dateKey, 10);
+  const time = trimmed(request.data?.time, 5);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw publicError('invalid-argument', 'Choose a valid new appointment time.');
+  const config = bookingConfig(await db.collection('clinic').doc('publicConfig').get());
+  if (!canPatientCancel({ appointment, uid: null, cutoffHours: config.patientCancellationCutoffHours, allowGuest: true })) throw publicError('failed-precondition', 'This appointment can no longer be changed online. Please contact the clinic.');
+  const now = new Date();
+  const context = await availabilityContext({ doctorId: appointment.doctorId, dateKey, visitTypeId: appointment.visitType, now });
+  const requested = daySlotsFor({ doctorId: appointment.doctorId, context, dateKey, now }).find((slot) => slot.time === time);
+  if (!requested) throw publicError('failed-precondition', 'That time is no longer available. Please choose another slot.');
+  await db.runTransaction(async (transaction) => {
+    const current = await transaction.get(ref);
+    if (!current.exists) throw publicError('not-found', 'We could not find this booking.');
+    const currentAppointment = current.data();
+    if (!canPatientCancel({ appointment: currentAppointment, uid: null, cutoffHours: config.patientCancellationCutoffHours, allowGuest: true })) throw publicError('failed-precondition', 'This appointment can no longer be changed online. Please contact the clinic.');
+    if (currentAppointment.dateKey === dateKey && istTimeOf(currentAppointment.startsAt) === time) throw publicError('failed-precondition', 'Choose a different appointment time.');
+    const lostUnitIds = appointmentUnitIds(currentAppointment);
+    const stamp = FieldValue.serverTimestamp();
+    const unitIds = await placeAppointmentInTransaction({
+      db,
+      transaction,
+      doctorId: currentAppointment.doctorId,
+      startsAt: requested.startsAt,
+      endsAt: requested.endsAt,
+      bufferBefore: context.visitType.bufferBeforeMinutes,
+      bufferAfter: context.visitType.bufferAfterMinutes,
+      appointmentRef: ref,
+      visitTypeId: context.visitType.id,
+      claimAppointmentId: ref.id,
+      now,
+    });
+    releaseUnitsInTransaction({ db, transaction, slotIds: lostUnitIds.filter((unitId) => !unitIds.includes(unitId)) });
+    transaction.update(ref, { dateKey, startsAt: Timestamp.fromDate(requested.startsAt), endsAt: Timestamp.fromDate(requested.endsAt), slotIds: unitIds, updatedAt: stamp });
+    transaction.set(ref.collection('events').doc(), { from: currentAppointment.status, to: currentAppointment.status, byUid: null, byRole: 'guest', at: stamp, meta: { action: 'rescheduled', fromDateKey: currentAppointment.dateKey, toDateKey: dateKey, toTime: time } });
+    transaction.set(db.collection('auditLogs').doc(), { at: stamp, actor: { uid: null, role: 'guest' }, action: 'appointment_rescheduled', resource: { type: 'appointment', id: ref.id }, meta: { source: 'guest_manage', fromDateKey: currentAppointment.dateKey, toDateKey: dateKey } });
+  });
+  return { ok: true, reference: appointment.reference, appointmentId: ref.id, dateKey, time, status: appointment.status };
+});
+
+const requireCalendarStaff = (request, doctorId) => {
+  assertPasswordChanged(request);
+  const role = ROLE[request.auth?.token?.role];
+  if (!role) throw publicError('permission-denied', 'Staff access is required.');
+  if (role === 'doctor' && request.auth.token.doctorId !== doctorId) throw publicError('permission-denied', 'You can only manage your own calendar.');
+  return role;
+};
+
+exports.saveCalendarBlock = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  const doctorId = trimmed(request.data?.doctorId, 120);
+  const dateKey = trimmed(request.data?.dateKey, 10);
+  const start = trimmed(request.data?.start, 5);
+  const end = trimmed(request.data?.end, 5);
+  const reason = trimmed(request.data?.reason, 200);
+  const role = requireCalendarStaff(request, doctorId);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(end) || !reason) throw publicError('invalid-argument', 'Enter a date, time range, and reason for the block.');
+  const startsAt = istInstant(dateKey, start);
+  const endsAt = istInstant(dateKey, end);
+  if (endsAt <= startsAt) throw publicError('invalid-argument', 'The block must end after it starts.');
+  const ref = db.collection('calendarBlocks').doc();
+  await ref.set({ doctorId, dateKey, startsAt: Timestamp.fromDate(startsAt), endsAt: Timestamp.fromDate(endsAt), reason, createdBy: { uid: request.auth.uid, role }, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+  await db.collection('auditLogs').add({ at: FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role }, action: 'calendar_block_created', resource: { type: 'calendar_block', id: ref.id }, meta: { doctorId, dateKey } });
+  return { id: ref.id, dateKey, start, end };
+});
+
+exports.deleteCalendarBlock = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  const blockId = trimmed(request.data?.blockId, 200);
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(blockId)) throw publicError('invalid-argument', 'Choose a valid calendar block.');
+  const ref = db.collection('calendarBlocks').doc(blockId);
+  const snapshot = await ref.get();
+  if (!snapshot.exists) throw publicError('not-found', 'Calendar block not found.');
+  const role = requireCalendarStaff(request, snapshot.get('doctorId'));
+  await ref.delete();
+  await db.collection('auditLogs').add({ at: FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role }, action: 'calendar_block_deleted', resource: { type: 'calendar_block', id: blockId }, meta: { doctorId: snapshot.get('doctorId'), dateKey: snapshot.get('dateKey') } });
+  return { ok: true };
+});
+
+exports.createStaffAppointment = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+  assertPasswordChanged(request);
+  const role = ROLE[request.auth?.token?.role];
+  if (!role) throw publicError('permission-denied', 'Staff access is required.');
+  const doctorId = trimmed(request.data?.doctorId, 120);
+  const patientId = trimmed(request.data?.patientId, 200);
+  const dateKey = trimmed(request.data?.dateKey, 10);
+  const time = trimmed(request.data?.time, 5);
+  const visitTypeId = trimmed(request.data?.visitTypeId, 120) || 'consultation';
+  const source = ['manager', 'walk_in', 'phone'].includes(request.data?.source) ? request.data.source : 'manager';
+  if (!doctorId || !patientId || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw publicError('invalid-argument', 'Choose a patient, doctor, date, and time.');
+  if (role === 'doctor' && request.auth.token.doctorId !== doctorId) throw publicError('permission-denied', 'You can only book your own calendar.');
+  const patientSnapshot = await db.collection('patients').doc(patientId).get();
+  const doctorSnapshot = await db.collection('doctors').doc(doctorId).get();
+  if (!patientSnapshot.exists || !doctorSnapshot.exists || doctorSnapshot.get('active') !== true) throw publicError('not-found', 'Patient or doctor not found.');
+  const now = new Date();
+  const context = await availabilityContext({ doctorId, dateKey, visitTypeId, now });
+  const requested = daySlotsFor({ doctorId, context, dateKey, now, ignoreNotice: true }).find((slot) => slot.time === time);
+  if (!requested) throw publicError('failed-precondition', 'That time is no longer available.');
+  const appointmentRef = db.collection('appointments').doc();
+  const queueRef = db.collection('counters').doc(`queue_${doctorId}_${dateKey}`);
+  const reference = newReference();
+  const patient = patientSnapshot.data();
+  const createdBy = { uid: request.auth.uid, role };
+  const status = context.visitType.requiresConfirmation ? 'scheduled' : 'confirmed';
+  await db.runTransaction(async (transaction) => {
+    // Every read comes before the first write, then the unit locks are placed.
+    const queue = await transaction.get(queueRef);
+    const unitIds = await placeAppointmentInTransaction({
+      db,
+      transaction,
+      doctorId,
+      startsAt: requested.startsAt,
+      endsAt: requested.endsAt,
+      bufferBefore: context.visitType.bufferBeforeMinutes,
+      bufferAfter: context.visitType.bufferAfterMinutes,
+      appointmentRef,
+      visitTypeId: context.visitType.id,
+      now,
+    });
+    const queueToken = (Number(queue.get('value')) || 0) + 1;
+    transaction.set(queueRef, { value: queueToken, doctorId, dateKey, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    transaction.set(appointmentRef, {
+      reference, branchId: doctorSnapshot.get('branchId'), departmentId: doctorSnapshot.get('departmentIds')?.[0] || null,
+      doctorId, visitType: context.visitType.id, visitMode: context.visitType.mode, dateKey,
+      startsAt: Timestamp.fromDate(requested.startsAt), endsAt: Timestamp.fromDate(requested.endsAt),
+      status, source, patientId, patientSnapshot: { name: patient.name || '', phone: patient.phone || '' }, phoneKey: patient.phone || null,
+      reason: trimmed(request.data?.reason, 500) || null, queueToken, slotIds: unitIds, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+    });
+    transaction.set(appointmentPrivateRef(appointmentRef.id), { appointmentId: appointmentRef.id, createdByUid: createdBy.uid, createdAt: FieldValue.serverTimestamp() });
+    transaction.create(db.collection('bookingReferences').doc(reference), { appointmentId: appointmentRef.id, createdAt: FieldValue.serverTimestamp() });
+    transaction.set(appointmentRef.collection('events').doc(), { from: null, to: status, byUid: request.auth.uid, byRole: role, at: FieldValue.serverTimestamp(), meta: { source } });
+    transaction.set(db.collection('auditLogs').doc(), { at: FieldValue.serverTimestamp(), actor: createdBy, action: 'appointment_created', resource: { type: 'appointment', id: appointmentRef.id }, patientId, meta: { source, status } });
+  });
+  const created = await appointmentRef.get();
+  await syncAppointmentToGoogle(appointmentRef.id);
+  return { appointmentId: appointmentRef.id, reference: created.get('reference'), status };
+});
+
+exports.joinWaitlist = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  const doctorId = trimmed(request.data?.doctorId, 120);
+  const visitTypeId = trimmed(request.data?.visitTypeId, 120) || 'consultation';
+  const dateKey = trimmed(request.data?.dateKey, 10);
+  const name = trimmed(request.data?.name, 120);
+  const phone = trimmed(request.data?.phone, 30);
+  const email = trimmed(request.data?.email, 240);
+  if (!doctorId || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !name || !validPhone(phone)) throw publicError('invalid-argument', 'Enter your name, phone number, doctor, and preferred date.');
+  const phoneKey = toE164(phone);
+  if (!phoneKey) throw publicError('invalid-argument', 'Enter a valid Indian mobile number.');
+  await enforceBookingRateLimit(request);
+  const existing = await db.collection('waitlist')
+    .where('doctorId', '==', doctorId)
+    .where('phoneKey', '==', phoneKey)
+    .where('dateKey', '==', dateKey)
+    .where('status', '==', 'active')
+    .limit(1)
+    .get();
+  if (existing.size) return { waitlistId: existing.docs[0].id, alreadyJoined: true };
+  const ref = db.collection('waitlist').doc();
+  await ref.set({
+    doctorId, visitTypeId, dateKey, name, phoneKey, email: email || null,
+    status: 'active', source: request.auth ? 'patient_portal' : 'web',
+    createdBy: request.auth ? request.auth.uid : null,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+  await db.collection('auditLogs').add({
+    at: FieldValue.serverTimestamp(),
+    actor: request.auth ? { uid: request.auth.uid, role: roleFor(request.auth) } : { uid: null, role: 'public' },
+    action: 'waitlist_joined',
+    resource: { type: 'waitlist', id: ref.id },
+    meta: { doctorId, dateKey, visitTypeId },
+  });
+  return { waitlistId: ref.id, alreadyJoined: false };
+});
+
+exports.moveAppointment = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  assertPasswordChanged(request);
+  const role = ROLE[request.auth?.token?.role];
+  const appointmentId = trimmed(request.data?.appointmentId, 200);
+  const dateKey = trimmed(request.data?.dateKey, 10);
+  const time = trimmed(request.data?.time, 5);
+  if (!role || !/^[A-Za-z0-9_-]{1,200}$/.test(appointmentId) || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw publicError('invalid-argument', 'Choose a valid appointment and time.');
+  const ref = db.collection('appointments').doc(appointmentId);
+  const initial = await ref.get();
+  if (!initial.exists) throw publicError('not-found', 'Appointment not found.');
+  const initialAppointment = initial.data();
+  if (role === 'doctor' && initialAppointment.doctorId !== request.auth.token.doctorId) throw publicError('permission-denied', 'You can only move your own appointments.');
+  if (!isActiveAppointment(initialAppointment.status)) throw publicError('failed-precondition', 'Closed appointments cannot be moved.');
+  const now = new Date();
+  const context = await availabilityContext({ doctorId: initialAppointment.doctorId, dateKey, visitTypeId: initialAppointment.visitType, now });
+  const requested = daySlotsFor({ doctorId: initialAppointment.doctorId, context, dateKey, now, ignoreNotice: true }).find((slot) => slot.time === time);
+  if (!requested) throw publicError('failed-precondition', 'That time conflicts with another booking or is outside hours.');
+  await db.runTransaction(async (transaction) => {
+    const current = await transaction.get(ref);
+    if (!current.exists) throw publicError('not-found', 'Appointment not found.');
+    const appointment = current.data();
+    const lostUnitIds = appointmentUnitIds(appointment);
+    const stamp = FieldValue.serverTimestamp();
+    const unitIds = await placeAppointmentInTransaction({
+      db,
+      transaction,
+      doctorId: appointment.doctorId,
+      startsAt: requested.startsAt,
+      endsAt: requested.endsAt,
+      bufferBefore: context.visitType.bufferBeforeMinutes,
+      bufferAfter: context.visitType.bufferAfterMinutes,
+      appointmentRef: ref,
+      visitTypeId: context.visitType.id,
+      claimAppointmentId: ref.id,
+      now,
+    });
+    releaseUnitsInTransaction({ db, transaction, slotIds: lostUnitIds.filter((unitId) => !unitIds.includes(unitId)) });
+    transaction.update(ref, { dateKey, startsAt: Timestamp.fromDate(requested.startsAt), endsAt: Timestamp.fromDate(requested.endsAt), slotIds: unitIds, updatedAt: stamp });
+    transaction.set(ref.collection('events').doc(), { from: appointment.status, to: appointment.status, byUid: request.auth.uid, byRole: role, at: stamp, meta: { action: 'moved', fromDateKey: appointment.dateKey, toDateKey: dateKey, toTime: time } });
+    transaction.set(db.collection('auditLogs').doc(), { at: stamp, actor: { uid: request.auth.uid, role }, action: 'appointment_moved', resource: { type: 'appointment', id: ref.id }, meta: { fromDateKey: appointment.dateKey, toDateKey: dateKey } });
+  });
+  return { ok: true, appointmentId, dateKey, time };
+});
+
+exports.addStaffNote = onCall({ ...callableOptions, timeoutSeconds: 20, memory: '256MiB' }, async (request) => {
+  assertPasswordChanged(request);
+  const role = ROLE[request.auth?.token?.role];
+  const appointmentId = trimmed(request.data?.appointmentId, 200);
+  const note = trimmed(request.data?.note, 2000);
+  if (!role || !/^[A-Za-z0-9_-]{1,200}$/.test(appointmentId) || !note) throw publicError('invalid-argument', 'Enter a note.');
+  const appointment = await db.collection('appointments').doc(appointmentId).get();
+  if (!appointment.exists) throw publicError('not-found', 'Appointment not found.');
+  if (role === 'doctor' && appointment.get('doctorId') !== request.auth.token.doctorId) throw publicError('permission-denied', 'You can only add notes to your own appointments.');
+  const ref = appointment.ref.collection('staffNotes').doc();
+  await ref.set({ note, createdBy: { uid: request.auth.uid, role }, createdAt: FieldValue.serverTimestamp() });
+  await db.collection('auditLogs').add({ at: FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role }, action: 'staff_note_added', resource: { type: 'appointment', id: appointmentId }, meta: {} });
+  return { noteId: ref.id };
 });
 
 const requireVideoStaff = (request) => {
@@ -933,8 +1820,8 @@ const safeVideoUrl = (value) => {
 exports.getVideoConsultationQueue = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
   const role = requireVideoStaff(request);
   const now = new Date();
-  const from = admin.firestore.Timestamp.fromDate(new Date(now.getTime() - 24 * 60 * 60 * 1000));
-  const to = admin.firestore.Timestamp.fromDate(new Date(now.getTime() + 31 * 24 * 60 * 60 * 1000));
+  const from = Timestamp.fromDate(new Date(now.getTime() - 24 * 60 * 60 * 1000));
+  const to = Timestamp.fromDate(new Date(now.getTime() + 31 * 24 * 60 * 60 * 1000));
   let query = db.collection('appointments').where('visitMode', '==', 'video').where('startsAt', '>=', from).where('startsAt', '<=', to);
   if (role === 'doctor') query = query.where('doctorId', '==', request.auth.token.doctorId);
   const snapshot = await query.orderBy('startsAt', 'asc').limit(50).get();
@@ -957,10 +1844,10 @@ exports.setVideoConsultationAccess = onCall({ ...callableOptions, timeoutSeconds
   if (role === 'doctor' && appointment.doctorId !== request.auth.token.doctorId) throw publicError('permission-denied', 'You can only prepare access for your own appointments.');
   if (!isActiveAppointment(appointment.status)) throw publicError('failed-precondition', 'Video access cannot be changed after the appointment is closed.');
   const videoConsultation = joinUrl
-    ? { status: 'ready', joinUrl, preparedBy: request.auth.uid, preparedAt: admin.firestore.FieldValue.serverTimestamp() }
-    : { status: 'awaiting_link', clearedBy: request.auth.uid, clearedAt: admin.firestore.FieldValue.serverTimestamp() };
-  await ref.set({ videoConsultation, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-  await db.collection('auditLogs').add({ at: admin.firestore.FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role }, action: joinUrl ? 'video_access_prepared' : 'video_access_cleared', resource: { type: 'appointment', id: appointmentId }, meta: { visitMode: 'video' } });
+    ? { status: 'ready', joinUrl, preparedBy: request.auth.uid, preparedAt: FieldValue.serverTimestamp() }
+    : { status: 'awaiting_link', clearedBy: request.auth.uid, clearedAt: FieldValue.serverTimestamp() };
+  await ref.set({ videoConsultation, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection('auditLogs').add({ at: FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role }, action: joinUrl ? 'video_access_prepared' : 'video_access_cleared', resource: { type: 'appointment', id: appointmentId }, meta: { visitMode: 'video' } });
   return { message: joinUrl ? 'Secure video access is ready for the patient.' : 'Video access was cleared.' };
 });
 
@@ -982,13 +1869,12 @@ exports.transitionAppointment = onCall({ ...callableOptions, timeoutSeconds: 30,
     const appointment = snapshot.data();
     if (role === 'doctor' && appointment.doctorId !== request.auth.token.doctorId) throw publicError('permission-denied', 'You can only update your own appointments.');
     if (!canTransition(appointment.status, to, role)) throw publicError('failed-precondition', 'That appointment change is not allowed.');
-    const now = admin.firestore.FieldValue.serverTimestamp();
+    const now = FieldValue.serverTimestamp();
     const update = { status: to, updatedAt: now };
     if (to === 'cancelled') update.cancellation = { byUid: request.auth.uid, byRole: role, reason: cancellationReason, at: now };
     transaction.update(ref, update);
     if (to === 'cancelled') {
-      const slotIds = Array.isArray(appointment.slotIds) && appointment.slotIds.length ? appointment.slotIds : (appointment.slotId ? [appointment.slotId] : []);
-      slotIds.forEach((slotId) => transaction.delete(db.collection('appointmentSlots').doc(slotId)));
+      releaseUnitsInTransaction({ db, transaction, slotIds: appointmentUnitIds(appointment) });
       cancelledAppointment = { ref, appointment };
     }
     transaction.set(ref.collection('events').doc(), { from: appointment.status, to, byUid: request.auth.uid, byRole: role, at: now, reason: to === 'cancelled' ? cancellationReason : null });
@@ -1013,10 +1899,9 @@ exports.cancelPatientAppointment = onCall({ ...callableOptions, timeoutSeconds: 
     if (!snapshot.exists) throw publicError('not-found', 'Appointment not found.');
     const appointment = snapshot.data();
     if (!canPatientCancel({ appointment, uid: request.auth.uid, cutoffHours: config.patientCancellationCutoffHours })) throw publicError('failed-precondition', 'This appointment can no longer be cancelled online. Please contact the clinic.');
-    const now = admin.firestore.FieldValue.serverTimestamp();
+    const now = FieldValue.serverTimestamp();
     transaction.update(ref, { status: 'cancelled', cancellation: { byUid: request.auth.uid, byRole: 'patient', reason, at: now }, updatedAt: now });
-    const slotIds = Array.isArray(appointment.slotIds) && appointment.slotIds.length ? appointment.slotIds : (appointment.slotId ? [appointment.slotId] : []);
-    slotIds.forEach((slotId) => transaction.delete(db.collection('appointmentSlots').doc(slotId)));
+    releaseUnitsInTransaction({ db, transaction, slotIds: appointmentUnitIds(appointment) });
     cancelledAppointment = { ref, appointment };
     transaction.set(ref.collection('events').doc(), { from: appointment.status, to: 'cancelled', byUid: request.auth.uid, byRole: 'patient', reason, at: now });
     transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: request.auth.uid, role: 'patient' }, action: 'appointment_cancelled', resource: { type: 'appointment', id: ref.id }, meta: { source: 'patient_portal' } });
@@ -1040,26 +1925,42 @@ exports.reschedulePatientAppointment = onCall({ ...callableOptions, timeoutSecon
   if (!initial.exists) throw publicError('not-found', 'Appointment not found.');
   const initialAppointment = initial.data();
   if (!canPatientCancel({ appointment: initialAppointment, uid: request.auth.uid, cutoffHours: config.patientCancellationCutoffHours })) throw publicError('failed-precondition', 'This appointment can no longer be changed online. Please contact the clinic.');
-  const context = await availabilityContext({ doctorId: initialAppointment.doctorId, dateKey, visitTypeId: initialAppointment.visitType });
-  const availableSlots = buildAvailability({ doctorId: initialAppointment.doctorId, dateKey, weeklySessions: context.weeklySessions, exception: context.exception, durationMinutes: context.visitType.minutes, intervalMinutes: context.config.intervalMinutes, bufferBeforeMinutes: context.config.bufferBeforeMinutes, bufferAfterMinutes: context.config.bufferAfterMinutes, leadMinutes: context.config.leadMinutes, bookingWindowDays: context.config.bookingWindowDays, busyRanges: context.busyRanges });
-  const requested = availableSlots.find((slot) => slot.time === time);
+  const now = new Date();
+  const context = await availabilityContext({ doctorId: initialAppointment.doctorId, dateKey, visitTypeId: initialAppointment.visitType, now });
+  const requested = daySlotsFor({ doctorId: initialAppointment.doctorId, context, dateKey, now }).find((slot) => slot.time === time);
   if (!requested) throw publicError('failed-precondition', 'That time is no longer available. Please choose another slot.');
-  const newSlotRef = db.collection('appointmentSlots').doc(makeSlotId(initialAppointment.doctorId, dateKey, time));
   let result;
+  let calendarIds = { calendarId: null, eventId: null };
   await db.runTransaction(async (transaction) => {
-    const [snapshot, newSlot] = await Promise.all([transaction.get(ref), transaction.get(newSlotRef)]);
+    const [snapshot, internals] = await Promise.all([transaction.get(ref), transaction.get(appointmentPrivateRef(ref.id))]);
     if (!snapshot.exists) throw publicError('not-found', 'Appointment not found.');
     const appointment = snapshot.data();
     if (!canPatientCancel({ appointment, uid: request.auth.uid, cutoffHours: config.patientCancellationCutoffHours })) throw publicError('failed-precondition', 'This appointment can no longer be changed online. Please contact the clinic.');
-    const existingSlotIds = Array.isArray(appointment.slotIds) && appointment.slotIds.length ? appointment.slotIds : (appointment.slotId ? [appointment.slotId] : []);
-    if (existingSlotIds.includes(newSlotRef.id)) throw publicError('failed-precondition', 'Choose a different appointment time.');
-    if (newSlot.exists) throw publicError('already-exists', 'That time has just been booked. Please choose another slot.');
-    const now = admin.firestore.FieldValue.serverTimestamp();
-    existingSlotIds.forEach((slotId) => transaction.delete(db.collection('appointmentSlots').doc(slotId)));
-    transaction.set(newSlotRef, { doctorId: appointment.doctorId, dateKey, startsAt: admin.firestore.Timestamp.fromDate(requested.startsAt), endsAt: admin.firestore.Timestamp.fromDate(requested.endsAt), appointmentId: ref.id, status: 'booked', createdAt: now });
-    transaction.update(ref, { dateKey, startsAt: admin.firestore.Timestamp.fromDate(requested.startsAt), endsAt: admin.firestore.Timestamp.fromDate(requested.endsAt), slotIds: [newSlotRef.id], updatedAt: now, externalCalendar: { ...(appointment.externalCalendar || {}), syncStatus: appointment.externalCalendar?.eventId ? 'pending' : 'not_connected' } });
-    transaction.set(ref.collection('events').doc(), { from: appointment.status, to: appointment.status, byUid: request.auth.uid, byRole: 'patient', at: now, meta: { action: 'rescheduled', fromDateKey: appointment.dateKey, toDateKey: dateKey, toTime: time } });
-    transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: request.auth.uid, role: 'patient' }, action: 'appointment_rescheduled', resource: { type: 'appointment', id: ref.id }, meta: { fromDateKey: appointment.dateKey, toDateKey: dateKey } });
+    if (appointment.dateKey === dateKey && istTimeOf(appointment.startsAt) === time) throw publicError('failed-precondition', 'Choose a different appointment time.');
+    calendarIds = calendarIdsFrom(internals.exists ? internals.data() : null, appointment);
+    const lostUnitIds = appointmentUnitIds(appointment);
+    const stamp = FieldValue.serverTimestamp();
+    const unitIds = await placeAppointmentInTransaction({
+      db,
+      transaction,
+      doctorId: appointment.doctorId,
+      startsAt: requested.startsAt,
+      endsAt: requested.endsAt,
+      bufferBefore: context.visitType.bufferBeforeMinutes,
+      bufferAfter: context.visitType.bufferAfterMinutes,
+      appointmentRef: ref,
+      visitTypeId: context.visitType.id,
+      claimAppointmentId: ref.id,
+      now,
+    });
+    releaseUnitsInTransaction({ db, transaction, slotIds: lostUnitIds.filter((unitId) => !unitIds.includes(unitId)) });
+    // An appointment created before the move keeps its Google event reachable by copying
+    // its identifiers into appointmentPrivate once; the appointment itself keeps only the
+    // sync status, which replaces the whole map and therefore drops the old identifiers.
+    if (calendarIds.eventId) transaction.set(appointmentPrivateRef(ref.id), calendarIds, { merge: true });
+    transaction.update(ref, { dateKey, startsAt: Timestamp.fromDate(requested.startsAt), endsAt: Timestamp.fromDate(requested.endsAt), slotIds: unitIds, updatedAt: stamp, externalCalendar: publicSyncState({ syncStatus: calendarIds.eventId ? 'pending' : 'not_connected' }) });
+    transaction.set(ref.collection('events').doc(), { from: appointment.status, to: appointment.status, byUid: request.auth.uid, byRole: 'patient', at: stamp, meta: { action: 'rescheduled', fromDateKey: appointment.dateKey, toDateKey: dateKey, toTime: time } });
+    transaction.set(db.collection('auditLogs').doc(), { at: stamp, actor: { uid: request.auth.uid, role: 'patient' }, action: 'appointment_rescheduled', resource: { type: 'appointment', id: ref.id }, meta: { fromDateKey: appointment.dateKey, toDateKey: dateKey } });
     result = { appointmentId: ref.id, dateKey, time, status: appointment.status };
   });
 
@@ -1067,16 +1968,16 @@ exports.reschedulePatientAppointment = onCall({ ...callableOptions, timeoutSecon
   // a transient Google failure never rolls back a successfully reserved slot.
   try {
     const appointment = (await ref.get()).data();
-    if (appointment.externalCalendar?.eventId) {
+    if (calendarIds.eventId) {
       const connection = await calendarConnection(appointment.doctorId);
       if (connection) {
         const { accessToken, calendarId } = await calendarAccess(connection);
-        await updateEventTime({ accessToken, calendarId, eventId: appointment.externalCalendar.eventId, startsAt: asDate(appointment.startsAt).toISOString(), endsAt: asDate(appointment.endsAt).toISOString() });
-        await ref.set({ externalCalendar: { ...appointment.externalCalendar, syncStatus: 'synced', lastSyncedAt: admin.firestore.FieldValue.serverTimestamp() }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        await updateEventTime({ accessToken, calendarId: calendarIds.calendarId || calendarId, eventId: calendarIds.eventId, startsAt: asDate(appointment.startsAt).toISOString(), endsAt: asDate(appointment.endsAt).toISOString() });
+        await ref.set({ externalCalendar: { ...publicSyncState({ syncStatus: 'synced' }), lastSyncedAt: FieldValue.serverTimestamp() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
       }
     }
   } catch (_error) {
-    await ref.set({ externalCalendar: { provider: 'google', syncStatus: 'pending', lastSyncError: 'Calendar event could not be updated.' }, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    await ref.set({ externalCalendar: publicSyncState({ syncStatus: 'pending', lastSyncError: 'Calendar event could not be updated.' }), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   }
   return { ok: true, ...result };
 });
@@ -1104,7 +2005,7 @@ exports.closeDay = onCall({ ...callableOptions, timeoutSeconds: 60, memory: '256
   await db.runTransaction(async (transaction) => {
     const currentAppointments = await Promise.all(appointments.map((appointment) => transaction.get(appointment.ref)));
     await transaction.get(exceptionRef);
-    const now = admin.firestore.FieldValue.serverTimestamp();
+    const now = FieldValue.serverTimestamp();
     transaction.set(exceptionRef, { doctorId, dateKey, type: 'closed', sessions: [], note: 'Clinic closed', updatedAt: now, updatedBy: request.auth.uid }, { merge: true });
     currentAppointments.forEach((snapshot) => {
       if (!snapshot.exists) return;
@@ -1113,8 +2014,7 @@ exports.closeDay = onCall({ ...callableOptions, timeoutSeconds: 60, memory: '256
       if (action === 'cancel') {
         if (!canTransition(appointment.status, 'cancelled', role)) throw publicError('failed-precondition', 'An appointment changed and cannot be cancelled by your role. Review the day again.');
         transaction.update(snapshot.ref, { status: 'cancelled', cancellation: { byUid: request.auth.uid, byRole: role, reason: closeReason, at: now }, updatedAt: now });
-        const slotIds = Array.isArray(appointment.slotIds) && appointment.slotIds.length ? appointment.slotIds : (appointment.slotId ? [appointment.slotId] : []);
-        slotIds.forEach((slotId) => transaction.delete(db.collection('appointmentSlots').doc(slotId)));
+        releaseUnitsInTransaction({ db, transaction, slotIds: appointmentUnitIds(appointment) });
         cancelledAppointments.push({ ref: snapshot.ref, appointment });
         transaction.set(snapshot.ref.collection('events').doc(), { from: appointment.status, to: 'cancelled', byUid: request.auth.uid, byRole: role, reason: closeReason, at: now, meta: { source: 'close_day', dateKey } });
       }
@@ -1122,6 +2022,22 @@ exports.closeDay = onCall({ ...callableOptions, timeoutSeconds: 60, memory: '256
     transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: request.auth.uid, role }, action: 'clinic_day_closed', resource: { type: 'schedule_exception', id: exceptionRef.id }, meta: { doctorId, dateKey, action, affectedAppointments: appointments.length } });
   });
   await Promise.all(cancelledAppointments.map((item) => deleteAppointmentFromGoogle(item)));
+  if (action === 'cancel') {
+    await Promise.all(cancelledAppointments
+      .filter(({ appointment }) => appointment.patientSnapshot?.email)
+      .map(({ appointment, ref }) => db.collection('notifications').doc(`${ref.id}_clinic_cancelled_${dateKey}`).create({
+        type: 'appointment_clinic_cancelled',
+        channel: 'email',
+        to: appointment.patientSnapshot.email,
+        appointmentId: ref.id,
+        status: 'queued',
+        attempts: 0,
+        sendAfter: FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
+      }).catch((error) => {
+        if (error.code !== 6) throw error;
+      })));
+  }
   return { ok: true, doctorId, dateKey, action, affectedAppointments: appointments.length };
 });
 
@@ -1130,10 +2046,10 @@ exports.closeDay = onCall({ ...callableOptions, timeoutSeconds: 60, memory: '256
 // never receives a client secret, refresh token, or another calendar's events.
 exports.beginGoogleCalendarConnection = onCall({ ...callableOptions, secrets: [GOOGLE_CALENDAR_CLIENT_ID] }, async (request) => {
   requireAdmin(request);
-  const { doctorId = 'brig-ak-sood', calendarId = 'primary' } = request.data || {};
+  const { doctorId, calendarId = 'primary' } = request.data || {};
   if (!doctorId || !/^[A-Za-z0-9_-]{1,120}$/.test(String(doctorId)) || !/^[A-Za-z0-9@._-]{1,240}$/.test(String(calendarId))) throw publicError('invalid-argument', 'Choose a valid doctor and Google Calendar.');
   const state = crypto.randomBytes(32).toString('base64url');
-  await db.collection('integrationOAuthStates').doc(state).set({ doctorId, calendarId, requestedBy: request.auth.uid, expiresAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)), createdAt: admin.firestore.FieldValue.serverTimestamp() });
+  await db.collection('integrationOAuthStates').doc(state).set({ doctorId, calendarId, requestedBy: request.auth.uid, expiresAt: Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)), createdAt: FieldValue.serverTimestamp() });
   return { authorizationUrl: buildAuthorizationUrl({ clientId: GOOGLE_CALENDAR_CLIENT_ID.value(), redirectUri: googleCallbackUrl(), state }) };
 });
 
@@ -1150,7 +2066,7 @@ exports.googleCalendarCallback = onRequest({ region: 'asia-south1', timeoutSecon
   try {
     const token = await exchangeAuthorizationCode({ code, clientId: GOOGLE_CALENDAR_CLIENT_ID.value(), clientSecret: GOOGLE_CALENDAR_CLIENT_SECRET.value(), redirectUri: googleCallbackUrl() });
     if (!token.refresh_token) throw new Error('No refresh token received.');
-    await db.collection('integrations').doc('googleCalendar').set({ provider: 'google', doctorId: stateSnapshot.get('doctorId'), calendarId: stateSnapshot.get('calendarId'), active: true, encryptedRefreshToken: encrypt(token.refresh_token, GOOGLE_CALENDAR_TOKEN_KEY.value()), connectedBy: stateSnapshot.get('requestedBy'), connectedAt: admin.firestore.FieldValue.serverTimestamp(), syncStatus: 'healthy', lastSyncError: admin.firestore.FieldValue.delete() }, { merge: true });
+    await db.collection('integrations').doc('googleCalendar').set({ provider: 'google', doctorId: stateSnapshot.get('doctorId'), calendarId: stateSnapshot.get('calendarId'), active: true, encryptedRefreshToken: encrypt(token.refresh_token, GOOGLE_CALENDAR_TOKEN_KEY.value()), connectedBy: stateSnapshot.get('requestedBy'), connectedAt: FieldValue.serverTimestamp(), syncStatus: 'healthy', lastSyncError: FieldValue.delete() }, { merge: true });
     await stateRef.delete();
     return res.status(200).type('html').send('<!doctype html><title>Calendar connected</title><p>Google Calendar is connected. You may close this window and return to the staff portal.</p>');
   } catch (_error) {
@@ -1168,6 +2084,6 @@ exports.googleCalendarStatus = onCall({ ...callableOptions }, async (request) =>
 
 exports.disconnectGoogleCalendar = onCall({ ...callableOptions }, async (request) => {
   requireAdmin(request);
-  await db.collection('integrations').doc('googleCalendar').set({ active: false, disconnectedAt: admin.firestore.FieldValue.serverTimestamp(), disconnectedBy: request.auth.uid, syncStatus: 'disconnected' }, { merge: true });
+  await db.collection('integrations').doc('googleCalendar').set({ active: false, disconnectedAt: FieldValue.serverTimestamp(), disconnectedBy: request.auth.uid, syncStatus: 'disconnected' }, { merge: true });
   return { disconnected: true };
 });

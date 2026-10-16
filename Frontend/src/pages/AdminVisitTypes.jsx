@@ -4,7 +4,13 @@ import { httpsCallable } from 'firebase/functions';
 import { Link, Navigate } from 'react-router-dom';
 import { auth, functions } from '../lib/firebase';
 
-const fresh = () => ({ id: '', label: '', minutes: 20, mode: 'in_person', active: true });
+const fresh = () => ({
+  id: '', slug: '', label: '', description: '', mode: 'in_person', minutes: 20,
+  bufferBeforeMinutes: 0, bufferAfterMinutes: 0, minNoticeMinutes: 30,
+  maxAdvanceDays: 14, intervalMinutes: 20, dailyLimit: null,
+  requiresConfirmation: false, color: 'blue', doctorIds: [], intakeQuestions: [],
+  pricePaise: null, active: true, sortOrder: 0,
+});
 
 const AdminVisitTypes = () => {
   const [access, setAccess] = useState('checking');
@@ -17,7 +23,7 @@ const AdminVisitTypes = () => {
   const load = useCallback(async () => {
     setError('');
     try {
-      const result = await httpsCallable(functions, 'getAdminBookingConfiguration')();
+      const result = await httpsCallable(functions, 'listVisitTypes')();
       setVisitTypes(result.data.visitTypes || []);
     } catch (caught) { setError(caught?.message || 'Appointment formats could not be loaded.'); }
   }, []);
@@ -33,18 +39,17 @@ const AdminVisitTypes = () => {
   const save = async (event) => {
     event.preventDefault();
     const id = draft.id.trim();
-    const next = editingId ? visitTypes.map((item) => item.id === editingId ? { ...draft, id: editingId, minutes: Number(draft.minutes) } : item) : [...visitTypes, { ...draft, id, minutes: Number(draft.minutes) }];
+    const next = { ...draft, id: editingId || id, slug: draft.slug.trim() || id, minutes: Number(draft.minutes), intervalMinutes: Number(draft.intervalMinutes), maxAdvanceDays: Number(draft.maxAdvanceDays), minNoticeMinutes: Number(draft.minNoticeMinutes), bufferBeforeMinutes: Number(draft.bufferBeforeMinutes), bufferAfterMinutes: Number(draft.bufferAfterMinutes), sortOrder: Number(draft.sortOrder) };
     setBusy(true); setError(''); setNotice('');
     try {
-      const result = await httpsCallable(functions, 'saveBookingVisitTypes')({ visitTypes: next });
-      setVisitTypes(result.data.visitTypes || next); setNotice(result.data.message || 'Appointment formats saved.'); reset();
+      const result = await httpsCallable(functions, 'saveVisitType')(next);
+      setVisitTypes((current) => editingId ? current.map((item) => item.id === editingId ? result.data.visitType : item) : [...current, result.data.visitType]); setNotice('Appointment format saved.'); reset();
     } catch (caught) { setError(caught?.message || 'Appointment formats could not be saved.'); } finally { setBusy(false); }
   };
   const edit = (item) => { setDraft({ ...item }); setEditingId(item.id); setNotice(''); setError(''); };
   const toggle = async (item) => {
-    const next = visitTypes.map((entry) => entry.id === item.id ? { ...entry, active: !entry.active } : entry);
     setBusy(true); setError('');
-    try { const result = await httpsCallable(functions, 'saveBookingVisitTypes')({ visitTypes: next }); setVisitTypes(result.data.visitTypes || next); setNotice(result.data.message || 'Appointment formats saved.'); }
+    try { const result = await httpsCallable(functions, 'saveVisitType')({ ...item, active: !item.active }); setVisitTypes((current) => current.map((entry) => entry.id === item.id ? result.data.visitType : entry)); setNotice('Appointment format saved.'); }
     catch (caught) { setError(caught?.message || 'Appointment format could not be updated.'); } finally { setBusy(false); }
   };
 

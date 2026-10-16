@@ -7,6 +7,7 @@ const AccountSettings = lazy(() => import('../pages/AccountSettings'));
 const DoctorSchedule = lazy(() => import('../pages/DoctorSchedule'));
 const ManagerWorkspace = lazy(() => import('../pages/ManagerWorkspace'));
 const StaffAdmin = lazy(() => import('../pages/StaffAdmin'));
+const DoctorWorkspace = lazy(() => import('../pages/DoctorWorkspace'));
 const StaffAccess = lazy(() => import('../pages/StaffAccess'));
 const AdminPatients = lazy(() => import('../pages/AdminPatients'));
 const AdminAudit = lazy(() => import('../pages/AdminAudit'));
@@ -14,6 +15,7 @@ const AdminCatalogue = lazy(() => import('../pages/AdminCatalogue'));
 const AdminFeedback = lazy(() => import('../pages/AdminFeedback'));
 const AdminVisitTypes = lazy(() => import('../pages/AdminVisitTypes'));
 const VideoConsultations = lazy(() => import('../pages/VideoConsultations'));
+const StaffCalendar = lazy(() => import('../pages/StaffCalendar'));
 const StaffEntry = lazy(() => import('../pages/StaffEntry'));
 const StaffLogin = lazy(() => import('../pages/StaffLogin'));
 const RouteLoading = () => <main className="route-loading route-loading--staff" aria-live="polite">Loading secure workspace…</main>;
@@ -24,6 +26,7 @@ const StaffApp = () => <BrowserRouter><AppErrorBoundary staff><StaffSessionGuard
   <Route path="/staff/login" element={<StaffLogin />} />
   <Route path="/staff/account" element={<AccountSettings staff />} />
   <Route path="/staff/admin" element={<StaffAdmin />} />
+  <Route path="/staff/doctor" element={<DoctorWorkspace />} />
   <Route path="/staff/admin/access" element={<StaffAccess />} />
   <Route path="/staff/admin/patients" element={<AdminPatients />} />
   <Route path="/staff/admin/audit" element={<AdminAudit />} />
@@ -31,8 +34,9 @@ const StaffApp = () => <BrowserRouter><AppErrorBoundary staff><StaffSessionGuard
   <Route path="/staff/admin/feedback" element={<AdminFeedback />} />
   <Route path="/staff/admin/visit-types" element={<AdminVisitTypes />} />
   <Route path="/staff/video" element={<VideoConsultations />} />
-  <Route path="/staff/doctor" element={<DoctorSchedule />} />
+  <Route path="/staff/doctor/schedule" element={<DoctorSchedule />} />
   <Route path="/staff/manager" element={<ManagerWorkspace />} />
+  <Route path="/staff/calendar" element={<StaffCalendar />} />
   <Route path="*" element={<Navigate to="/" replace />} />
 </Routes></Suspense></StaffSessionGuard></AppErrorBoundary></BrowserRouter>;
 

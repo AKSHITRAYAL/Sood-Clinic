@@ -148,7 +148,14 @@ appointments/{id}        { reference:'SC-8XKQ2M', doctorId, branchId, department
                            status, source:'web'|'manager'|'walk_in'|'phone', tokenNumber?, phoneKey:E.164,
                            patientId, patientSnapshot:{name,phone,sex?,ageYears?}, reason?, 
                            cancel?:{byRole,reason,at}, consent?:{version,acceptedAt},
-                           createdBy:{uid|null,role}, createdAt, updatedAt }
+                           slotIds:[appointmentSlots unit id],              // every 5-minute unit the visit locks
+                           externalCalendar?:{provider, syncStatus, lastSyncedAt?, lastSyncError?},
+                           createdAt, updatedAt }
+                         // The appointment is patient-readable, so it carries NO createdBy, calendarId or eventId;
+                         // those internals live in appointmentPrivate (scheduler task A0-05).
+appointmentPrivate/{appointmentId}   { appointmentId, manageTokenHash, createdAt, createdByUid:uid|null,
+                           calendarId?, eventId? }   // server-only; the scheduler spec calls the token
+                                                    // timestamp manageCreatedAt, the code stores createdAt
 appointments/{id}/events/{eventId}   { from, to, byUid, byRole, at, reason?, meta? }
 appointmentSlots/{doctorId}_{yyyyMMddHHmm}  (see 4.3)
 patients/{patientId}     { uhid:'SC-000123', name, nameLower, phone, altPhone?, email?, sex, dob?, bloodGroup?, address?, guardianName?,

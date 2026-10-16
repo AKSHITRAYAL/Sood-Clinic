@@ -87,7 +87,8 @@ service cloud.firestore {
     // Rules cannot safely enforce a state machine or cross-document lock by themselves.
     match /appointments/{appointmentId} {
       allow read: if isClinicStaff()
-        || (request.auth != null && resource.data.patientId == request.auth.uid);
+        || (request.auth != null && (resource.data.patientId == request.auth.uid
+          || request.auth.uid in get(/databases/$(database)/documents/patients/$(resource.data.patientId)).data.linkedUids));
       allow create, update, delete: if false;
     }
     // Administrative audit and notification/outbox data are server-owned. Their
@@ -97,6 +98,20 @@ service cloud.firestore {
     match /rateLimits/{rateLimitId} { allow read, write: if false; }
     match /counters/{counterId} { allow read, write: if false; }
     match /patientDirectory/{patientId} { allow read, write: if false; }
+    match /patientLinkRequests/{requestId} { allow read, write: if false; }
+    match /calendarBlocks/{blockId} {
+      allow read: if isClinicStaff();
+      allow write: if false;
+    }
+    match /appointments/{appointmentId}/staffNotes/{noteId} {
+      allow read: if isClinicStaff();
+      allow write: if false;
+    }
+    match /appointmentPrivate/{appointmentId} { allow read, write: if false; }
+    match /waitlist/{waitlistId} { allow read, write: if false; }
+    match /visitTypes/{visitTypeId} { allow read, write: if false; }
+    match /bookingReferences/{reference} { allow read, write: if false; }
+    match /calendarFeeds/{doctorId} { allow read, write: if false; }
     // The public booking calendar reads the doctor-declared recurring hours.
     match /clinicSchedules/{doctorId} {
       allow read: if true;
@@ -119,20 +134,20 @@ service cloud.firestore {
     // Patient-owned data is private to the signed-in patient. Clinic staff may access it
     // only when clinically required; public visitors cannot read any of it.
     match /patients/{patientId} {
-      allow read: if isClinicStaff() || (request.auth != null && request.auth.uid == patientId);
+      allow read: if isClinicStaff() || (request.auth != null && (request.auth.uid == patientId || request.auth.uid in resource.data.linkedUids));
       // Profile writes go through callables so the private administrator directory
       // remains in sync. Clinical records stay staff-only.
       allow create, update, delete: if false;
       match /medicalHistory/{entryId} {
         // Clinical history is not manager/admin data. Patient self-reported
         // fields live on the parent profile and only doctors can modify clinical history.
-        allow read: if isDoctor() || (request.auth != null && request.auth.uid == patientId);
+        allow read: if isDoctor() || (request.auth != null && (request.auth.uid == patientId || request.auth.uid in get(/databases/$(database)/documents/patients/$(patientId)).data.linkedUids));
         allow create, update, delete: if isDoctor();
       }
       match /medicalDocuments/{documentId} {
         // File metadata and bytes will be written only by a future server/Storage
         // workflow. Direct browser writes cannot establish an auditable upload.
-        allow read: if isDoctor() || (request.auth != null && request.auth.uid == patientId);
+        allow read: if isDoctor() || (request.auth != null && (request.auth.uid == patientId || request.auth.uid in get(/databases/$(database)/documents/patients/$(patientId)).data.linkedUids));
         allow create, update, delete: if false;
       }
     }

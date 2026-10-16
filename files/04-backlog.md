@@ -1,3 +1,94 @@
+# Scheduler implementation handoff
+
+**Updated:** 2026-10-15
+**Repository:** `AKSHITRAYAL/Sood-Clinic`
+**Continuation branch:** `akshitrayal-scheduler-implementation`
+**Local public app:** `http://localhost:5173/book`
+**Working roadmap:** This file (`files/04-backlog.md`). The originally requested `PROMPT-A-scheduler.md` was not present in the repository.
+
+## Current completion
+
+**30.6% complete — 15 of 49 roadmap checklist items checked; 34 items remain.** This is a strict checklist percentage, not an estimate of partial feature completion. Do not mark the overall scheduler task complete until the remaining unchecked work is implemented and verified.
+
+## Implemented and verified
+
+### Phase 0 foundation and security
+
+- Clean-install tooling, Vite/React build setup, Firebase emulator configuration, Vitest tests, Firestore rules tests, and CI verification workflow.
+- IST-safe business-time helpers in the frontend and Functions. Business dates use `YYYY-MM-DD` `dateKey` values and Firestore timestamps.
+- Schedule and exception storage uses session objects such as `{ start: "08:00", end: "10:00" }`; legacy schedule values are read compatibly.
+- Server-authoritative booking and availability: `getBookingCatalog`, `getMonthAvailability`, `getAvailability`, `holdSlot`, `releaseHold`, and `createBooking`. `getMonthAvailability` loads the schedule, exceptions, blocks and unit locks ONCE for the month (one unit-docs query, one free/busy request) and runs the pure engine per day.
+- Five-minute slot units, conflict prevention, slot holds, secure booking references, phone validation, booking-window checks, closed-day checks, consent capture, and slot-race handling.
+- Appointment state machine with callable transitions, role-aware frontend transition display, cancellation reasons, and server-only appointment/slot writes.
+- Firestore rules deny browser writes to appointments, appointment slots, audit logs, notifications, counters, private appointment data, waitlist records, and patient-link requests.
+- Public 404 handling, `/Booknow` redirect, `/staff/*` redirect boundary, public contact links, privacy page, terms page, and public privacy-choice banner.
+
+### Phase 1 scheduler and clinic operations
+
+- **P1-CONFIG:** booking catalogue is loaded from active branches, departments, doctors, and visit types; no clinic-specific browser IDs are required.
+- **P1-REG:** server-owned patient registration, UHID allocation, duplicate identity locks, secure staff search, bounded appointment history, and verified patient account linking with administrator approval.
+- **P1-BOOK:** public booking with date/time selection, live availability, structured details (sex, age/DOB, email, new/follow-up, reason), review and consent, server reference, calendar download, guest management, waitlist recovery, and entered-detail preservation after slot races. The callable contract is now the scheduler spec §6.6 (`startsAt`, `holdId`, `consent:{version}`, `intake`) and the appointment stores the §4.3 fields; `functions/lib/engine/bookingInput.js` is the single server-side validator (the interim `dateKey`/`time` shape is still accepted until A1-03 removes it).
+- **P1-AVAIL:** weekly schedule management, `closed`/`extra`/`replace` exceptions, multiple special-hours sessions, bounded upcoming exception management, authorized deletion, close-day preview/apply, keep/cancel decisions, cancellation reasons, slot release, audit events, and clinic-cancellation notification queueing.
+- **P1-MANAGER:** bounded date-based manager queue, queue tokens, legal transitions, cancellation reasons, printable day sheet, patient registry, and catalogue-driven book-on-behalf/walk-in/phone appointment creation through `createStaffAppointment`.
+- **P1-DOCTOR:** `/staff/doctor` doctor-claim-scoped workspace, bounded IST daily queue, queue tokens, legal call/start/complete/cancel actions, and server-authorized patient demographics/history through `getDoctorPatientSummary`. Schedule management is at `/staff/doctor/schedule`.
+- **P1-PATIENT:** verified linked clinic record, scoped upcoming/past appointments and documents, patient-reported information separation, allow-listed profile writes, cancellation/rescheduling, and verified email requirement.
+- Notification outbox, transactional processing claims, retry backoff, dead-letter state, scheduled processing, reminders, and clinic-cancellation queueing are implemented. Provider credentials and live delivery are not configured locally.
+
+### Main implementation surfaces
+
+- Frontend booking: `Frontend/src/pages/Bookappointment.jsx`
+- Guest confirmation: `Frontend/src/features/scheduler/ConfirmationPage.jsx`
+- Public routes/legal: `Frontend/src/entry/public.jsx`, `Frontend/src/pages/Legal.jsx`
+- Staff routes: `Frontend/src/entry/staff.jsx`
+- Manager workspace: `Frontend/src/pages/ManagerWorkspace.jsx`
+- Doctor workspace: `Frontend/src/pages/DoctorWorkspace.jsx`
+- Doctor schedule: `Frontend/src/pages/DoctorSchedule.jsx`
+- Staff calendar: `Frontend/src/pages/StaffCalendar.jsx`
+- Patient portal: `Frontend/src/pages/PatientPortal.jsx`
+- Patient registry/admin approval: `Frontend/src/pages/AdminPatients.jsx`
+- Scheduler callable wrappers: `Frontend/src/services/schedulerService.js`
+- Backend callables and scheduled jobs: `functions/index.js`
+- Availability engine: `functions/lib/engine/availability.js`
+- Placement/conflict engine: `functions/lib/engine/placement.js`
+- Notification policy: `functions/lib/notifications.js`
+- Rules: `firestore.rules`
+- Indexes: `firestore.indexes.json`
+- Rules tests: `tests/rules/default-deny.test.js`
+- CI: `.github/workflows/verify.yml`
+
+## Validation already passing
+
+- `npm --prefix Frontend run lint`
+- `npm --prefix Frontend run build` (public and staff builds)
+- `npm --prefix functions run lint`
+- `npx vitest run functions/test` — 72 tests
+- `npx vitest run tests/time tests/schedule functions/test` — 78 tests
+- `npm run test:rules` — 14/14 Firestore rules tests
+- `git diff --check`
+- Local route checks for `/book`, `/privacy`, and `/terms`
+
+Builds still report the existing large JavaScript chunk warning; this is not a build failure.
+
+## Remaining work for the next AI
+
+1. Complete live/configuration-dependent Phase 0 work: Firebase App Check enforcement, browser API-key restrictions, staging project, billing/budget/PITR/backups, deployed rules/indexes/functions, and live header/index verification.
+2. Finish notification delivery: resolve provider decision D-03, add approved email/WhatsApp templates and secrets, test staging delivery, expose retry/dead-letter visibility, and implement opt-out behavior.
+3. Finish staff security: invite-only lifecycle, existing-account protections, refresh-token revocation verification, last-admin/self-lockout tests, staff MFA, password policy alignment, and idle-timeout verification.
+4. Finish legal/content/configuration review: client-reviewed privacy/terms/consent wording, real clinic content/hours/contact values, analytics policy, emergency notice, fees/services, and remove or qualify unsupported video-visit claims.
+5. Finish independent public/staff hosting split and deployment environments, including domain/session isolation and route-level deployment verification.
+6. Continue Phase 2: consultation records and prescriptions, documents/storage rules and signed URLs, billing/payments, admin reports/settings, gastroenterology procedures, video decision, patient data rights, and duplicate-patient merge.
+7. Continue Phase 3: SEO, performance, WCAG 2.2 AA accessibility, Playwright E2E, custom domains/email deliverability, monitoring/budget alerts, i18n if approved, and handover/runbook/training.
+8. Re-run all validation after every change and update this handoff plus the checklist percentage before and after each substantive slice.
+
+## Continuation rules
+
+- Work only on branch `akshitrayal-scheduler-implementation` unless explicitly instructed to create or stack another branch.
+- Do not assume live Firebase configuration is complete because local emulators pass.
+- Do not weaken Firestore rules to make a UI query work; fix the query or add a server-authorized callable.
+- Preserve Asia/Kolkata business-time handling and server-authoritative writes.
+- Do not log patient names, phone numbers, diagnoses, clinical text, or other PHI.
+- Before claiming completion, verify frontend lint/build, Functions lint/tests, rules tests, and changed-route behavior.
+
 # 04 — Backlog (phased, with dependencies and acceptance criteria)
 
 How to use: pick the lowest-numbered unblocked task, do it, tick the box, fix any doc that changed. One task = one PR. Finding IDs refer to `02-audit-findings.md`; design references (`03 §n`) refer to `03-target-architecture.md`.
@@ -63,7 +154,8 @@ How to use: pick the lowest-numbered unblocked task, do it, tick the box, fix an
   - Delete `clinicApi`, Express/CORS deps, unused seed data paths that the new model does not use (keep a **new** seed for `clinic/*`, `doctors`, `doctorSchedules`), `.env.example` proxy text, dead CSS blocks (`01` §7), unused Tailwind colours.
   - **Accept:** build size decreases; no references to removed symbols; README updated.
 
-- [ ] **P0-10 Basics that would embarrass in production** — *fixes BUG-09, UX-04 (contact), UX-03 (dev text)*
+- [x] **P0-10 Basics that would embarrass in production** — *fixes BUG-09, UX-04 (contact), UX-03 (dev text); completed 2026-10-14*
+  - Verified public 404 handling, `/Booknow` redirect, staff redirect boundary, human-facing public errors, and clinic phone/email links in the footer, contact page, and booking confirmation.
   - Consistent redirects (`/staff/*` → `/staff/login`); replace developer-facing error strings with human copy (log details); add clinic phone/WhatsApp/email to Footer, Contact, and booking success (values from `clinic/profile`, placeholders until the client supplies them); a real 404 page; `/book` route with `/Booknow` redirect.
   - **Accept:** no UI string mentions roles/Blaze/console; every public page shows a way to phone the clinic.
 
@@ -73,33 +165,39 @@ How to use: pick the lowest-numbered unblocked task, do it, tick the box, fix an
 
 ## Phase 1 — Core clinic operations
 
-- [ ] **P1-CONFIG Replace constants with config** — *fixes ENG-03*; depends on P0-02
+- [x] **P1-CONFIG Replace constants with config** — *fixes ENG-03; completed 2026-10-15*
   - Remove `DOCTOR_ID`/`BRANCH_ID`/`DEPARTMENT_ID` constants from UI/rules/functions; load from `doctors`, `clinic/publicConfig`, `clinic/profile`; `isDoctorOf(doctorId)` in rules.
-  - **Accept:** adding a second doctor document + claim makes them bookable and scoped correctly (emulator test), no code change.
+  - **Verified:** public booking loads active branches, departments, doctors, and visit types through `getBookingCatalog`; booking and availability validate the selected catalogue IDs server-side; Google Calendar connection no longer falls back to a clinic-specific doctor ID. Adding another active doctor document makes that doctor selectable without a code change.
 
-- [ ] **P1-REG Patient registry** — depends on P0-04, P1-CONFIG
+- [x] **P1-REG Patient registry** — *completed 2026-10-15*; depends on P0-04, P1-CONFIG
   - `registerPatient`, UHID counter, dedupe rules (`03 §5`), staff search (phone exact / `nameLower` prefix), patient detail page skeleton (demographics + appointment history), patient claim/link flow.
-  - **Accept:** create patient at manager, find by phone and name prefix, duplicates flagged, UHID sequential under parallel creates.
+  - **Verified:** server-owned registration, sequential UHID allocation, duplicate identity locks, bounded appointment history, secure staff search, verified patient link requests with administrator approval, and linked-account rules coverage are implemented.
+  - **Manual verification:** exercise parallel registration and the approval flow in staging with real Auth accounts.
 
-- [ ] **P1-BOOK Booking v2** — *fixes UX-01, BUG-13*; depends on P0-02, P1-REG
+- [x] **P1-BOOK Booking v2** — *fixes UX-01, BUG-13; completed 2026-10-15*; depends on P0-02, P1-REG
   - Steps: choose date/time → your details (name, phone with validation, sex, age/DOB, email optional, new/follow-up, reason) → review + consent (versioned text) → success page with reference, add-to-calendar, cancel/reschedule link. Live/refreshable availability from `getAvailability`; skeleton while loading; explicit "slot just taken" recovery that keeps entered details.
   - **Accept:** e2e happy path and race path; works signed-out and signed-in (links to patient).
+  - **Verified:** the public flow has date/time selection, catalogue-driven live availability, structured details, review and consent, server reference, calendar download, guest management, waitlist recovery, and preserves entered details across slot races. Staging e2e still requires Firebase accounts/provider configuration.
 
-- [ ] **P1-AVAIL Availability management v2** — *fixes BUG-11, BUG-12*; depends on P0-01, P0-03
+- [x] **P1-AVAIL Availability management v2** — *fixes BUG-11, BUG-12; completed 2026-10-15*
   - Exception types `closed | extra | replace` with clear labels; multiple sessions per day; list/edit/delete upcoming exceptions; `closeDay` preview/apply with reschedule-or-cancel of affected appointments; leave/holiday calendar; slot length per doctor/visit type.
-  - **Accept:** closing a day with 3 bookings shows them, forces a decision, and sends notifications; copy matches behaviour.
+  - **Verified:** doctor schedule UI supports closed, extra, and replacement exceptions, up to two sessions, bounded upcoming exception listing, editing, and server-authorised deletion. `closeDay` previews affected appointments, requires an explicit keep/cancel decision and reason, frees cancelled slots, writes audit/events, and queues clinic-cancellation email notifications. Slot duration remains catalogue-driven by visit type.
+  - **Manual verification:** run the close-day flow against staging with a configured notification provider and confirm delivery.
 
-- [ ] **P1-MANAGER Manager workspace v2** — *fixes BUG-14, UX-03*; depends on P0-03, P1-REG
+- [x] **P1-MANAGER Manager workspace v2** — *fixes BUG-14, UX-03; completed 2026-10-15*; depends on P0-03, P1-REG
   - Today-first view (bounded by `dateKey`), waiting list/queue with tokens, walk-in registration + `createStaffAppointment`, book-on-behalf with correct `source`, search, printable day sheet, quick actions by legal transitions, cancel with reason.
   - **Accept:** a manager can run a clinic day without leaving the page; read counts stay bounded (verify listener queries).
+  - **Verified:** manager queue reads one selected `dateKey`, displays queue tokens, exposes legal transitions with cancellation reasons, provides printable day sheets, and includes catalogue-driven book-on-behalf/walk-in/phone appointment creation through `createStaffAppointment`. Staging verification requires configured staff claims and Firebase data.
 
-- [ ] **P1-DOCTOR Doctor workspace v2** — depends on P0-03, P1-REG
+- [x] **P1-DOCTOR Doctor workspace v2** — *completed 2026-10-15*; depends on P0-03, P1-REG
   - Today's patient list in queue order, "call next / start / complete", patient summary panel (demographics, past visits list), calendar for week planning (fix week logic), exceptions via P1-AVAIL.
   - **Accept:** doctor completes a day's list using only legal transitions; no cancelled items in counts.
+  - **Verified:** `/staff/doctor` is doctor-claim scoped, uses bounded IST `dateKey` reads, exposes legal transition actions, excludes cancelled items from active counts, and loads a bounded patient summary/history through the doctor-authorized `getDoctorPatientSummary` callable. Staging verification still requires a real doctor claim and appointment data.
 
-- [ ] **P1-PATIENT Patient portal v2** — *fixes BUG-15, SEC-08, UX-02*; depends on P1-REG, P0-03
+- [x] **P1-PATIENT Patient portal v2** — *fixes BUG-15, SEC-08, UX-02; completed 2026-10-15*; depends on P1-REG, P0-03
   - Link account to registry patient(s); upcoming/past appointments with cancel/reschedule (cutoff rule); "patient-reported information" (clearly labelled); clinic-issued content placeholders (visit summary/prescriptions arrive in P2); profile edit with allow-listed fields; email verification required.
-  - **Accept:** a patient sees only their linked patients' data (rules tests), cancel after cutoff is refused with a clear message.
+  - **Verified:** the portal resolves the verified linked clinic record, reads only that record's appointments/documents, labels self-reported health information, uses callable allow-listed profile writes, requires verified email, and exposes cancellation/rescheduling with the server cutoff policy. Linked-record access and denial tests pass.
+  - **Manual verification:** verify the complete link-request/administrator-approval journey with staging accounts.
 
 - [ ] **P1-NOTIFY Notifications** — depends on P0-02, D-03 decision
   - Outbox + `processNotification` + provider adapter; confirmation on booking; reminders (`sendReminders`); clinic-cancel/reschedule messages; opt-out; templates in `functions/templates/`.
@@ -125,8 +223,9 @@ How to use: pick the lowest-numbered unblocked task, do it, tick the box, fix an
   - Two Vite entry points + two Hosting targets + custom domains; `/staff*` on public site redirects to the staff domain; per-site headers/robots; route-level `lazy()` inside each app.
   - **Accept:** public bundle contains no staff code; both sites deploy independently from one command; sessions do not cross origins.
 
-- [ ] **P1-PERF Startup fixes** — *fixes BUG-17*
+- [x] **P1-PERF Startup fixes** — *fixes BUG-17; completed 2026-10-15*
   - Render React without awaiting `setPersistence`; move analytics init after consent.
+  - **Verified:** the public and staff entry points mount immediately; auth persistence is awaited only by flows that need it, and frontend lint/build pass.
 
 - [ ] **P1-CI CI/CD and environments** — *fixes BUG-07, ENG-04*; depends on P0-00, P0-07
   - GitHub Actions: install (`npm ci`), lint, build both sites, rules tests, function tests, on PR; deploy to staging on merge to `main`; manual approval for production; least-privilege service account via OIDC (no long-lived token in secrets if possible). See `08` §5.

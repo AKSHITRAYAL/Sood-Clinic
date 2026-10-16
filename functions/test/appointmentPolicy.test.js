@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import appointmentPolicy from '../lib/appointmentPolicy.js';
 
-const { canPatientCancel } = appointmentPolicy;
+const { canPatientCancel, isActiveAppointment } = appointmentPolicy;
 
 describe('patient appointment cancellation policy', () => {
   const now = new Date('2026-10-09T04:00:00.000Z');
@@ -10,5 +10,10 @@ describe('patient appointment cancellation policy', () => {
   it('rejects cancellations inside the cutoff and by another patient', () => {
     expect(canPatientCancel({ appointment: appointment(2), uid: 'patient-one', now })).toBe(false);
     expect(canPatientCancel({ appointment: appointment(3), uid: 'patient-two', now })).toBe(false);
+  });
+
+  it('counts every status except the terminal ones as active', () => {
+    ['scheduled', 'confirmed', 'checked_in', 'in_consultation', undefined].forEach((status) => expect(isActiveAppointment(status)).toBe(true));
+    ['cancelled', 'completed', 'no_show'].forEach((status) => expect(isActiveAppointment(status)).toBe(false));
   });
 });
