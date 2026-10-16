@@ -1,6 +1,17 @@
+// Unit docs are read back from Firestore, where `expiresAt` is a Timestamp, but the same
+// code is called with plain Dates in tests. `new Date(timestamp)` is an Invalid Date, so
+// coercing properly is what makes an expired hold stop blocking a booking.
+const asMillis = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.getTime();
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.getTime();
+};
+
 const isExpiredHold = (unit, now) => unit?.kind === 'hold'
   && unit.expiresAt
-  && new Date(unit.expiresAt).getTime() <= now.getTime();
+  && asMillis(unit.expiresAt) <= asMillis(now);
 
 /**
  * A unit the caller already owns is not a conflict: a guest may claim the units its
@@ -22,4 +33,4 @@ const planPlacement = ({ candidateUnitIds, existingUnits, now, claimHoldId = nul
   return { ok: true };
 };
 
-module.exports = { planPlacement };
+module.exports = { asMillis, planPlacement };

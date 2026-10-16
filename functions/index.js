@@ -9,8 +9,9 @@ const crypto = require('crypto');
 const { istDateKey, istInstant, toIstParts } = require('./lib/ist');
 const { istUnitId, unitSlotsForRange } = require('./lib/engine/units');
 const { computeDaySlots } = require('./lib/engine/availability');
-const { placeAppointmentInTransaction, releaseUnitsInTransaction } = require('./src/scheduler/placement');
+const { placeAppointmentInTransaction, releaseUnitsInTransaction, unitsHeldBy } = require('./src/scheduler/placement');
 const { createAvailabilityCallables } = require('./src/scheduler/availabilityCallables');
+const { createHoldHandlers, isHoldId } = require('./src/scheduler/holds');
 const { schedulerError } = require('./src/scheduler/errors');
 const { enqueueForAppointment } = require('./src/scheduler/notify');
 const { buildAuthorizationUrl, createEvent, deleteEvent, decrypt, encrypt, exchangeAuthorizationCode, freeBusy, refreshAccessToken, updateEventTime } = require('./lib/googleCalendar');
@@ -914,14 +915,20 @@ const validClientRequestId = (value) => /^[a-zA-Z0-9_-]{16,128}$/.test(String(va
 const functionsProject = () => process.env.GCLOUD_PROJECT || 'sood-clinic';
 const googleCallbackUrl = () => `https://asia-south1-${functionsProject()}.cloudfunctions.net/googleCalendarCallback`;
 const BOOKING_RATE_LIMIT = 10;
+// Spec 6: holds are cheap and thrown away on every page interaction, so they get a wider
+// hourly allowance than a booking itself.
+const HOLD_RATE_LIMIT = 20;
 const BOOKING_RATE_WINDOW_MS = 60 * 60 * 1000;
 
 // Callers are identified by a truncated hash of their IP: the raw address is never stored,
 // and the same hash is what appointmentPrivate keeps for abuse triage (§4.3b).
 const requestIpHash = (request) => crypto.createHash('sha256').update(String(request.rawRequest?.ip || '')).digest('hex').slice(0, 32);
 
-const enforceBookingRateLimit = async (request) => {
-  const rateLimitRef = db.collection('rateLimits').doc(requestIpHash(request));
+// Spec 6 gives each callable its own hourly allowance (booking 10, hold 20, …). One shared
+// counter for every callable meant a guest who held a few times could not book at all, so
+// the bucket is part of the document id.
+const enforceRateLimit = async (request, { bucket, limit }) => {
+  const rateLimitRef = db.collection('rateLimits').doc(`${bucket}_${requestIpHash(request)}`);
   const now = new Date();
   const resetAt = new Date(now.getTime() + BOOKING_RATE_WINDOW_MS);
 
@@ -931,7 +938,7 @@ const enforceBookingRateLimit = async (request) => {
     const count = existing.exists && existingResetAt && existingResetAt > now
       ? Number(existing.get('count')) || 0
       : 0;
-    if (count >= BOOKING_RATE_LIMIT) {
+    if (count >= limit) {
       throw publicError('resource-exhausted', 'Too many booking attempts. Please try again in an hour.');
     }
     transaction.set(rateLimitRef, {
@@ -940,6 +947,8 @@ const enforceBookingRateLimit = async (request) => {
     });
   });
 };
+
+const enforceBookingRateLimit = (request) => enforceRateLimit(request, { bucket: 'booking', limit: BOOKING_RATE_LIMIT });
 
 const assertPhoneBookingCapacity = async (phoneKey, now = new Date()) => {
   const activeBookings = await db.collection('appointments')
@@ -1030,22 +1039,15 @@ const dayOccupiedUnits = async (doctorId, dateKey, now) => {
   return occupied;
 };
 
-// §6.6 wants an ISO `startsAt`. The deployed page still sends the interim `dateKey` + `time`
-// pair and `holdToken`, so both shapes are read until A1-03 moves the page and the holds
-// callables to the contract (`startsAt`, `holdId`, `consent`).
+// §6.6 wants an ISO `startsAt`. The interim `dateKey` + `time` pair the deployed page used
+// to send is no longer read: A1-03 moved the page and the hold callables to the contract
+// (`startsAt`, `holdId`, `consent`).
 const bookingStartsAt = (data) => {
   const iso = typeof data?.startsAt === 'string' ? data.startsAt.trim() : '';
-  if (iso) {
-    const parsed = new Date(iso);
-    if (!Number.isNaN(parsed.getTime())) return parsed;
-  }
-  const dateKey = trimmed(data?.dateKey, 10);
-  const time = trimmed(data?.time, 5);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey) && /^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return istInstant(dateKey, time);
-  return null;
+  if (!iso) return null;
+  const parsed = new Date(iso);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
-
-const holdSecretFrom = (data) => trimmed(data?.holdId, 200) || trimmed(data?.holdToken, 200);
 
 // §4.3 wants the clinic registry id on the appointment when the booking matches a known
 // patient. The registry is phone-keyed, so the lookup stays server-side.
@@ -1057,7 +1059,6 @@ const patientRegistryIdForPhone = async (phoneKey) => {
   return isUhid(uhid) ? uhid : null;
 };
 
-const holdDurationMs = 5 * 60 * 1000;
 const appointmentUnitIds = (appointment) => (Array.isArray(appointment?.slotIds) && appointment.slotIds.length
   ? appointment.slotIds
   : (appointment?.slotId ? [appointment.slotId] : []));
@@ -1073,72 +1074,6 @@ const istTimeOf = (value) => {
   const { hour, minute } = toIstParts(date);
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 };
-
-// A guest whose own hold is still alive may confirm a time that availability already
-// hides because of that same hold.
-const unitsHeldByToken = async ({ doctorId, startsAt, endsAt, bufferBefore, bufferAfter, claimHoldId, now }) => {
-  const units = unitSlotsForRange(
-    doctorId,
-    new Date(startsAt.getTime() - bufferBefore * 60 * 1000),
-    new Date(endsAt.getTime() + bufferAfter * 60 * 1000),
-  );
-  if (!units.length) return false;
-  const snapshots = await db.getAll(...units.map((unit) => db.collection('appointmentSlots').doc(unit.id)));
-  return snapshots.every((snapshot) => snapshot.exists
-    && snapshot.get('kind') === 'hold'
-    && snapshot.get('holdId') === claimHoldId
-    && (!asDate(snapshot.get('expiresAt')) || asDate(snapshot.get('expiresAt')).getTime() > now.getTime()));
-};
-
-exports.holdSlot = onCall({ ...callableOptions, timeoutSeconds: 20, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
-  const doctorId = trimmed(request.data?.doctorId, 120);
-  const dateKey = trimmed(request.data?.dateKey, 10);
-  const time = trimmed(request.data?.time, 5);
-  const visitTypeId = trimmed(request.data?.visitTypeId, 120);
-  if (!doctorId || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw publicError('invalid-argument', 'Choose a valid appointment time.');
-  await enforceBookingRateLimit(request);
-  const now = new Date();
-  const context = await availabilityContext({ doctorId, dateKey, visitTypeId, now });
-  const requested = daySlotsFor({ doctorId, context, dateKey, now }).find((slot) => slot.time === time);
-  if (!requested) throw publicError('failed-precondition', 'That time is no longer available.');
-  const holdToken = newManageToken();
-  const holdId = hashToken(holdToken);
-  const expiresAt = new Date(now.getTime() + holdDurationMs);
-  let unitIds = [];
-  await db.runTransaction(async (transaction) => {
-    unitIds = await placeAppointmentInTransaction({
-      db,
-      transaction,
-      doctorId,
-      startsAt: requested.startsAt,
-      endsAt: requested.endsAt,
-      bufferBefore: context.visitType.bufferBeforeMinutes,
-      bufferAfter: context.visitType.bufferAfterMinutes,
-      kindForCore: 'hold',
-      kindForBuffer: 'hold',
-      holdId,
-      visitTypeId: context.visitType.id,
-      expiresAt,
-      now,
-    });
-  });
-  return { slotId: unitIds[0] || null, holdToken, expiresAt: expiresAt.toISOString(), time };
-});
-
-// A hold owns every unit it locked, and only the token that created the hold can
-// release them.
-exports.releaseHold = onCall({ ...callableOptions, timeoutSeconds: 20, memory: '256MiB' }, async (request) => {
-  const holdToken = trimmed(request.data?.holdToken, 200);
-  if (holdToken.length < 20) throw publicError('invalid-argument', 'Choose a valid held appointment time.');
-  const snapshot = await db.collection('appointmentSlots').where('holdId', '==', hashToken(holdToken)).get();
-  const heldUnitRefs = snapshot.docs.filter((document) => document.get('kind') === 'hold').map((document) => document.ref);
-  if (heldUnitRefs.length) {
-    const batch = db.batch();
-    heldUnitRefs.forEach((ref) => batch.delete(ref));
-    await batch.commit();
-  }
-  return { ok: true };
-});
 
 const blockBusyRanges = async (doctorId, dateKey) => {
   const snapshot = await db.collection('calendarBlocks')
@@ -1312,6 +1247,21 @@ Object.assign(exports, createAvailabilityCallables({
   loadExternalBusy: externalBusyRanges,
 }));
 
+// Holds lock five-minute units for a guest who is still filling in their details (spec 6.4-6.5).
+// The module is handed the same day-context loader and pure engine the availability callables
+// use, so a hold and a booking can never disagree about whether a time is offered.
+const holdHandlers = createHoldHandlers({
+  db,
+  loadDayContext: availabilityContext,
+  slotsForDay: daySlotsFor,
+  rateLimit: (request) => enforceRateLimit(request, { bucket: 'hold', limit: HOLD_RATE_LIMIT }),
+  hashToken,
+});
+
+exports.holdSlot = onCall({ ...callableOptions, timeoutSeconds: 20, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, holdHandlers.holdSlot);
+
+exports.releaseHold = onCall({ ...callableOptions, timeoutSeconds: 20, memory: '256MiB' }, holdHandlers.releaseHold);
+
 // Calendar identifiers name the clinic's external calendar, and the creator's uid names a
 // staff member. Neither belongs on the appointment, which the owning patient can read, so
 // both live on the server-only appointmentPrivate document.
@@ -1399,13 +1349,15 @@ exports.createBooking = onCall({ ...callableOptions, timeoutSeconds: 30, memory:
   await enforceBookingRateLimit(request);
   await assertPhoneBookingCapacity(phoneKey, now);
   const context = await availabilityContext({ doctorId, dateKey, visitTypeId, now });
-  const holdSecret = holdSecretFrom(data);
-  const claimHoldId = holdSecret.length >= 16 ? hashToken(holdSecret) : null;
+  // §6.6: the client's own random hold id, hashed before it is compared with the units.
+  const holdId = trimmed(data.holdId, 64);
+  const claimHoldId = isHoldId(holdId) ? hashToken(holdId) : null;
   const appointmentSlots = daySlotsFor({ doctorId, context, dateKey, now });
   let requested = appointmentSlots.find((slot) => slot.time === time);
   if (!requested && claimHoldId) {
     const candidate = slotForTime(dateKey, time, context.visitType.minutes);
-    const held = await unitsHeldByToken({
+    const held = await unitsHeldBy({
+      db,
       doctorId,
       startsAt: candidate.startsAt,
       endsAt: candidate.endsAt,

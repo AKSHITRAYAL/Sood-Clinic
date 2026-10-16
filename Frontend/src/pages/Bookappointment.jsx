@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import Navbar from '../components/Navbar';
@@ -16,6 +16,8 @@ const createBooking = httpsCallable(functions, 'createBooking');
 // booking whose consent version it does not recognise. A1-06 moves this into content/consent.js.
 const BOOKING_CONSENT_VERSION = 'booking-v1';
 const requestId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+// §6.4 wants 16–64 random URL-safe characters. A UUID without hyphens gives 32 hex ones.
+const newHoldId = () => requestId().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64).padEnd(16, '0');
 const monthKey = (date) => `${toIstParts(date).year}-${String(toIstParts(date).month).padStart(2, '0')}`;
 const monthLabel = (date) => date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', month: 'long', year: 'numeric' });
 const labelDate = (dateKey) => istInstant(dateKey).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short' });
@@ -116,6 +118,12 @@ const Bookappointment = () => {
     return () => { active = false; };
   }, [maxDate, selectedDate, selection.doctorId, selection.visitTypeId, today]);
 
+  // One hold id for the whole visit to the page: re-holding a different time releases the
+  // previous hold's units (§6.4 allows one active hold per id), and a retry after a failed
+  // booking converts the units this same hold still owns instead of conflicting with them.
+  const holdIdRef = useRef('');
+  if (!holdIdRef.current) holdIdRef.current = newHoldId();
+
   const chooseBranch = (branchId) => {
     const department = catalog.departments.find((item) => item.branchId === branchId);
     const doctor = catalog.doctors.find((item) => item.branchId === branchId && item.departmentIds.includes(department?.id));
@@ -128,12 +136,12 @@ const Bookappointment = () => {
     setSaving(true); setError('');
     try {
       await authReady;
-      const hold = await holdSlot({ doctorId: selection.doctorId, dateKey: selectedDate, time: selectedSlot.time, visitTypeId: selection.visitTypeId });
+      const startsAt = selectedSlot.startsAt || istInstant(selectedDate, selectedSlot.time).toISOString();
+      await holdSlot({ doctorId: selection.doctorId, visitTypeId: selection.visitTypeId, startsAt, holdId: holdIdRef.current });
       const { data } = await createBooking({
         doctorId: selection.doctorId, visitTypeId: selection.visitTypeId,
-        startsAt: selectedSlot.startsAt || istInstant(selectedDate, selectedSlot.time).toISOString(),
-        // holdSlot still returns its secret as `holdToken` until A1-03 renames the contract.
-        holdId: hold.holdToken, clientRequestId: requestId(),
+        startsAt,
+        holdId: holdIdRef.current, clientRequestId: requestId(),
         patient: { name: form.name.trim(), phone: form.phone.trim(), email: form.email.trim() || undefined, sex: form.sex || undefined, ageYears: form.ageYears ? Number(form.ageYears) : undefined, dob: form.dob || undefined, visitKind: form.visitKind },
         reason: form.reason.trim() || undefined,
         consent: { version: BOOKING_CONSENT_VERSION },

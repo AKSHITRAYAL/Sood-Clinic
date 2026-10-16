@@ -147,8 +147,8 @@ describe('validateBookingInput', () => {
     expect(validate({ consent: undefined }).reason).toBe('CONSENT_REQUIRED');
   });
 
-  it('accepts the legacy consentVersion string while the deployed page still sends it', () => {
-    expect(validate({ consent: undefined, consentVersion: CONSENT_VERSION }).ok).toBe(true);
+  it('refuses the interim top-level consentVersion string (§6.6 sends consent:{version})', () => {
+    expect(validate({ consent: undefined, consentVersion: CONSENT_VERSION })).toMatchObject({ ok: false, reason: 'CONSENT_REQUIRED' });
   });
 
   it('rejects a visit kind outside the enum', () => {

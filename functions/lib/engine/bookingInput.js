@@ -88,8 +88,9 @@ const validateBookingInput = (input = {}, visitType = {}, { now = new Date() } =
     });
   }
 
-  const consentVersion = text(input?.consent?.version) || text(input?.consentVersion);
-  if (consentVersion !== CONSENT_VERSION) fields.consent = 'Please accept the consent to continue.';
+  // §6.6 sends `consent:{version}`. The interim top-level `consentVersion` string the old
+  // page posted is no longer read (A1-03 moved the page).
+  if (text(input?.consent?.version) !== CONSENT_VERSION) fields.consent = 'Please accept the consent to continue.';
 
   const code = fields.phone ? 'INVALID_PHONE'
     : fields.email ? 'INVALID_EMAIL'

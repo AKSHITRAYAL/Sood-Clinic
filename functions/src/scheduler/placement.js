@@ -2,7 +2,7 @@ const admin = require('firebase-admin');
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { istDateKey } = require('../../lib/ist');
 const { unitSlotsForRange } = require('../../lib/engine/units');
-const { planPlacement } = require('../../lib/engine/placement');
+const { asMillis, planPlacement } = require('../../lib/engine/placement');
 const { schedulerError } = require('./errors');
 
 const MINUTE_MS = 60 * 1000;
@@ -95,4 +95,37 @@ const releaseUnitsInTransaction = ({ db, transaction, slotIds }) => {
   (Array.isArray(slotIds) ? slotIds : []).forEach((slotId) => transaction.delete(db.collection('appointmentSlots').doc(slotId)));
 };
 
-module.exports = { placeAppointmentInTransaction, releaseUnitsInTransaction };
+/**
+ * True when every unit the range covers (buffers included) is a live hold owned by
+ * `claimHoldId`. A guest whose own hold is still alive may confirm a time that
+ * availability already hides because of that same hold, so both `createBooking` and
+ * `holdSlot` ask this before refusing a time.
+ */
+const unitsHeldBy = async ({
+  db,
+  doctorId,
+  startsAt,
+  endsAt,
+  bufferBefore = 0,
+  bufferAfter = 0,
+  claimHoldId = null,
+  now = new Date(),
+}) => {
+  if (!claimHoldId) return false;
+  const start = asDate(startsAt);
+  const end = asDate(endsAt);
+  const units = unitSlotsForRange(
+    doctorId,
+    new Date(start.getTime() - bufferBefore * MINUTE_MS),
+    new Date(end.getTime() + bufferAfter * MINUTE_MS),
+  );
+  if (!units.length) return false;
+  const at = asMillis(now);
+  const snapshots = await db.getAll(...units.map((unit) => db.collection('appointmentSlots').doc(unit.id)));
+  return snapshots.every((snapshot) => snapshot.exists
+    && snapshot.get('kind') === 'hold'
+    && snapshot.get('holdId') === claimHoldId
+    && (!snapshot.get('expiresAt') || asMillis(snapshot.get('expiresAt')) > at));
+};
+
+module.exports = { placeAppointmentInTransaction, releaseUnitsInTransaction, unitsHeldBy };

@@ -4,7 +4,7 @@ Branch: `akshitrayal-scheduler-implementation`
 Worktree: `/home/keshu/copilot-worktrees/hospital-management-system/akshitrayal-stunning-system`
 Specs: `/home/keshu/Projects/PROMPT-A-scheduler.md` (scheduler), `/home/keshu/Projects/PROMPT-B-ui-redesign.md` (UI), `/home/keshu/Downloads/AI-PROMPT-next-tasks.md` (next tasks)
 Repo checklist: `files/04-backlog.md`
-Last updated: 2026-10-15
+Last updated: 2026-10-16
 
 This file is the running log of what is implemented on this branch, how it is built, what is
 verified, and what is still open. Append a dated entry to **Change log** every session and
@@ -58,8 +58,9 @@ requests delivered → what was verified (with counts) → files touched → bug
 | A0-06 references + tokens | done | `functions/lib/engine/reference.js`, `functions/lib/tokens.js` (`newManageToken`, `hashToken`, `tokensEqual` with length-mismatch guard), tests incl. the 1,000-reference alphabet check |
 | A0-07 error reasons + copy | done | `functions/src/scheduler/errors.js` (`schedulerError`), `Frontend/src/lib/bookingErrors.js`; `bookingErrors.test.js` asserts the full reason→copy table and the default fallback |
 | A1-01 month-wide `getMonthAvailability` | done (2026-10-15, session 3) | New `functions/src/scheduler/availabilityCallables.js` (spec 6.2) replaces the old inline callable: one read per source for the month, pure `groupUnitsByDate` actually used, one `freeBusy` request for the month, dailyLimit counts only fetched when a visit type caps a day, `nextAvailable` from today, and a past/out-of-window malformed month refused instead of silently returning no days |
-| A1-02 `createBooking` v2 | done (2026-10-15, session 4) | `functions/lib/engine/bookingInput.js` (`validateBookingInput`, `CONSENT_VERSION`, 25 test vectors in `functions/test/engine/bookingInput.test.js`); `createBooking` takes the §6.6 input (`startsAt`, `holdId`, `consent:{version}`, `intake`) and writes the §4.3 fields, `contact`, `patientRegistryId` (registry lookup by phone) and `ipHash`/`manageCreatedAt` on `appointmentPrivate`; `functions/src/scheduler/notify.js` is called after commit (`enqueueForAppointment('booking_confirmed', id)`) and is a no-op until A2-03. Response is `{appointmentId, reference, status, idempotent, startsAt, endsAt, manageToken, visitType, doctor}`. `Bookappointment.jsx` sends the new payload. The interim `dateKey`/`time`/`consentVersion`/`holdToken` shape is still accepted so the deployed page keeps booking until hosting is rebuilt (temporary, A1-03 removes it) |
-| A1-03…A5-06 | not started as cards | Several features exist in a first form but are built on the legacy engine or without the card's UI prerequisites (Prompt B B-01…B-12). They are deliberately **not** ticked. See §5 |
+| A1-02 `createBooking` v2 | done (2026-10-15, session 4) | `functions/lib/engine/bookingInput.js` (`validateBookingInput`, `CONSENT_VERSION`, 25 test vectors in `functions/test/engine/bookingInput.test.js`); `createBooking` takes the §6.6 input (`startsAt`, `holdId`, `consent:{version}`, `intake`) and writes the §4.3 fields, `contact`, `patientRegistryId` (registry lookup by phone) and `ipHash`/`manageCreatedAt` on `appointmentPrivate`; `functions/src/scheduler/notify.js` is called after commit (`enqueueForAppointment('booking_confirmed', id)`) and is a no-op until A2-03. Response is `{appointmentId, reference, status, idempotent, startsAt, endsAt, manageToken, visitType, doctor}`. `Bookappointment.jsx` sends the new payload. The interim `dateKey`/`time`/`consentVersion`/`holdToken` shape was still accepted so the deployed page kept booking; **A1-03 removed it** (2026-10-16) |
+| A1-03 holds | done (2026-10-16, session 5) | `functions/src/scheduler/holds.js` (`createHoldHandlers`, `isHoldId`) implements §6.4–6.5: `holdSlot` takes `{doctorId, visitTypeId, startsAt, holdId}` and returns `{holdId, expiresAt}` (5 minutes), `releaseHold` takes `{doctorId, holdId}`; the hold id is hashed before it reaches the units, at most one active hold per id is kept, and the same-hash `claimHoldId` conversion lives in `createBooking`. 8 vectors in `functions/test/scheduler/holds.test.js` drive the real engine through fakes. Found and fixed on the way: expired holds never counted as expired in placement, and every callable shared one `rateLimits` counter |
+| A1-04…A5-06 | not started as cards | Several features exist in a first form but are built on the legacy engine or without the card's UI prerequisites (Prompt B B-01…B-12). They are deliberately **not** ticked. See §5 |
 
 Ledger in `PROMPT-A-scheduler.md` §12 is kept in sync with this table.
 
@@ -140,14 +141,14 @@ by `doctorId` + `dateKey` range. Tests: `tests/rules/*.test.js` (emulator).
 | `features/scheduler/ics.js` (+ test) | client-side `.ics` text for the download button |
 | `lib/bookingErrors.js` (+ test) | reason → friendly copy |
 
-## 4. Validation status (last run 2026-10-15, session 3, in this worktree)
+## 4. Validation status (last run 2026-10-16, session 5, in this worktree)
 
 | Command | Result |
 |---|---|
-| `npm ci` | pass (run 2026-10-15 session 1) |
-| `npx vitest run tests/time tests/schedule functions/test` | pass — 78/78, 15 files (`functions/test` alone: 72/72, 13 files) |
-| `npx vitest run` (whole repo) | 86 pass, 14 skipped, 1 file fails **only** because `tests/rules/default-deny.test.js` needs the emulator (see `npm run test:rules`) |
-| `firebase emulators:exec --only firestore,functions` + one-off script | pass — 39/39: real callables `getAvailability`, `getMonthAvailability`, `holdSlot`, `releaseHold`, `createBooking` (v2 input, rejection reasons, interim-input compatibility, idempotent replay), `getBookingByToken`, `cancelBookingByToken`; asserts the written documents, the §4.3 fields and that the month response agrees with the day response |
+| `npm ci` | pass (run 2026-10-15 session 1; not re-run in session 5 — no dependency changed) |
+| `npx vitest run tests/time tests/schedule functions/test` | pass — 86/86, 16 files (`functions/test` alone: 80/80, 14 files; +8 for `functions/test/scheduler/holds.test.js`) |
+| `npx vitest run` (whole repo) | 94 pass, 14 skipped, 1 file fails **only** because `tests/rules/default-deny.test.js` needs the emulator (see `npm run test:rules`) |
+| `firebase emulators:exec --only firestore,functions` + one-off script | pass — 47/47: real callables `getAvailability`, `getMonthAvailability`, `holdSlot`, `releaseHold` (§6.4–6.5 contract, own-hold re-hold, foreign hold id, one-active-hold-per-id, release), `createBooking` (v2 input, rejection reasons, refusal of the removed interim shape, idempotent replay, booking over an expired hold), `getBookingByToken`, `cancelBookingByToken`; asserts the written documents, the §4.3 fields and that the month response agrees with the day response |
 | `(cd functions && npm run lint)` | pass |
 | `npm --prefix Frontend run lint` | pass |
 | `npm --prefix Frontend run build` | pass (pre-existing large-chunk warning: staff `index` 738.83 kB → 225.98 kB gzip) |
@@ -182,10 +183,23 @@ production data exists.
   `appointment_confirmation` write with `enqueueForAppointment('booking_confirmed', id)`, which is a
   no-op today: **a booking no longer queues any notification until A2-03 fills the outbox in.**
   Nothing is lost in practice — the old document only reached the unconfigured webhook and dead-lettered.
-- **Booking input compatibility (temporary).** `createBooking` reads both the §6.6 input and the
-  interim `dateKey`/`time`/`consentVersion`/`holdToken` shape so the deployed page keeps working.
-  A1-03 must delete that branch together with the page change. `branchId`/`departmentId` are no
-  longer part of the input (§6.6); the stored appointment takes them from the doctor record.
+- **Booking input compatibility — closed by A1-03 (2026-10-16).** `createBooking` now reads only the
+  §6.6 input: `startsAt` must be an ISO instant and `consent.version` is the only accepted consent
+  shape, so the interim `dateKey`/`time`/`consentVersion`/`holdToken` payload is refused with the
+  plain "Choose a valid appointment time." message. `Bookappointment.jsx` sends `startsAt` and a
+  client-generated `holdId`. The deployed Hosting bundle still sends the interim shape until the
+  next hosting deploy — front-desk/phone bookings are unaffected, but **online booking on the live
+  site will fail until hosting is redeployed** (the page and the callables must ship together).
+  `branchId`/`departmentId` remain out of the input (§6.6); the stored appointment takes them from
+  the doctor record.
+- **Age and visit-kind extras.** `validateBookingInput` still accepts `patient.ageYears` and
+  `patient.visitKind` and stores them in `patientSnapshot`, although §6.6 lists only
+  `{name, phone, email?, dob?, sex?}`. They stay until A1-06 rebuilds the details form (removing
+  them server-side now would silently drop the age and new/follow-up the page collects).
+- **Token callables share the booking allowance.** `getBookingByToken`/`cancelBookingByToken`/
+  `rescheduleBookingByToken` call `enforceBookingRateLimit` (10/hour) although §6 gives token
+  callables 30/hour; A1-04 owns those callables. Each limit now has its own `rateLimits` bucket, so
+  this is a wrong number, not a shared counter.
 - **No staff calendar grid, no drag/move, no drawer, no command palette** (A3-02…A3-11), no
   reports (A5-01), no ICS feed (A4-03), no cleanup job (A4-04), no Playwright E2E (A5-04).
 - **Prompt B** (B-01…B-12: tokens, base components, shells) is not implemented, so every card
@@ -193,12 +207,20 @@ production data exists.
 
 ## 6. Next card
 
+`A1-04 · Guest manage callables and shared internals [L] · depends: A0-06, A1-02` —
+`functions/src/scheduler/manage.js` with internal `cancelAppointmentCore`/`rescheduleAppointmentCore`
+(policy from `functions/lib/appointmentPolicy.js`), the three token callables on top of it, and
+`cancelPatientAppointment`/`reschedulePatientAppointment` refactored onto the same cores; the token
+allowance becomes 30/hour (§6) while it is in there. A1-04 also owns the self-overlap gap below §5.
+
+### Superseded card notes (A1-03)
+
 `A1-03 · Holds [M] · depends: A0-03, A1-02` — `functions/src/scheduler/holds.js` with contracts
 6.4/6.5: `holdSlot` verifies the slot is currently offered by `computeDaySlots` and locks units with
 `kind:'hold'`, a client-generated `holdId` (16–64 random characters) and `expiresAt = now + 5 min`;
-`createBooking` converts the units of that `holdId` instead of conflicting (already true — it hashes
-whatever secret `holdSlot` hands back); `releaseHold` takes `{doctorId, holdId}`. Then remove the
-interim input branch from `createBooking` and `Bookappointment.jsx` (see §5).
+`createBooking` converts the units of that `holdId` instead of conflicting; `releaseHold` takes
+`{doctorId, holdId}`. **Done 2026-10-16**, together with removing the interim input branch from
+`createBooking` and `Bookappointment.jsx` (see §5 for what that means for a Hosting deploy).
 
 ### Superseded card notes (A1-02)
 
@@ -223,6 +245,37 @@ Then A1-04 (guest manage callables on the shared internals, §6.7–6.9), A1-05 
 — `useMonthAvailability` and `schedulerService.js` already exist), A1-06…A1-09.
 
 ## 7. Change log
+
+### 2026-10-16 (session 5, A1-03)
+
+- **A1-03 done.** Holds now live in `functions/src/scheduler/holds.js`:
+  - `holdSlot({doctorId, visitTypeId, startsAt, holdId})` → `{holdId, expiresAt}` (§6.4). It asks the
+    same `computeDaySlots` context the availability callables use, so a hold can only lock a time the
+    engine is offering right now; the five-minute expiry and the `kind:'hold'` units are unchanged,
+    and the stored `holdId` is the SHA-256 hash, so the units hold no secret.
+  - At most one active hold per `holdId` (§6.4): re-holding a different time deletes that id's older
+    units after the new ones are written.
+  - A guest can re-hold its own time — needed because a live hold hides the time from the engine —
+    through `unitsHeldBy`, moved from `index.js` into `src/scheduler/placement.js` and shared with
+    `createBooking`'s hold-claim path.
+  - `releaseHold({doctorId, holdId})` → `{ok:true}` (§6.5) deletes only that doctor's `kind:'hold'`
+    units for that hash, and both callables are throttled under their own `hold` bucket (20/hour).
+- **The interim booking input is gone** (`index.js`, `lib/engine/bookingInput.js`): `startsAt` is
+  required, `consent.version` is the only accepted form, and `Bookappointment.jsx` now generates one
+  hold id per page visit with `crypto.randomUUID()` and sends the same id to `holdSlot` and
+  `createBooking`.
+- **Two defects found by the emulator run, both fixed:**
+  - *Expired holds blocked bookings.* `lib/engine/placement.js` compared `new Date(unit.expiresAt)`,
+    and Firestore returns `expiresAt` as a Timestamp for which `new Date(ts)` is an **Invalid Date**:
+    the comparison was always false, so an expired hold was treated as a live conflict while
+    availability (which coerces with `toDate()`) correctly ignored it. Now both use a tolerant
+    `asMillis`, covered by a Timestamp-shaped test.
+  - *One `rateLimits` counter for every callable.* `enforceRateLimit` keyed the document on the IP
+    hash alone, so 20 holds exhausted `createBooking`'s 10/hour allowance for the same caller. The
+    bucket name is now part of the document id (`hold_…`, `booking_…`).
+- Checks in this worktree: vitest 86/86 (16 files), rules 14/14, functions + frontend lint, both
+  bundles built, `git diff --check`, and the emulator script **47/47**. `npm ci` was not re-run (no
+  dependency changed). No deploy, no billing, no production data change.
 
 ### 2026-10-15 (session 4, A1-02)
 
