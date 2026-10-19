@@ -1,6 +1,6 @@
 // No SDK imports, input-file option, credentials, network calls or write mode.
 const { rehearse } = require('../migration/rehearsal.cjs');
-const { fixtures } = require('../migration/fixtures.cjs');
+const { fixtures, targetSnapshot, patientTargetSnapshot, serviceTargetSnapshot, appointmentTargetSnapshot, scheduleTargetSnapshot, clinicalTargetSnapshot, experienceTargetSnapshot, registryTargetSnapshot } = require('../migration/fixtures.cjs');
 try {
   if (process.argv.length !== 2) throw new Error('UNSUPPORTED_ARGUMENTS');
   for (const key of ['GCLOUD_PROJECT', 'GOOGLE_CLOUD_PROJECT', 'GCP_PROJECT']) {
@@ -14,7 +14,7 @@ try {
   for (const key of ['DATA_CONNECT_EMULATOR_HOST', 'FIREBASE_DATA_CONNECT_EMULATOR_HOST']) {
     if (process.env[key] && process.env[key] !== '127.0.0.1:9399') throw new Error('UNSAFE_ENVIRONMENT');
   }
-  console.log(JSON.stringify({ dataset: 'built_in_synthetic', ...rehearse(fixtures) }));
+  console.log(JSON.stringify({ dataset: 'built_in_synthetic', ...rehearse(fixtures, { targetSnapshot, patientTargetSnapshot, serviceTargetSnapshot, appointmentTargetSnapshot, scheduleTargetSnapshot, clinicalTargetSnapshot, experienceTargetSnapshot, registryTargetSnapshot }) }));
 } catch {
   console.error('Rehearsal refused: use synthetic fixtures in a local-only environment with no arguments or database overrides.');
   process.exitCode = 1;

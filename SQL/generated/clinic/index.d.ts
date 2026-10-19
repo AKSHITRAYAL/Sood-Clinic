@@ -15,6 +15,17 @@ export interface AppointmentEvent_Key {
   __typename?: 'AppointmentEvent_Key';
 }
 
+export interface AppointmentLegacySlot_Key {
+  appointmentId: UUIDString;
+  ordinal: number;
+  __typename?: 'AppointmentLegacySlot_Key';
+}
+
+export interface AppointmentPrivateDetails_Key {
+  appointmentId: UUIDString;
+  __typename?: 'AppointmentPrivateDetails_Key';
+}
+
 export interface Appointment_Key {
   id: UUIDString;
   __typename?: 'Appointment_Key';
@@ -49,6 +60,11 @@ export interface DoctorDepartment_Key {
   doctorId: UUIDString;
   departmentId: UUIDString;
   __typename?: 'DoctorDepartment_Key';
+}
+
+export interface DoctorScheduleState_Key {
+  doctorId: UUIDString;
+  __typename?: 'DoctorScheduleState_Key';
 }
 
 export interface DoctorSchedule_Key {
@@ -134,6 +150,43 @@ export interface GetPublicClinicData {
   } & Service_Key)[];
 }
 
+export interface LegacyAuditRecord_Key {
+  id: UUIDString;
+  __typename?: 'LegacyAuditRecord_Key';
+}
+
+export interface LegacyBookingRequest_Key {
+  id: UUIDString;
+  __typename?: 'LegacyBookingRequest_Key';
+}
+
+export interface LegacyMedicalDocument_Key {
+  id: UUIDString;
+  __typename?: 'LegacyMedicalDocument_Key';
+}
+
+export interface LegacyMedicalHistory_Key {
+  id: UUIDString;
+  __typename?: 'LegacyMedicalHistory_Key';
+}
+
+export interface LegacyPatientFeedback_Key {
+  id: UUIDString;
+  __typename?: 'LegacyPatientFeedback_Key';
+}
+
+export interface LegacySourceInstant_Key {
+  entityType: string;
+  entityId: string;
+  field: string;
+  __typename?: 'LegacySourceInstant_Key';
+}
+
+export interface LegacyUhidCounter_Key {
+  id: UUIDString;
+  __typename?: 'LegacyUhidCounter_Key';
+}
+
 export interface Notification_Key {
   id: UUIDString;
   __typename?: 'Notification_Key';
@@ -155,6 +208,11 @@ export interface PatientLink_Key {
   patientId: UUIDString;
   userId: string;
   __typename?: 'PatientLink_Key';
+}
+
+export interface PatientReportedProfile_Key {
+  patientId: UUIDString;
+  __typename?: 'PatientReportedProfile_Key';
 }
 
 export interface Patient_Key {

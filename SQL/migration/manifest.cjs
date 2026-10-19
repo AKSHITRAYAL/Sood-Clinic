@@ -15,7 +15,7 @@ const manifest = {
   identity_locks: item('firestore', 'patientIdentityLocks/{id}', 'derived', ['patientId', ...times]),
   counters: item('firestore', 'counters/patientUhid', 'deferred', ['value', ...times]),
   schedules: item('firestore', 'doctorSchedules/{id}', 'deferred', ['doctorId', ...session, 'updatedBy', ...times]),
-  exceptions: item('firestore', 'scheduleExceptions/{id}', 'deferred', ['doctorId', 'dateKey', 'type', 'note', 'reason', ...session, 'createdBy', 'updatedBy', ...times]),
+  exceptions: item('firestore', 'scheduleExceptions/{id}', 'deferred', ['doctorId', 'dateKey', 'type', 'note', 'reason', 'sessions[].start', 'sessions[].end', 'createdBy', 'updatedBy', ...times]),
   old_schedules: item('firestore', 'clinicSchedules/{id}', 'deferred', ['doctorId', ...session, ...times]),
   appointments: item('firestore', 'appointments/{id}', 'deferred', ['reference', 'branchId', 'departmentId', 'doctorId', 'visitType', 'visitMode', 'dateKey', 'startsAt', 'endsAt', 'status', 'source', 'patientId', 'patientSnapshot.name', 'patientSnapshot.phone', 'patientSnapshot.email', 'phoneKey', 'reason', 'slotIds[]', 'slotId', 'consent.version', 'consent.acceptedAt', 'createdBy.uid', 'createdBy.role', 'externalCalendar.provider', 'externalCalendar.syncStatus', 'videoConsultation.status', ...times]),
   appointment_events: item('firestore', 'appointments/{appointmentId}/events/{id}', 'deferred', ['from', 'to', 'byUid', 'byRole', 'at', 'reason', 'meta.source', ...times]),
@@ -31,4 +31,16 @@ const manifest = {
   oauth_states: item('firestore', 'integrationOAuthStates/{id}', 'secret_excluded', ['uid', 'createdAt', 'expiresAt', 'usedAt']),
   public_assets: item('static', '{id}', 'static_assets', ['title', 'topic', 'path', 'kind']),
 };
+manifest.public_config.fields.push('slotMinutes', 'visitTypes[].active');
+manifest.medical_history.fields.push('details');
+manifest.medical_documents.fields.push('category', 'details');
+manifest.patients.fields.push('createdBy.uid', 'createdBy.role', 'updatedBy');
+manifest.audit.fields.push('meta.sessionCount', 'meta.doctorId', 'meta.dateKey', 'meta.type', 'meta.indexed', 'meta.fields[]', 'meta.active', 'meta.branchId', 'meta.publicBookingEnabled', 'meta.bookingEnabled', 'meta.count', 'meta.feedbackId', 'meta.visitMode', 'meta.fromDateKey', 'meta.toDateKey', 'meta.action', 'meta.affectedAppointments');
+manifest.appointments.fields.push('videoConsultation', 'externalCalendar.calendarId', 'externalCalendar.eventId', 'externalCalendar.lastSyncError', 'videoConsultation.joinUrl', 'videoConsultation.preparedBy', 'videoConsultation.clearedBy', 'cancellation.byUid', 'cancellation.byRole', 'cancellation.reason');
+manifest.appointment_events.fields.push('meta.action', 'meta.dateKey', 'meta.fromDateKey', 'meta.toDateKey', 'meta.toTime');
+// Exported Firestore instants may be exact seconds/nanoseconds objects, not ISO strings.
+for (const [category, fields] of Object.entries({ appointments: ['startsAt', 'endsAt', 'consent.acceptedAt', 'externalCalendar.lastSyncedAt', 'videoConsultation.preparedAt', 'videoConsultation.clearedAt', 'cancellation.at'], appointment_events: ['at'], slots: ['startsAt', 'endsAt'], feedback: ['reviewedAt', 'publishedAt'], audit: ['at'] })) {
+  manifest[category].fields.push(...fields.filter(field => !manifest[category].fields.includes(field)));
+  manifest[category].fields.push(...fields.flatMap(field => [`${field}.seconds`, `${field}.nanoseconds`]));
+}
 module.exports = { manifest };

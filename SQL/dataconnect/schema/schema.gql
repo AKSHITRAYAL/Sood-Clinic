@@ -22,6 +22,13 @@ type Branch @table(name: "clinic_branches") {
   code: String! @unique
   name: String!
   address: String!
+  addressLine1: String
+  addressLine2: String
+  city: String
+  state: String
+  postalCode: String
+  country: String
+  legacyUpdatedBy: String
   timezone: String! @default(value: "Asia/Kolkata")
   active: Boolean! @default(value: true)
   createdAt: Timestamp! @default(expr: "request.time")
@@ -33,6 +40,9 @@ type Department @table(name: "clinic_departments") {
   branch: Branch!
   code: String! @unique
   name: String!
+  description: String
+  createdAt: Timestamp
+  legacyUpdatedBy: String
   active: Boolean! @default(value: true)
   publicBookingEnabled: Boolean! @default(value: false)
   sortOrder: Int! @default(value: 0)
@@ -47,6 +57,8 @@ type Doctor @table(name: "clinic_doctors") {
   registrationNumber: String! @unique
   bio: String
   photoPath: String
+  createdAt: Timestamp
+  legacyUpdatedBy: String
   active: Boolean! @default(value: true)
   bookingEnabled: Boolean! @default(value: false)
   updatedAt: Timestamp! @default(expr: "request.time")
@@ -55,6 +67,7 @@ type Doctor @table(name: "clinic_doctors") {
 type DoctorDepartment @table(name: "clinic_doctor_departments", key: ["doctor", "department"]) {
   doctor: Doctor!
   department: Department!
+  sortOrder: Int @default(value: 0)
 }
 
 # Projection only: Firebase custom claims, not this table, grant staff access.
@@ -80,9 +93,62 @@ type Patient @table(name: "clinic_patients") @index(fields: ["phone", "displayNa
   gender: String
   bloodGroup: String
   address: String
+  title: String
+  maritalStatus: String
+  addressLine1: String
+  city: String
+  state: String
+  postalCode: String
+  emergencyContactName: String
+  emergencyContactPhone: String
+  legacyRecordSource: String
+  legacyCreatedBy: String
+  legacyCreatedByUid: String
+  legacyCreatedByRole: String
+  legacyUpdatedBy: String
   archivedAt: Timestamp
   createdAt: Timestamp! @default(expr: "request.time")
   updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# Patient-reported health text is never part of manager demographic projections.
+# No connector operation exposes this table before the scoped patient cutover.
+type PatientReportedProfile @table(name: "clinic_patient_reported_profiles", key: "patient") {
+  patient: Patient!
+  allergies: String
+  currentMedications: String
+  healthNotes: String
+}
+
+# Private preservation drafts, not finalized visits or download/access grants.
+# No connector operations expose these tables before scoped clinical cutover.
+type LegacyMedicalHistory @table(name: "clinic_legacy_medical_history") @index(fields: ["patientId", "createdAt"]) {
+  legacyId: String! @unique
+  patient: Patient!
+  doctor: Doctor
+  legacyDate: String
+  diagnosis: String
+  notes: String
+  details: String
+  createdAt: Timestamp
+  updatedAt: Timestamp
+}
+
+type LegacyMedicalDocument @table(name: "clinic_legacy_medical_documents") @index(fields: ["patientId", "createdAt"]) {
+  legacyId: String! @unique
+  patient: Patient!
+  doctor: Doctor
+  name: String
+  title: String
+  category: String
+  details: String
+  legacyUrl: String
+  storagePath: String
+  visibleToPatient: Boolean
+  contentType: String
+  sizeBytes: Int
+  createdAt: Timestamp
+  updatedAt: Timestamp
 }
 
 type PatientLink @table(name: "clinic_patient_links", key: ["patient", "user"]) @index(fields: ["userId"]) {
@@ -108,6 +174,9 @@ type PatientLinkInvitation @table(name: "clinic_patient_link_invitations", key: 
 }
 
 type Service @table(name: "clinic_services") {
+  legacyId: String @unique
+  legacySortOrder: Int
+  legacyCreatedAt: Timestamp
   code: String! @unique
   name: String!
   durationMinutes: Int!
@@ -126,6 +195,12 @@ type DoctorService @table(name: "clinic_doctor_services", key: ["doctor", "servi
 # Private operational settings; never returned in public catalog operations.
 type ClinicSettings @table(name: "clinic_settings", key: "id") {
   id: String!
+  slotMinutes: Int
+  intervalMinutes: Int
+  bufferBeforeMinutes: Int
+  bufferAfterMinutes: Int
+  createdAt: Timestamp
+  legacyUpdatedBy: String
   bookingWindowDays: Int! @default(value: 14)
   leadMinutes: Int! @default(value: 30)
   cancelCutoffMinutes: Int! @default(value: 120)
@@ -133,7 +208,20 @@ type ClinicSettings @table(name: "clinic_settings", key: "id") {
   updatedAt: Timestamp! @default(expr: "request.time")
 }
 
+# A row with zero windows means deliberately closed weekly hours, not fallback.
+# No connector exposes migration provenance or legacy exception text.
+type DoctorScheduleState @table(name: "clinic_doctor_schedule_states", key: "doctor") {
+  doctor: Doctor!
+  authority: String!
+  legacySourcePath: String @unique
+  legacyCreatedAt: Timestamp
+  legacyUpdatedBy: String
+  updatedAt: Timestamp
+}
+
 type DoctorSchedule @table(name: "clinic_doctor_schedules") @index(fields: ["doctorId", "weekday"]) {
+  legacyId: String @unique
+  sourceOrder: Int
   doctor: Doctor!
   weekday: Int!
   startMinute: Int!
@@ -142,6 +230,12 @@ type DoctorSchedule @table(name: "clinic_doctor_schedules") @index(fields: ["doc
 }
 
 type ScheduleException @table(name: "clinic_schedule_exceptions") @index(fields: ["doctorId", "date"]) {
+  legacyId: String @unique
+  legacyCreatedAt: Timestamp
+  legacyCreatedBy: String
+  legacyUpdatedBy: String
+  legacyNote: String
+  legacyReason: String
   doctor: Doctor!
   date: Date!
   kind: String!
@@ -150,6 +244,8 @@ type ScheduleException @table(name: "clinic_schedule_exceptions") @index(fields:
 }
 
 type ExceptionWindow @table(name: "clinic_exception_windows") {
+  legacyId: String @unique
+  sourceOrder: Int
   exception: ScheduleException!
   startMinute: Int!
   endMinute: Int!
@@ -158,8 +254,14 @@ type ExceptionWindow @table(name: "clinic_exception_windows") {
 # No booking API until atomic interval protection is implemented in Phase 6.
 type Appointment @table(name: "clinic_appointments") @index(fields: ["doctorId", "clinicDate", "startsAt"]) @index(fields: ["patientId", "startsAt"]) {
   legacyId: String @unique
+  department: Department
+  visitMode: String
+  legacyVisitType: String
+  createdByRole: String
   reference: String! @unique
-  patient: Patient!
+  # LOCAL draft: anonymous bookings have no patient; no contact-based ownership.
+  # Releasing this nullability change needs explicit non-additive diff review.
+  patient: Patient
   doctor: Doctor!
   branch: Branch!
   service: Service!
@@ -175,7 +277,19 @@ type Appointment @table(name: "clinic_appointments") @index(fields: ["doctorId",
   updatedAt: Timestamp! @default(expr: "request.time")
 }
 
+# Entirely private until explicit scoped projections exist; never select all fields
+# for manager history because legacyReason may contain clinical information.
 type AppointmentEvent @table(name: "clinic_appointment_events") @index(fields: ["appointmentId", "occurredAt"]) {
+  legacyId: String @unique
+  legacyReason: String
+  legacyCreatedAt: Timestamp
+  legacyUpdatedAt: Timestamp
+  legacyMetaSource: String
+  legacyMetaAction: String
+  legacyDate: Date
+  legacyFromDate: Date
+  legacyToDate: Date
+  legacyToTime: String
   appointment: Appointment!
   action: String!
   previousStatus: String
@@ -183,6 +297,54 @@ type AppointmentEvent @table(name: "clinic_appointment_events") @index(fields: [
   actorUid: String
   actorRole: String!
   occurredAt: Timestamp! @default(expr: "request.time")
+}
+
+# Sensitive source details, including health text and meeting-link capabilities.
+# No connector operation exposes this table before role-scoped module cutover.
+type AppointmentPrivateDetails @table(name: "clinic_appointment_private_details", key: "appointment") {
+  appointment: Appointment!
+  snapshotName: String
+  snapshotPhone: String
+  snapshotEmail: String
+  reason: String
+  phoneKey: String
+  legacySlotId: String
+  legacySlotListPresent: Boolean!
+  calendarProvider: String
+  calendarId: String
+  calendarEventId: String
+  calendarSyncStatus: String
+  calendarLastSyncedAt: Timestamp
+  calendarLastSyncError: String
+  videoStatus: String
+  videoJoinUrl: String
+  videoPreparedBy: String
+  videoPreparedAt: Timestamp
+  videoClearedBy: String
+  videoClearedAt: Timestamp
+  cancellationByUid: String
+  cancellationByRole: String
+  cancellationReason: String
+  cancellationAt: Timestamp
+}
+
+# Historical lock references only, never used as SQL occupancy or access grants.
+type AppointmentLegacySlot @table(name: "clinic_appointment_legacy_slots", key: ["appointment", "ordinal"]) {
+  appointment: Appointment!
+  ordinal: Int!
+  legacySlotId: String!
+}
+
+# Immutable source-time evidence; SQL's microseconds do not retain nanoseconds.
+# A later importer must commit domain values and this evidence atomically.
+# This is private historical migration metadata, never current booking authority.
+type LegacySourceInstant @table(name: "clinic_legacy_source_instants", key: ["entityType", "entityId", "field"]) {
+  entityType: String!
+  entityId: String!
+  field: String!
+  sourcePath: String!
+  sqlValue: Timestamp!
+  exactValue: String!
 }
 
 type Notification @table(name: "clinic_notifications") @index(fields: ["status", "sendAfter"]) {
@@ -195,6 +357,54 @@ type Notification @table(name: "clinic_notifications") @index(fields: ["status",
   attempts: Int! @default(value: 0)
   sendAfter: Timestamp!
   createdAt: Timestamp! @default(expr: "request.time")
+}
+
+# Private retained history; never automatically publish or merge into live audit.
+type LegacyPatientFeedback @table(name: "clinic_legacy_patient_feedback") {
+  legacyId: String! @unique
+  patient: Patient!
+  appointment: Appointment! @unique
+  rating: Int!
+  comment: String
+  status: String!
+  reviewedBy: String
+  reviewedAt: Timestamp
+  publishedAt: Timestamp
+  createdAt: Timestamp
+  updatedAt: Timestamp
+}
+
+type LegacyAuditRecord @table(name: "clinic_legacy_audit_records") {
+  legacyId: String! @unique
+  actorUid: String
+  actorRole: String
+  action: String
+  resourceType: String
+  legacyResourceId: String
+  legacyMetadata: String
+  occurredAt: Timestamp
+  legacyCreatedAt: Timestamp
+  legacyUpdatedAt: Timestamp
+}
+
+# Private migration evidence, not a live allocator or caller-scoped retry receipt.
+type LegacyUhidCounter @table(name: "clinic_legacy_uhid_counters") {
+  legacyId: String! @unique
+  sourceValue: String!
+  observedSourceMax: String!
+  observedTargetMax: String
+  createdAt: Timestamp
+  updatedAt: Timestamp
+}
+
+type LegacyBookingRequest @table(name: "clinic_legacy_booking_requests") {
+  legacyId: String! @unique
+  legacyRequestKey: String!
+  appointment: Appointment!
+  reference: String!
+  status: String!
+  createdAt: Timestamp
+  updatedAt: Timestamp
 }
 
 # IDs and action codes only; clinical text is stored in later clinical tables.

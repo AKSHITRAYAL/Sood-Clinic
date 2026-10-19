@@ -29,4 +29,24 @@ const fixtures = [
   firestore('integrationOAuthStates/fixture-state', { uid: 'fixture-old-staff', createdAt: at, expiresAt: at }),
   record('static', 'fixture-video', { title: 'Synthetic guide', topic: 'Synthetic topic', path: 'synthetic/not-a-real-video.mp4', kind: 'video' }),
 ];
-module.exports = { fixtures };
+// Existing target metadata is synthetic too; never replace it with a live dump.
+const targetSnapshot = {
+  complete: true,
+  branches: [{ id: '00000000-0000-4000-8000-000000000001', legacyId: 'fixture-branch', code: 'FIXTURE' }],
+  departments: [{ id: '00000000-0000-4000-8000-000000000002', legacyId: 'fixture-department', code: 'FIXTURE-DEPT', branchId: '00000000-0000-4000-8000-000000000001' }],
+  doctors: [{ id: '00000000-0000-4000-8000-000000000003', legacyId: 'fixture-doctor', registrationNumber: 'FIXTURE-ONLY', branchId: '00000000-0000-4000-8000-000000000001' }],
+};
+const patientTargetSnapshot = { complete: true, patients: [{ id: '00000000-0000-4000-8000-000000000044', legacyId: 'fixture-account', uhid: 'SC-999999' }] };
+const serviceTargetSnapshot = { complete: true, services: [{ id: '00000000-0000-4000-8000-000000000055', legacyId: 'consultation', code: 'consultation' }] };
+const appointmentTargetSnapshot = { complete: true, appointments: [{ id: '00000000-0000-4000-8000-000000000066', legacyId: 'fixture-appointment', reference: 'FIXTURE-APPOINTMENT', patientId: patientTargetSnapshot.patients[0].id, doctorId: targetSnapshot.doctors[0].id, branchId: targetSnapshot.branches[0].id, serviceId: serviceTargetSnapshot.services[0].id }], events: [{ id: '00000000-0000-4000-8000-000000000077', legacyId: 'appointments/fixture-appointment/events/fixture-event', appointmentId: '00000000-0000-4000-8000-000000000066' }] };
+const scheduleTargetSnapshot = {
+  complete: true,
+  states: [{ doctorId: targetSnapshot.doctors[0].id, legacySourcePath: 'doctorSchedules/fixture-doctor' }],
+  weekly: [{ id: '00000000-0000-4000-8000-000000000083', legacyId: 'doctorSchedules/fixture-doctor/sessions/0', doctorId: targetSnapshot.doctors[0].id }],
+  exceptions: [{ id: '00000000-0000-4000-8000-000000000081', legacyId: 'fixture-exception', doctorId: targetSnapshot.doctors[0].id, date: '2026-10-20' }],
+  windows: [],
+};
+const clinicalTargetSnapshot = { complete: true, histories: [{ id: '00000000-0000-4000-8000-000000000091', legacyId: 'patients/fixture-account/medicalHistory/fixture-history', patientId: patientTargetSnapshot.patients[0].id, doctorId: targetSnapshot.doctors[0].id }], documents: [{ id: '00000000-0000-4000-8000-000000000092', legacyId: 'patients/fixture-account/medicalDocuments/fixture-document', patientId: patientTargetSnapshot.patients[0].id, doctorId: targetSnapshot.doctors[0].id }] };
+const experienceTargetSnapshot = { complete: true, feedback: [{ id: '00000000-0000-4000-8000-000000000093', legacyId: 'patientFeedback/fixture-feedback', patientId: patientTargetSnapshot.patients[0].id, appointmentId: appointmentTargetSnapshot.appointments[0].id }], audit: [{ id: '00000000-0000-4000-8000-000000000094', legacyId: 'auditLogs/fixture-audit' }] };
+const registryTargetSnapshot = { complete: true, counters: [{ id: '00000000-0000-4000-8000-000000000095', legacyId: 'counters/patientUhid' }], requests: [{ id: '00000000-0000-4000-8000-000000000096', legacyId: 'bookingRequests/fixture-request', appointmentId: appointmentTargetSnapshot.appointments[0].id }] };
+module.exports = { fixtures, targetSnapshot, patientTargetSnapshot, serviceTargetSnapshot, appointmentTargetSnapshot, scheduleTargetSnapshot, clinicalTargetSnapshot, experienceTargetSnapshot, registryTargetSnapshot };

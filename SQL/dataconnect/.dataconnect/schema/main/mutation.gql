@@ -18,6 +18,24 @@ extend type Mutation {
     data: AppointmentEvent_Data!
   ): AppointmentEvent_KeyOutput! @fdc_generated(from: "AppointmentEvent", purpose: INSERT_SINGLE)
   """
+  ✨ Insert a single `AppointmentLegacySlot` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  appointmentLegacySlot_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: AppointmentLegacySlot_Data!
+  ): AppointmentLegacySlot_KeyOutput! @fdc_generated(from: "AppointmentLegacySlot", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `AppointmentPrivateDetails` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  appointmentPrivateDetails_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: AppointmentPrivateDetails_Data!
+  ): AppointmentPrivateDetails_KeyOutput! @fdc_generated(from: "AppointmentPrivateDetails", purpose: INSERT_SINGLE)
+  """
   ✨ Insert a single `AuditLog` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
   """
   auditLog_insert(
@@ -90,6 +108,15 @@ extend type Mutation {
     data: DoctorSchedule_Data!
   ): DoctorSchedule_KeyOutput! @fdc_generated(from: "DoctorSchedule", purpose: INSERT_SINGLE)
   """
+  ✨ Insert a single `DoctorScheduleState` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  doctorScheduleState_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: DoctorScheduleState_Data!
+  ): DoctorScheduleState_KeyOutput! @fdc_generated(from: "DoctorScheduleState", purpose: INSERT_SINGLE)
+  """
   ✨ Insert a single `DoctorService` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
   """
   doctorService_insert(
@@ -107,6 +134,69 @@ extend type Mutation {
     """
     data: ExceptionWindow_Data!
   ): ExceptionWindow_KeyOutput! @fdc_generated(from: "ExceptionWindow", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `LegacyAuditRecord` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  legacyAuditRecord_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: LegacyAuditRecord_Data!
+  ): LegacyAuditRecord_KeyOutput! @fdc_generated(from: "LegacyAuditRecord", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `LegacyBookingRequest` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  legacyBookingRequest_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: LegacyBookingRequest_Data!
+  ): LegacyBookingRequest_KeyOutput! @fdc_generated(from: "LegacyBookingRequest", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `LegacyMedicalDocument` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  legacyMedicalDocument_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: LegacyMedicalDocument_Data!
+  ): LegacyMedicalDocument_KeyOutput! @fdc_generated(from: "LegacyMedicalDocument", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `LegacyMedicalHistory` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  legacyMedicalHistory_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: LegacyMedicalHistory_Data!
+  ): LegacyMedicalHistory_KeyOutput! @fdc_generated(from: "LegacyMedicalHistory", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `LegacyPatientFeedback` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  legacyPatientFeedback_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: LegacyPatientFeedback_Data!
+  ): LegacyPatientFeedback_KeyOutput! @fdc_generated(from: "LegacyPatientFeedback", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `LegacySourceInstant` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  legacySourceInstant_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: LegacySourceInstant_Data!
+  ): LegacySourceInstant_KeyOutput! @fdc_generated(from: "LegacySourceInstant", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `LegacyUhidCounter` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  legacyUhidCounter_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: LegacyUhidCounter_Data!
+  ): LegacyUhidCounter_KeyOutput! @fdc_generated(from: "LegacyUhidCounter", purpose: INSERT_SINGLE)
   """
   ✨ Insert a single `Notification` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
   """
@@ -152,6 +242,15 @@ extend type Mutation {
     """
     data: PatientLinkInvitation_Data!
   ): PatientLinkInvitation_KeyOutput! @fdc_generated(from: "PatientLinkInvitation", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `PatientReportedProfile` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  patientReportedProfile_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: PatientReportedProfile_Data!
+  ): PatientReportedProfile_KeyOutput! @fdc_generated(from: "PatientReportedProfile", purpose: INSERT_SINGLE)
   """
   ✨ Insert a single `ScheduleException` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
   """
@@ -215,6 +314,24 @@ extend type Mutation {
     """
     data: [AppointmentEvent_Data!]!
   ): [AppointmentEvent_KeyOutput!]! @fdc_generated(from: "AppointmentEvent", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `AppointmentLegacySlot` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  appointmentLegacySlot_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [AppointmentLegacySlot_Data!]!
+  ): [AppointmentLegacySlot_KeyOutput!]! @fdc_generated(from: "AppointmentLegacySlot", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `AppointmentPrivateDetails` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  appointmentPrivateDetails_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [AppointmentPrivateDetails_Data!]!
+  ): [AppointmentPrivateDetails_KeyOutput!]! @fdc_generated(from: "AppointmentPrivateDetails", purpose: INSERT_MULTIPLE)
   """
   ✨ Insert `AuditLog` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
   """
@@ -288,6 +405,15 @@ extend type Mutation {
     data: [DoctorSchedule_Data!]!
   ): [DoctorSchedule_KeyOutput!]! @fdc_generated(from: "DoctorSchedule", purpose: INSERT_MULTIPLE)
   """
+  ✨ Insert `DoctorScheduleState` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  doctorScheduleState_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [DoctorScheduleState_Data!]!
+  ): [DoctorScheduleState_KeyOutput!]! @fdc_generated(from: "DoctorScheduleState", purpose: INSERT_MULTIPLE)
+  """
   ✨ Insert `DoctorService` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
   """
   doctorService_insertMany(
@@ -305,6 +431,69 @@ extend type Mutation {
     """
     data: [ExceptionWindow_Data!]!
   ): [ExceptionWindow_KeyOutput!]! @fdc_generated(from: "ExceptionWindow", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `LegacyAuditRecord` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  legacyAuditRecord_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [LegacyAuditRecord_Data!]!
+  ): [LegacyAuditRecord_KeyOutput!]! @fdc_generated(from: "LegacyAuditRecord", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `LegacyBookingRequest` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  legacyBookingRequest_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [LegacyBookingRequest_Data!]!
+  ): [LegacyBookingRequest_KeyOutput!]! @fdc_generated(from: "LegacyBookingRequest", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `LegacyMedicalDocument` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  legacyMedicalDocument_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [LegacyMedicalDocument_Data!]!
+  ): [LegacyMedicalDocument_KeyOutput!]! @fdc_generated(from: "LegacyMedicalDocument", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `LegacyMedicalHistory` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  legacyMedicalHistory_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [LegacyMedicalHistory_Data!]!
+  ): [LegacyMedicalHistory_KeyOutput!]! @fdc_generated(from: "LegacyMedicalHistory", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `LegacyPatientFeedback` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  legacyPatientFeedback_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [LegacyPatientFeedback_Data!]!
+  ): [LegacyPatientFeedback_KeyOutput!]! @fdc_generated(from: "LegacyPatientFeedback", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `LegacySourceInstant` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  legacySourceInstant_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [LegacySourceInstant_Data!]!
+  ): [LegacySourceInstant_KeyOutput!]! @fdc_generated(from: "LegacySourceInstant", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `LegacyUhidCounter` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  legacyUhidCounter_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [LegacyUhidCounter_Data!]!
+  ): [LegacyUhidCounter_KeyOutput!]! @fdc_generated(from: "LegacyUhidCounter", purpose: INSERT_MULTIPLE)
   """
   ✨ Insert `Notification` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
   """
@@ -350,6 +539,15 @@ extend type Mutation {
     """
     data: [PatientLinkInvitation_Data!]!
   ): [PatientLinkInvitation_KeyOutput!]! @fdc_generated(from: "PatientLinkInvitation", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `PatientReportedProfile` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  patientReportedProfile_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [PatientReportedProfile_Data!]!
+  ): [PatientReportedProfile_KeyOutput!]! @fdc_generated(from: "PatientReportedProfile", purpose: INSERT_MULTIPLE)
   """
   ✨ Insert `ScheduleException` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
   """
@@ -413,6 +611,24 @@ extend type Mutation {
     """
     data: AppointmentEvent_Data!
   ): AppointmentEvent_KeyOutput! @fdc_generated(from: "AppointmentEvent", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `AppointmentLegacySlot` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `AppointmentLegacySlot`.
+  """
+  appointmentLegacySlot_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: AppointmentLegacySlot_Data!
+  ): AppointmentLegacySlot_KeyOutput! @fdc_generated(from: "AppointmentLegacySlot", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `AppointmentPrivateDetails` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `AppointmentPrivateDetails`.
+  """
+  appointmentPrivateDetails_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: AppointmentPrivateDetails_Data!
+  ): AppointmentPrivateDetails_KeyOutput! @fdc_generated(from: "AppointmentPrivateDetails", purpose: UPSERT_SINGLE)
   """
   ✨ Insert or update a single `AuditLog` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `AuditLog`.
   """
@@ -486,6 +702,15 @@ extend type Mutation {
     data: DoctorSchedule_Data!
   ): DoctorSchedule_KeyOutput! @fdc_generated(from: "DoctorSchedule", purpose: UPSERT_SINGLE)
   """
+  ✨ Insert or update a single `DoctorScheduleState` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `DoctorScheduleState`.
+  """
+  doctorScheduleState_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: DoctorScheduleState_Data!
+  ): DoctorScheduleState_KeyOutput! @fdc_generated(from: "DoctorScheduleState", purpose: UPSERT_SINGLE)
+  """
   ✨ Insert or update a single `DoctorService` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `DoctorService`.
   """
   doctorService_upsert(
@@ -503,6 +728,69 @@ extend type Mutation {
     """
     data: ExceptionWindow_Data!
   ): ExceptionWindow_KeyOutput! @fdc_generated(from: "ExceptionWindow", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `LegacyAuditRecord` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `LegacyAuditRecord`.
+  """
+  legacyAuditRecord_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: LegacyAuditRecord_Data!
+  ): LegacyAuditRecord_KeyOutput! @fdc_generated(from: "LegacyAuditRecord", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `LegacyBookingRequest` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `LegacyBookingRequest`.
+  """
+  legacyBookingRequest_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: LegacyBookingRequest_Data!
+  ): LegacyBookingRequest_KeyOutput! @fdc_generated(from: "LegacyBookingRequest", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `LegacyMedicalDocument` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `LegacyMedicalDocument`.
+  """
+  legacyMedicalDocument_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: LegacyMedicalDocument_Data!
+  ): LegacyMedicalDocument_KeyOutput! @fdc_generated(from: "LegacyMedicalDocument", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `LegacyMedicalHistory` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `LegacyMedicalHistory`.
+  """
+  legacyMedicalHistory_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: LegacyMedicalHistory_Data!
+  ): LegacyMedicalHistory_KeyOutput! @fdc_generated(from: "LegacyMedicalHistory", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `LegacyPatientFeedback` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `LegacyPatientFeedback`.
+  """
+  legacyPatientFeedback_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: LegacyPatientFeedback_Data!
+  ): LegacyPatientFeedback_KeyOutput! @fdc_generated(from: "LegacyPatientFeedback", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `LegacySourceInstant` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `LegacySourceInstant`.
+  """
+  legacySourceInstant_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: LegacySourceInstant_Data!
+  ): LegacySourceInstant_KeyOutput! @fdc_generated(from: "LegacySourceInstant", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `LegacyUhidCounter` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `LegacyUhidCounter`.
+  """
+  legacyUhidCounter_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: LegacyUhidCounter_Data!
+  ): LegacyUhidCounter_KeyOutput! @fdc_generated(from: "LegacyUhidCounter", purpose: UPSERT_SINGLE)
   """
   ✨ Insert or update a single `Notification` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Notification`.
   """
@@ -548,6 +836,15 @@ extend type Mutation {
     """
     data: PatientLinkInvitation_Data!
   ): PatientLinkInvitation_KeyOutput! @fdc_generated(from: "PatientLinkInvitation", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `PatientReportedProfile` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `PatientReportedProfile`.
+  """
+  patientReportedProfile_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: PatientReportedProfile_Data!
+  ): PatientReportedProfile_KeyOutput! @fdc_generated(from: "PatientReportedProfile", purpose: UPSERT_SINGLE)
   """
   ✨ Insert or update a single `ScheduleException` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `ScheduleException`.
   """
@@ -611,6 +908,24 @@ extend type Mutation {
     """
     data: [AppointmentEvent_Data!]!
   ): [AppointmentEvent_KeyOutput!]! @fdc_generated(from: "AppointmentEvent", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `AppointmentLegacySlot` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `AppointmentLegacySlot`.
+  """
+  appointmentLegacySlot_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [AppointmentLegacySlot_Data!]!
+  ): [AppointmentLegacySlot_KeyOutput!]! @fdc_generated(from: "AppointmentLegacySlot", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `AppointmentPrivateDetails` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `AppointmentPrivateDetails`.
+  """
+  appointmentPrivateDetails_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [AppointmentPrivateDetails_Data!]!
+  ): [AppointmentPrivateDetails_KeyOutput!]! @fdc_generated(from: "AppointmentPrivateDetails", purpose: UPSERT_MULTIPLE)
   """
   ✨ Insert or update `AuditLog` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `AuditLog`.
   """
@@ -684,6 +999,15 @@ extend type Mutation {
     data: [DoctorSchedule_Data!]!
   ): [DoctorSchedule_KeyOutput!]! @fdc_generated(from: "DoctorSchedule", purpose: UPSERT_MULTIPLE)
   """
+  ✨ Insert or update `DoctorScheduleState` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `DoctorScheduleState`.
+  """
+  doctorScheduleState_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [DoctorScheduleState_Data!]!
+  ): [DoctorScheduleState_KeyOutput!]! @fdc_generated(from: "DoctorScheduleState", purpose: UPSERT_MULTIPLE)
+  """
   ✨ Insert or update `DoctorService` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `DoctorService`.
   """
   doctorService_upsertMany(
@@ -701,6 +1025,69 @@ extend type Mutation {
     """
     data: [ExceptionWindow_Data!]!
   ): [ExceptionWindow_KeyOutput!]! @fdc_generated(from: "ExceptionWindow", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `LegacyAuditRecord` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `LegacyAuditRecord`.
+  """
+  legacyAuditRecord_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [LegacyAuditRecord_Data!]!
+  ): [LegacyAuditRecord_KeyOutput!]! @fdc_generated(from: "LegacyAuditRecord", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `LegacyBookingRequest` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `LegacyBookingRequest`.
+  """
+  legacyBookingRequest_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [LegacyBookingRequest_Data!]!
+  ): [LegacyBookingRequest_KeyOutput!]! @fdc_generated(from: "LegacyBookingRequest", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `LegacyMedicalDocument` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `LegacyMedicalDocument`.
+  """
+  legacyMedicalDocument_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [LegacyMedicalDocument_Data!]!
+  ): [LegacyMedicalDocument_KeyOutput!]! @fdc_generated(from: "LegacyMedicalDocument", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `LegacyMedicalHistory` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `LegacyMedicalHistory`.
+  """
+  legacyMedicalHistory_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [LegacyMedicalHistory_Data!]!
+  ): [LegacyMedicalHistory_KeyOutput!]! @fdc_generated(from: "LegacyMedicalHistory", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `LegacyPatientFeedback` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `LegacyPatientFeedback`.
+  """
+  legacyPatientFeedback_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [LegacyPatientFeedback_Data!]!
+  ): [LegacyPatientFeedback_KeyOutput!]! @fdc_generated(from: "LegacyPatientFeedback", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `LegacySourceInstant` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `LegacySourceInstant`.
+  """
+  legacySourceInstant_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [LegacySourceInstant_Data!]!
+  ): [LegacySourceInstant_KeyOutput!]! @fdc_generated(from: "LegacySourceInstant", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `LegacyUhidCounter` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `LegacyUhidCounter`.
+  """
+  legacyUhidCounter_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [LegacyUhidCounter_Data!]!
+  ): [LegacyUhidCounter_KeyOutput!]! @fdc_generated(from: "LegacyUhidCounter", purpose: UPSERT_MULTIPLE)
   """
   ✨ Insert or update `Notification` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Notification`.
   """
@@ -746,6 +1133,15 @@ extend type Mutation {
     """
     data: [PatientLinkInvitation_Data!]!
   ): [PatientLinkInvitation_KeyOutput!]! @fdc_generated(from: "PatientLinkInvitation", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `PatientReportedProfile` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `PatientReportedProfile`.
+  """
+  patientReportedProfile_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [PatientReportedProfile_Data!]!
+  ): [PatientReportedProfile_KeyOutput!]! @fdc_generated(from: "PatientReportedProfile", purpose: UPSERT_MULTIPLE)
   """
   ✨ Insert or update `ScheduleException` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `ScheduleException`.
   """
@@ -839,6 +1235,44 @@ extend type Mutation {
     """
     data: AppointmentEvent_Data!
   ): AppointmentEvent_KeyOutput @fdc_generated(from: "AppointmentEvent", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `AppointmentLegacySlot` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `AppointmentLegacySlot` or `null` if not found.
+  """
+  appointmentLegacySlot_update(
+    """
+    The key used to identify the object.
+    """
+    key: AppointmentLegacySlot_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: AppointmentLegacySlot_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: AppointmentLegacySlot_Data!
+  ): AppointmentLegacySlot_KeyOutput @fdc_generated(from: "AppointmentLegacySlot", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `AppointmentPrivateDetails` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `AppointmentPrivateDetails` or `null` if not found.
+  """
+  appointmentPrivateDetails_update(
+    """
+    The key used to identify the object.
+    """
+    key: AppointmentPrivateDetails_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: AppointmentPrivateDetails_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: AppointmentPrivateDetails_Data!
+  ): AppointmentPrivateDetails_KeyOutput @fdc_generated(from: "AppointmentPrivateDetails", purpose: UPDATE_SINGLE)
   """
   ✨ Update a single `AuditLog` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `AuditLog` or `null` if not found.
   """
@@ -1037,6 +1471,25 @@ extend type Mutation {
     data: DoctorSchedule_Data!
   ): DoctorSchedule_KeyOutput @fdc_generated(from: "DoctorSchedule", purpose: UPDATE_SINGLE)
   """
+  ✨ Update a single `DoctorScheduleState` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `DoctorScheduleState` or `null` if not found.
+  """
+  doctorScheduleState_update(
+    """
+    The key used to identify the object.
+    """
+    key: DoctorScheduleState_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: DoctorScheduleState_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: DoctorScheduleState_Data!
+  ): DoctorScheduleState_KeyOutput @fdc_generated(from: "DoctorScheduleState", purpose: UPDATE_SINGLE)
+  """
   ✨ Update a single `DoctorService` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `DoctorService` or `null` if not found.
   """
   doctorService_update(
@@ -1079,6 +1532,169 @@ extend type Mutation {
     """
     data: ExceptionWindow_Data!
   ): ExceptionWindow_KeyOutput @fdc_generated(from: "ExceptionWindow", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `LegacyAuditRecord` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `LegacyAuditRecord` or `null` if not found.
+  """
+  legacyAuditRecord_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: LegacyAuditRecord_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: LegacyAuditRecord_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: LegacyAuditRecord_Data!
+  ): LegacyAuditRecord_KeyOutput @fdc_generated(from: "LegacyAuditRecord", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `LegacyBookingRequest` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `LegacyBookingRequest` or `null` if not found.
+  """
+  legacyBookingRequest_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: LegacyBookingRequest_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: LegacyBookingRequest_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: LegacyBookingRequest_Data!
+  ): LegacyBookingRequest_KeyOutput @fdc_generated(from: "LegacyBookingRequest", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `LegacyMedicalDocument` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `LegacyMedicalDocument` or `null` if not found.
+  """
+  legacyMedicalDocument_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: LegacyMedicalDocument_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: LegacyMedicalDocument_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: LegacyMedicalDocument_Data!
+  ): LegacyMedicalDocument_KeyOutput @fdc_generated(from: "LegacyMedicalDocument", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `LegacyMedicalHistory` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `LegacyMedicalHistory` or `null` if not found.
+  """
+  legacyMedicalHistory_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: LegacyMedicalHistory_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: LegacyMedicalHistory_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: LegacyMedicalHistory_Data!
+  ): LegacyMedicalHistory_KeyOutput @fdc_generated(from: "LegacyMedicalHistory", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `LegacyPatientFeedback` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `LegacyPatientFeedback` or `null` if not found.
+  """
+  legacyPatientFeedback_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: LegacyPatientFeedback_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: LegacyPatientFeedback_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: LegacyPatientFeedback_Data!
+  ): LegacyPatientFeedback_KeyOutput @fdc_generated(from: "LegacyPatientFeedback", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `LegacySourceInstant` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `LegacySourceInstant` or `null` if not found.
+  """
+  legacySourceInstant_update(
+    """
+    The key used to identify the object.
+    """
+    key: LegacySourceInstant_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: LegacySourceInstant_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: LegacySourceInstant_Data!
+  ): LegacySourceInstant_KeyOutput @fdc_generated(from: "LegacySourceInstant", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `LegacyUhidCounter` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `LegacyUhidCounter` or `null` if not found.
+  """
+  legacyUhidCounter_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: LegacyUhidCounter_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: LegacyUhidCounter_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: LegacyUhidCounter_Data!
+  ): LegacyUhidCounter_KeyOutput @fdc_generated(from: "LegacyUhidCounter", purpose: UPDATE_SINGLE)
   """
   ✨ Update a single `Notification` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `Notification` or `null` if not found.
   """
@@ -1184,6 +1800,25 @@ extend type Mutation {
     """
     data: PatientLinkInvitation_Data!
   ): PatientLinkInvitation_KeyOutput @fdc_generated(from: "PatientLinkInvitation", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `PatientReportedProfile` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `PatientReportedProfile` or `null` if not found.
+  """
+  patientReportedProfile_update(
+    """
+    The key used to identify the object.
+    """
+    key: PatientReportedProfile_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PatientReportedProfile_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: PatientReportedProfile_Data!
+  ): PatientReportedProfile_KeyOutput @fdc_generated(from: "PatientReportedProfile", purpose: UPDATE_SINGLE)
   """
   ✨ Update a single `ScheduleException` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `ScheduleException` or `null` if not found.
   """
@@ -1348,6 +1983,44 @@ extend type Mutation {
     data: AppointmentEvent_Data!
   ): Int! @fdc_generated(from: "AppointmentEvent", purpose: UPDATE_MULTIPLE)
   """
+  ✨ Update `AppointmentLegacySlot` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  appointmentLegacySlot_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: AppointmentLegacySlot_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: AppointmentLegacySlot_Data!
+  ): Int! @fdc_generated(from: "AppointmentLegacySlot", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `AppointmentPrivateDetails` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  appointmentPrivateDetails_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: AppointmentPrivateDetails_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: AppointmentPrivateDetails_Data!
+  ): Int! @fdc_generated(from: "AppointmentPrivateDetails", purpose: UPDATE_MULTIPLE)
+  """
   ✨ Update `AuditLog` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
   """
   auditLog_updateMany(
@@ -1500,6 +2173,25 @@ extend type Mutation {
     data: DoctorSchedule_Data!
   ): Int! @fdc_generated(from: "DoctorSchedule", purpose: UPDATE_MULTIPLE)
   """
+  ✨ Update `DoctorScheduleState` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  doctorScheduleState_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: DoctorScheduleState_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: DoctorScheduleState_Data!
+  ): Int! @fdc_generated(from: "DoctorScheduleState", purpose: UPDATE_MULTIPLE)
+  """
   ✨ Update `DoctorService` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
   """
   doctorService_updateMany(
@@ -1537,6 +2229,139 @@ extend type Mutation {
     """
     data: ExceptionWindow_Data!
   ): Int! @fdc_generated(from: "ExceptionWindow", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `LegacyAuditRecord` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  legacyAuditRecord_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: LegacyAuditRecord_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: LegacyAuditRecord_Data!
+  ): Int! @fdc_generated(from: "LegacyAuditRecord", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `LegacyBookingRequest` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  legacyBookingRequest_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: LegacyBookingRequest_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: LegacyBookingRequest_Data!
+  ): Int! @fdc_generated(from: "LegacyBookingRequest", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `LegacyMedicalDocument` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  legacyMedicalDocument_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: LegacyMedicalDocument_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: LegacyMedicalDocument_Data!
+  ): Int! @fdc_generated(from: "LegacyMedicalDocument", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `LegacyMedicalHistory` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  legacyMedicalHistory_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: LegacyMedicalHistory_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: LegacyMedicalHistory_Data!
+  ): Int! @fdc_generated(from: "LegacyMedicalHistory", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `LegacyPatientFeedback` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  legacyPatientFeedback_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: LegacyPatientFeedback_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: LegacyPatientFeedback_Data!
+  ): Int! @fdc_generated(from: "LegacyPatientFeedback", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `LegacySourceInstant` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  legacySourceInstant_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: LegacySourceInstant_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: LegacySourceInstant_Data!
+  ): Int! @fdc_generated(from: "LegacySourceInstant", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `LegacyUhidCounter` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  legacyUhidCounter_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: LegacyUhidCounter_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: LegacyUhidCounter_Data!
+  ): Int! @fdc_generated(from: "LegacyUhidCounter", purpose: UPDATE_MULTIPLE)
   """
   ✨ Update `Notification` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
   """
@@ -1632,6 +2457,25 @@ extend type Mutation {
     """
     data: PatientLinkInvitation_Data!
   ): Int! @fdc_generated(from: "PatientLinkInvitation", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `PatientReportedProfile` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  patientReportedProfile_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: PatientReportedProfile_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: PatientReportedProfile_Data!
+  ): Int! @fdc_generated(from: "PatientReportedProfile", purpose: UPDATE_MULTIPLE)
   """
   ✨ Update `ScheduleException` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
   """
@@ -1765,6 +2609,34 @@ extend type Mutation {
     """
     first: AppointmentEvent_FirstRow
   ): AppointmentEvent_KeyOutput @fdc_generated(from: "AppointmentEvent", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `AppointmentLegacySlot` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  appointmentLegacySlot_delete(
+    """
+    The key used to identify the object.
+    """
+    key: AppointmentLegacySlot_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: AppointmentLegacySlot_FirstRow
+  ): AppointmentLegacySlot_KeyOutput @fdc_generated(from: "AppointmentLegacySlot", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `AppointmentPrivateDetails` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  appointmentPrivateDetails_delete(
+    """
+    The key used to identify the object.
+    """
+    key: AppointmentPrivateDetails_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: AppointmentPrivateDetails_FirstRow
+  ): AppointmentPrivateDetails_KeyOutput @fdc_generated(from: "AppointmentPrivateDetails", purpose: DELETE_SINGLE)
   """
   ✨ Delete a single `AuditLog` based on `id`, `key` or `first` and return its key (or `null` if not found).
   """
@@ -1923,6 +2795,20 @@ extend type Mutation {
     first: DoctorSchedule_FirstRow
   ): DoctorSchedule_KeyOutput @fdc_generated(from: "DoctorSchedule", purpose: DELETE_SINGLE)
   """
+  ✨ Delete a single `DoctorScheduleState` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  doctorScheduleState_delete(
+    """
+    The key used to identify the object.
+    """
+    key: DoctorScheduleState_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: DoctorScheduleState_FirstRow
+  ): DoctorScheduleState_KeyOutput @fdc_generated(from: "DoctorScheduleState", purpose: DELETE_SINGLE)
+  """
   ✨ Delete a single `DoctorService` based on `id`, `key` or `first` and return its key (or `null` if not found).
   """
   doctorService_delete(
@@ -1955,6 +2841,134 @@ extend type Mutation {
     """
     first: ExceptionWindow_FirstRow
   ): ExceptionWindow_KeyOutput @fdc_generated(from: "ExceptionWindow", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `LegacyAuditRecord` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  legacyAuditRecord_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: LegacyAuditRecord_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: LegacyAuditRecord_FirstRow
+  ): LegacyAuditRecord_KeyOutput @fdc_generated(from: "LegacyAuditRecord", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `LegacyBookingRequest` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  legacyBookingRequest_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: LegacyBookingRequest_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: LegacyBookingRequest_FirstRow
+  ): LegacyBookingRequest_KeyOutput @fdc_generated(from: "LegacyBookingRequest", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `LegacyMedicalDocument` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  legacyMedicalDocument_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: LegacyMedicalDocument_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: LegacyMedicalDocument_FirstRow
+  ): LegacyMedicalDocument_KeyOutput @fdc_generated(from: "LegacyMedicalDocument", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `LegacyMedicalHistory` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  legacyMedicalHistory_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: LegacyMedicalHistory_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: LegacyMedicalHistory_FirstRow
+  ): LegacyMedicalHistory_KeyOutput @fdc_generated(from: "LegacyMedicalHistory", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `LegacyPatientFeedback` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  legacyPatientFeedback_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: LegacyPatientFeedback_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: LegacyPatientFeedback_FirstRow
+  ): LegacyPatientFeedback_KeyOutput @fdc_generated(from: "LegacyPatientFeedback", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `LegacySourceInstant` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  legacySourceInstant_delete(
+    """
+    The key used to identify the object.
+    """
+    key: LegacySourceInstant_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: LegacySourceInstant_FirstRow
+  ): LegacySourceInstant_KeyOutput @fdc_generated(from: "LegacySourceInstant", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `LegacyUhidCounter` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  legacyUhidCounter_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: LegacyUhidCounter_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: LegacyUhidCounter_FirstRow
+  ): LegacyUhidCounter_KeyOutput @fdc_generated(from: "LegacyUhidCounter", purpose: DELETE_SINGLE)
   """
   ✨ Delete a single `Notification` based on `id`, `key` or `first` and return its key (or `null` if not found).
   """
@@ -2035,6 +3049,20 @@ extend type Mutation {
     """
     first: PatientLinkInvitation_FirstRow
   ): PatientLinkInvitation_KeyOutput @fdc_generated(from: "PatientLinkInvitation", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `PatientReportedProfile` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  patientReportedProfile_delete(
+    """
+    The key used to identify the object.
+    """
+    key: PatientReportedProfile_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PatientReportedProfile_FirstRow
+  ): PatientReportedProfile_KeyOutput @fdc_generated(from: "PatientReportedProfile", purpose: DELETE_SINGLE)
   """
   ✨ Delete a single `ScheduleException` based on `id`, `key` or `first` and return its key (or `null` if not found).
   """
@@ -2164,6 +3192,34 @@ extend type Mutation {
     all: Boolean = false
   ): Int! @fdc_generated(from: "AppointmentEvent", purpose: DELETE_MULTIPLE)
   """
+  ✨ Delete `AppointmentLegacySlot` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  appointmentLegacySlot_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: AppointmentLegacySlot_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "AppointmentLegacySlot", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `AppointmentPrivateDetails` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  appointmentPrivateDetails_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: AppointmentPrivateDetails_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "AppointmentPrivateDetails", purpose: DELETE_MULTIPLE)
+  """
   ✨ Delete `AuditLog` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
   """
   auditLog_deleteMany(
@@ -2276,6 +3332,20 @@ extend type Mutation {
     all: Boolean = false
   ): Int! @fdc_generated(from: "DoctorSchedule", purpose: DELETE_MULTIPLE)
   """
+  ✨ Delete `DoctorScheduleState` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  doctorScheduleState_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: DoctorScheduleState_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "DoctorScheduleState", purpose: DELETE_MULTIPLE)
+  """
   ✨ Delete `DoctorService` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
   """
   doctorService_deleteMany(
@@ -2303,6 +3373,104 @@ extend type Mutation {
     """
     all: Boolean = false
   ): Int! @fdc_generated(from: "ExceptionWindow", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `LegacyAuditRecord` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  legacyAuditRecord_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: LegacyAuditRecord_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "LegacyAuditRecord", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `LegacyBookingRequest` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  legacyBookingRequest_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: LegacyBookingRequest_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "LegacyBookingRequest", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `LegacyMedicalDocument` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  legacyMedicalDocument_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: LegacyMedicalDocument_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "LegacyMedicalDocument", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `LegacyMedicalHistory` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  legacyMedicalHistory_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: LegacyMedicalHistory_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "LegacyMedicalHistory", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `LegacyPatientFeedback` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  legacyPatientFeedback_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: LegacyPatientFeedback_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "LegacyPatientFeedback", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `LegacySourceInstant` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  legacySourceInstant_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: LegacySourceInstant_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "LegacySourceInstant", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `LegacyUhidCounter` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  legacyUhidCounter_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: LegacyUhidCounter_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "LegacyUhidCounter", purpose: DELETE_MULTIPLE)
   """
   ✨ Delete `Notification` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
   """
@@ -2373,6 +3541,20 @@ extend type Mutation {
     """
     all: Boolean = false
   ): Int! @fdc_generated(from: "PatientLinkInvitation", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `PatientReportedProfile` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  patientReportedProfile_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: PatientReportedProfile_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "PatientReportedProfile", purpose: DELETE_MULTIPLE)
   """
   ✨ Delete `ScheduleException` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
   """
