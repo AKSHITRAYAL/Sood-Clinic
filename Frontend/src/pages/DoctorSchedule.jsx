@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { signOut } from 'firebase/auth';
+import { useStaffAccess } from '../lib/staffSessionContext';
 import { collection, doc, getDoc, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { Link, Navigate } from 'react-router-dom';
 import { publicUrl } from '../lib/portals';
@@ -20,9 +21,8 @@ const formatDate = (date, options) => date.toLocaleDateString('en-IN', { timeZon
 const formatTime = (value) => { const date = toDate(value); return date ? date.toLocaleTimeString('en-IN', { timeZone: IST, hour: 'numeric', minute: '2-digit' }) : 'Time unavailable'; };
 
 const DoctorSchedule = () => {
-  const [user, setUser] = useState(undefined);
-  const [allowed, setAllowed] = useState(false);
-  const [doctorId, setDoctorId] = useState('');
+  const { user, doctorId, state } = useStaffAccess('doctor');
+  const allowed = state === 'password-change' ? state : state === 'allowed';
   const [appointments, setAppointments] = useState([]);
   const [weekly, setWeekly] = useState(defaultWeekly());
   const [weekStart, setWeekStart] = useState(startOfIstWeekMonday());
@@ -32,13 +32,6 @@ const DoctorSchedule = () => {
   const [closeReview, setCloseReview] = useState(null);
   const [dialog, setDialog] = useState(null);
 
-  useEffect(() => onAuthStateChanged(auth, async (next) => {
-    if (!next) { setUser(null); return; }
-    const token = await next.getIdTokenResult();
-    setUser(next);
-    setDoctorId(token.claims.doctorId || '');
-    setAllowed(token.claims.forcePasswordChange === true ? 'password-change' : token.claims.role === 'doctor' && Boolean(token.claims.doctorId));
-  }), []);
 
   useEffect(() => {
     if (allowed !== true || !doctorId) return undefined;

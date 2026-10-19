@@ -1,10 +1,20 @@
+import { useEffect, useState } from 'react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { CLINIC_EMAIL, CLINIC_PHONE_DISPLAY, CLINIC_PHONE_TEL } from '../lib/clinicContact';
+import { getClinicContact } from '../services/clinicProfileService';
 
-const clinicAddress = 'House No. 398, Sector 10, Panchkula, Haryana 134109, India';
-
-const Contact = () => (
+const Contact = () => {
+  const [contact, setContact] = useState(null);
+  const [error, setError] = useState('');
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setError('');
+    getClinicContact().then((result) => { if (!cancelled) setContact(result); })
+      .catch((failure) => { if (!cancelled) setError(failure.message); });
+    return () => { cancelled = true; };
+  }, [attempt]);
+  return (
   <>
     <Navbar />
     <main className="container mx-auto max-w-6xl px-5 py-12">
@@ -12,10 +22,14 @@ const Contact = () => (
       <h1 className="mt-3 text-4xl font-bold">Contact &amp; clinic information</h1>
       <div className="mt-8 grid gap-8 md:grid-cols-2">
         <section className="rounded-2xl border bg-white p-7 shadow-sm">
-          <h2 className="text-2xl font-semibold">Sood Clinic</h2>
-          <p className="mt-4 leading-7">{clinicAddress}</p>
-          {CLINIC_PHONE_TEL && <><h3 className="mt-7 text-lg font-semibold">Phone</h3><a className="mt-2 inline-flex text-lg font-semibold text-[#176dcc] hover:text-[#0f5bad]" href={`tel:${CLINIC_PHONE_TEL}`}>{CLINIC_PHONE_DISPLAY}</a></>}
-          {CLINIC_EMAIL && <><h3 className="mt-7 text-lg font-semibold">Email</h3><a className="mt-2 inline-flex text-lg font-semibold text-[#176dcc] hover:text-[#0f5bad]" href={`mailto:${CLINIC_EMAIL}`}>{CLINIC_EMAIL}</a></>}
+          <h2 className="text-2xl font-semibold">{contact?.name || 'Clinic contact'}</h2>
+          {!contact && !error && <p className="mt-4" role="status">Loading clinic details…</p>}
+          {error && <div className="mt-4"><p role="alert">{error}</p><button type="button" className="mt-3 underline" onClick={() => setAttempt((value) => value + 1)}>Try again</button></div>}
+          {contact && <>
+            <p className="mt-4 leading-7">{contact.address}</p>
+            <h3 className="mt-7 text-lg font-semibold">Phone</h3><a className="mt-2 inline-flex text-lg font-semibold text-[#176dcc] hover:text-[#0f5bad]" href={`tel:${contact.phone}`}>{contact.phone}</a>
+            <h3 className="mt-7 text-lg font-semibold">Email</h3><a className="mt-2 inline-flex text-lg font-semibold text-[#176dcc] hover:text-[#0f5bad]" href={`mailto:${contact.email}`}>{contact.email}</a>
+          </>}
           <h3 className="mt-7 text-lg font-semibold">Consultation hours</h3>
           <p className="mt-2">Monday–Saturday</p>
           <p>8:00 AM–10:00 AM · 5:00 PM–6:30 PM</p>
@@ -30,5 +44,6 @@ const Contact = () => (
     <Footer />
   </>
 );
+};
 
 export default Contact;

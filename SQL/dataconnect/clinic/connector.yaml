@@ -1,0 +1,5 @@
+connectorId: clinic
+generate:
+  javascriptSdk:
+    outputDir: ../../generated/clinic
+    package: '@clinic/sql-client'

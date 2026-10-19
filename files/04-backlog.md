@@ -1,5 +1,7 @@
 # 04 — Backlog (phased, with dependencies and acceptance criteria)
 
+Active SQL backend work is tracked in `SQL/PLAN.md` and the current `SQL/phase 4.md`, with security handoff in `SQL/phase 3.md` (2026-10-19). Follow that ordered plan for SQL tasks; unchecked Firestore-era boxes here are not evidence of the SQL implementation's completion.
+
 How to use: pick the lowest-numbered unblocked task, do it, tick the box, fix any doc that changed. One task = one PR. Finding IDs refer to `02-audit-findings.md`; design references (`03 §n`) refer to `03-target-architecture.md`.
 
 **Definition of Done (every task)**

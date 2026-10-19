@@ -1,0 +1,66 @@
+# IAM only. Callable validates current Firebase Auth before invoking these.
+query ListStaffIdentityPage($afterUid: String!, $limit: Int!) @auth(level: NO_ACCESS) {
+  staffProfiles(where: {userId: {gt: $afterUid}}, orderBy: [{userId: ASC}], limit: $limit) {
+    user { id displayName active }
+    email role doctorLegacyId sessionValidAfterSeconds active requiresPasswordChange
+  }
+}
+
+mutation BeginStaffAccessChange($requestId: UUID!, $actorUid: String!, $actorRole: String!, $action: String!, $targetUid: String!)
+@auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: $actorUid, requestId: $requestId}) @check(expr: "this == null", message: "REQUEST_ALREADY_APPLIED") { operation }
+  }
+  staffAccessLock_insert(data: {id: "staff-access", requestId: $requestId, actorUid: $actorUid})
+  auditLog_insert(data: {id: $requestId, actorUid: $actorUid, actorRole: $actorRole, action: $action, resourceType: "staff_account", resourceId: $targetUid})
+}
+
+mutation FinishStaffAccessChange(
+  $requestId: UUID!, $actorUid: String!, $actorRole: String!, $action: String!,
+  $uid: String!, $name: String!, $email: String!, $role: String!, $doctorLegacyId: String,
+  $accountActive: Boolean!, $active: Boolean!, $requiresPasswordChange: Boolean!, $sessionValidAfterSeconds: Int64!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    staffAccessLock(key: {id: "staff-access"}) @check(expr: "this != null && this.actorUid == vars.actorUid && this.requestId == vars.requestId", message: "STAFF_LOCK_NOT_OWNED") { actorUid requestId }
+  }
+  user_upsert(data: {id: $uid, displayName: $name, active: $accountActive, updatedAt_expr: "request.time"})
+  staffProfile_upsert(data: {userId: $uid, email: $email, role: $role, doctorLegacyId: $doctorLegacyId, active: $active, requiresPasswordChange: $requiresPasswordChange, sessionValidAfterSeconds: $sessionValidAfterSeconds, updatedAt_expr: "request.time"})
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: $action, resourceType: "staff_account", resourceId: $uid})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: "staff_access_change"})
+  staffAccessLock_delete(key: {id: "staff-access"})
+}
+
+mutation AbortStaffAccessChange($requestId: UUID!, $actorUid: String!, $actorRole: String!, $targetUid: String!)
+@auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    staffAccessLock(key: {id: "staff-access"}) @check(expr: "this != null && this.actorUid == vars.actorUid && this.requestId == vars.requestId", message: "STAFF_LOCK_NOT_OWNED") { actorUid requestId }
+  }
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: "staff_change_rejected", resourceType: "staff_account", resourceId: $targetUid})
+  staffAccessLock_delete(key: {id: "staff-access"})
+}
+
+query ListStaffAudit($limit: Int!) @auth(level: NO_ACCESS) {
+  auditLogs(orderBy: [{occurredAt: DESC}, {id: DESC}], limit: $limit) { id actorUid actorRole action resourceType resourceId occurredAt }
+}
+
+query InspectStaffAccessLock @auth(level: NO_ACCESS) {
+  staffAccessLock(key: {id: "staff-access"}) { requestId actorUid createdAt }
+}
+
+query InspectStaffAccessChange($requestId: UUID!) @auth(level: NO_ACCESS) {
+  auditLog(key: {id: $requestId}) { id actorUid actorRole action resourceType resourceId occurredAt }
+}
+
+mutation UpsertStaffIdentity(
+  $uid: String!, $name: String!, $email: String!, $role: String!, $doctorLegacyId: String,
+  $accountActive: Boolean!, $active: Boolean!, $requiresPasswordChange: Boolean!,
+  $sessionValidAfterSeconds: Int64!, $actorUid: String!
+) @auth(level: NO_ACCESS) @transaction {
+  user_upsert(data: {id: $uid, displayName: $name, active: $accountActive, updatedAt_expr: "request.time"})
+  staffProfile_upsert(data: {
+    userId: $uid, email: $email, role: $role, doctorLegacyId: $doctorLegacyId,
+    active: $active, requiresPasswordChange: $requiresPasswordChange,
+    sessionValidAfterSeconds: $sessionValidAfterSeconds, updatedAt_expr: "request.time"
+  })
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: "admin", action: "staff_identity_reconciled", resourceType: "staff_account", resourceId: $uid})
+}

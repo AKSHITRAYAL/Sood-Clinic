@@ -1,0 +1,12 @@
+{
+  "projectId": "sood-clinic",
+  "serviceId": "ak-sood-clinic-service",
+  "reviewedAt": "2026-10-19",
+  "applied": true,
+  "diffs": [
+    {
+      "sql": "ALTER TABLE \"public\".\"clinic_staff_profiles\" ADD COLUMN \"doctor_legacy_id\" text NULL, ADD COLUMN \"email\" text NOT NULL DEFAULT '', ADD COLUMN \"role\" text NOT NULL DEFAULT 'none', ADD COLUMN \"session_valid_after_seconds\" bigint NOT NULL DEFAULT 0::bigint",
+      "description": "Four additive staff projection columns; existing rows receive non-authorizing defaults."
+    }
+  ]
+}

@@ -1,5 +1,17 @@
 # 03 — Target Architecture (source of truth for the design)
 
+SQL migration update (2026-10-19): `SQL/PLAN.md` and `SQL/phase 1.md` govern the new SQL Connect backend. The Firestore model below documents the existing application until each tested module cuts over. Staff authorization remains Firebase custom claims. Do not merge the Firestore scheduler unchanged or switch production storage from this note alone.
+
+Live SQL milestone: see `SQL/phase 2.md` and the current `SQL/phase 3.md`. Contact reads the public profile from SQL. Phase 3 adds four staff projection fields and IAM-only directory operations: a callable verifies current Firebase Auth and reconciles rebuildable staff metadata before returning a bounded directory page. Staff roles remain authoritative in Auth; patient and booking workflows still use Firestore/Functions until their documented cutovers.
+
+P3-07a lifecycle cutover: runtime staff management/password completion now writes SQL metadata/audit rather than Firestore staff profiles. A shared SQL lock serializes Auth changes; pending/completed/incomplete audit events and scoped receipts make failures visible. Auth itself remains the role/credential authority and cannot participate in SQL transactions. See Phase 3's recovery instructions before releasing an uncertain operation's lock. Activity combines SQL events with bounded legacy operational history. Patient/booking and unrelated operational workflows still use their existing Firestore stores.
+
+P3-07b/c is deployed: protected staff routes share a fail-closed session provider; protected callables check live Auth, and doctor appointment/clinical access requires matching ownership. Explicit Firestore FieldValue/Timestamp imports fix the shared helper compatibility issue reproduced by endpoint emulator tests. Direct Firestore signed tokens still retain their expiry boundary; remaining private-data SQL/server cutovers and verified patient linking are not complete. See the Phase 3 log for 82 passing tests and read-only live release checks.
+
+P3-07d foundation: IAM-only patient-link invitations use a hashed, ten-minute, single-use clinic code bound to an explicit patient/account pair after staff identity/guardian verification. The target verified account must accept it; acceptance/revocation and their audits are transactional. The service has no callable/UI yet and does not expand old Firestore access. `SQL/phase 4.md` records source mapping gaps and the next local migration rehearsal; real patient migration remains gated on protected backup/restore decisions.
+
+Phase 4 local tooling: `SQL/migration/` now inventories 25 source categories and validates synthetic source shapes, namespaced new-ID candidates and catalogue dependencies. `npm run sql:rehearse` is fixture-only/count-only and cannot write or read production. Catalogue projections retain a private source envelope but remain explicitly not ready to apply; existing SQL IDs and unmapped fields must be reconciled before imports. No production schema, identity or storage-authority change is introduced by these tools.
+
 This is the design the backlog (`04-backlog.md`) builds toward. It fixes the findings in `02-audit-findings.md`. Where a choice depends on the client, the default is stated and the question is in `07-open-decisions.md`. If you deviate, update this file in the same PR.
 
 ## 1. Principles

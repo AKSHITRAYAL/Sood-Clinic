@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { signOut } from 'firebase/auth';
+import { useStaffAccess } from '../lib/staffSessionContext';
 import { httpsCallable } from 'firebase/functions';
 import { Link, Navigate } from 'react-router-dom';
 import { auth, functions } from '../lib/firebase';
 
 const AdminFeedback = () => {
-  const [access, setAccess] = useState('checking'); const [items, setItems] = useState([]); const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [busy, setBusy] = useState('');
+  const { state: access } = useStaffAccess('admin'); const [items, setItems] = useState([]); const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [busy, setBusy] = useState('');
   const load = useCallback(async () => { setError(''); try { const result = await httpsCallable(functions, 'getFeedbackModerationQueue')(); setItems(result.data.feedback || []); } catch (caught) { setError(caught.message || 'Feedback could not be loaded.'); } }, []);
-  useEffect(() => onAuthStateChanged(auth, async (user) => { if (!user) return setAccess('signed-out'); const token = await user.getIdTokenResult(); setAccess(token.claims.forcePasswordChange ? 'password-change' : token.claims.role === 'admin' ? 'allowed' : 'denied'); }), []);
   useEffect(() => { if (access === 'allowed') load(); }, [access, load]);
   const moderate = async (feedbackId, action) => { setBusy(feedbackId); setError(''); try { const result = await httpsCallable(functions, 'moderatePatientFeedback')({ feedbackId, action }); setItems((current) => current.filter((item) => item.id !== feedbackId)); setNotice(result.data.message); } catch (caught) { setError(caught.message || 'Feedback could not be updated.'); } finally { setBusy(''); } };
   if (access === 'signed-out') return <Navigate to="/staff/login" replace />;

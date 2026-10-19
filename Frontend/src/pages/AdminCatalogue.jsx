@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { signOut } from 'firebase/auth';
+import { useStaffAccess } from '../lib/staffSessionContext';
 import { httpsCallable } from 'firebase/functions';
 import { Link, Navigate } from 'react-router-dom';
 import { auth, functions } from '../lib/firebase';
@@ -8,9 +9,8 @@ const blank = (kind) => kind === 'branch' ? { id: '', name: '', code: '', active
 const title = (kind) => kind === 'branch' ? 'Branch' : kind === 'department' ? 'Department' : 'Doctor';
 
 const AdminCatalogue = () => {
-  const [access, setAccess] = useState('checking'); const [catalog, setCatalog] = useState({ branches: [], departments: [], doctors: [] }); const [kind, setKind] = useState('branch'); const [record, setRecord] = useState(blank('branch')); const [editing, setEditing] = useState(false); const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState(''); const [error, setError] = useState('');
+  const { state: access } = useStaffAccess('admin'); const [catalog, setCatalog] = useState({ branches: [], departments: [], doctors: [] }); const [kind, setKind] = useState('branch'); const [record, setRecord] = useState(blank('branch')); const [editing, setEditing] = useState(false); const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState(''); const [error, setError] = useState('');
   const load = useCallback(async () => { setLoading(true); setError(''); try { const result = await httpsCallable(functions, 'getAdminBookingCatalog')(); setCatalog(result.data); } catch (caught) { setError(caught?.message || 'The booking catalogue could not be loaded.'); } finally { setLoading(false); } }, []);
-  useEffect(() => onAuthStateChanged(auth, async (user) => { if (!user) return setAccess('signed-out'); const token = await user.getIdTokenResult(); setAccess(token.claims.forcePasswordChange ? 'password-change' : token.claims.role === 'admin' ? 'allowed' : 'denied'); }), []);
   useEffect(() => { if (access === 'allowed') load(); }, [access, load]);
   const rows = useMemo(() => catalog[kind === 'branch' ? 'branches' : `${kind}s`] || [], [catalog, kind]);
   const chooseKind = (next) => { setKind(next); setRecord(blank(next)); setEditing(false); setNotice(''); setError(''); };

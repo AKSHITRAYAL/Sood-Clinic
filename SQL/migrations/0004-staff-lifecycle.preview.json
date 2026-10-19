@@ -1,0 +1,12 @@
+{
+  "projectId": "sood-clinic",
+  "serviceId": "ak-sood-clinic-service",
+  "reviewedAt": "2026-10-19",
+  "applied": true,
+  "diffs": [
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_staff_access_locks\" (\"id\" text NOT NULL, \"actor_uid\" text NOT NULL, \"created_at\" timestamptz NOT NULL, \"request_id\" uuid NOT NULL, PRIMARY KEY (\"id\"))",
+      "description": "Add one lock table to serialize Auth staff changes across Functions. No existing data changed."
+    }
+  ]
+}

@@ -1,18 +1,19 @@
 import { useEffect, useState } from 'react';
-import { EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential, sendPasswordResetEmail, signOut, updatePassword, updateProfile } from 'firebase/auth';
+import { sendPasswordResetEmail, signOut, updateProfile } from 'firebase/auth';
+import { useStaffAccess } from '../lib/staffSessionContext';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
-import { httpsCallable } from 'firebase/functions';
-import { auth, functions } from '../lib/firebase';
+import { auth } from '../lib/firebase';
+import { changeStaffPassword } from '../services/staffAccountService';
 import { hasStrongPassword, passwordPolicyMessage } from '../lib/passwordPolicy';
 import PasswordRequirements from '../components/PasswordRequirements';
 
 const AccountSettings = () => {
   const navigate = useNavigate();
-  const [user, setUser] = useState(undefined); const [view, setView] = useState('overview'); const [title, setTitle] = useState(''); const [displayName, setDisplayName] = useState(''); const [currentPassword, setCurrentPassword] = useState(''); const [newPassword, setNewPassword] = useState(''); const [notice, setNotice] = useState(''); const [error, setError] = useState(''); const [mustChangePassword, setMustChangePassword] = useState(false);
-  useEffect(() => onAuthStateChanged(auth, async (next) => { setUser(next || null); const token = next ? await next.getIdTokenResult() : null; setMustChangePassword(token?.claims.forcePasswordChange === true); if (token?.claims.forcePasswordChange === true) setView('security'); const existing = next?.displayName || ''; const match = existing.match(/^(Dr\.|Mr\.|Mrs\.|Ms\.)\s+(.*)$/); setTitle(match?.[1] || ''); setDisplayName(match?.[2] || existing); }), []);
+  const { user, mustChangePassword } = useStaffAccess(); const [view, setView] = useState('overview'); const [title, setTitle] = useState(''); const [displayName, setDisplayName] = useState(''); const [currentPassword, setCurrentPassword] = useState(''); const [newPassword, setNewPassword] = useState(''); const [notice, setNotice] = useState(''); const [error, setError] = useState('');
+  useEffect(() => { if (mustChangePassword) setView('security'); const existing = user?.displayName || ''; const match = existing.match(/^(Dr\.|Mr\.|Mrs\.|Ms\.)\s+(.*)$/); setTitle(match?.[1] || ''); setDisplayName(match?.[2] || existing); }, [user, mustChangePassword]);
   const updateName = async (event) => { event.preventDefault(); setError(''); try { await updateProfile(user, { displayName: `${title ? `${title} ` : ''}${displayName.trim()}`.trim() }); setNotice('Profile updated.'); setView('overview'); } catch { setError('We could not update your profile.'); } };
   const sendReset = async () => { setError(''); try { await sendPasswordResetEmail(auth, user.email); setNotice('A password-reset link was sent to your email.'); setView('overview'); } catch { setError('We could not send a reset link. Please try again.'); } };
-  const changePassword = async (event) => { event.preventDefault(); setError(''); if (!hasStrongPassword(newPassword)) { setError(passwordPolicyMessage); return; } try { await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, currentPassword)); await updatePassword(user, newPassword); if (mustChangePassword) { await httpsCallable(functions, 'completeOwnPasswordChange')(); const token = await auth.currentUser.getIdTokenResult(true); const destination = { admin: '/staff/admin', doctor: '/staff/doctor', manager: '/staff/manager' }[token.claims.role] || '/staff'; setMustChangePassword(false); navigate(destination, { replace: true }); return; } setCurrentPassword(''); setNewPassword(''); setNotice('Password changed.'); setView('overview'); } catch { setError('Check your current password and try again.'); } };
+  const changePassword = async (event) => { event.preventDefault(); setError(''); if (!hasStrongPassword(newPassword)) { setError(passwordPolicyMessage); return; } try { await changeStaffPassword(user, currentPassword, newPassword, mustChangePassword); setCurrentPassword(''); setNewPassword(''); if (mustChangePassword) { navigate('/staff/login', { replace: true, state: { passwordChanged: true } }); return; } setNotice('Password changed.'); setView('overview'); } catch (failure) { setError(failure.message); } };
   if (user === undefined) return <main className="staff-shell"><p className="workspace-status">Loading…</p></main>;
   if (!user) return <Navigate to="/staff/login" replace />;
   const back = '/staff';

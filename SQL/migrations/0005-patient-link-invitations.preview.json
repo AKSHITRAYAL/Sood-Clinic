@@ -1,0 +1,24 @@
+{
+  "projectId": "sood-clinic",
+  "serviceId": "ak-sood-clinic-service",
+  "reviewedAt": "2026-10-19",
+  "applied": true,
+  "diffs": [
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_patient_link_invitations\" (\"patient_id\" uuid NOT NULL, \"user_id\" text NOT NULL, \"created_at\" timestamptz NOT NULL, \"evidence\" text NOT NULL, \"expires_at\" timestamptz NOT NULL, \"relationship\" text NOT NULL, \"token_hash\" character varying(64) NOT NULL, \"verified_by\" text NOT NULL, PRIMARY KEY (\"patient_id\", \"user_id\"), CONSTRAINT \"clinic_patient_link_invitations_patient_id_fkey\" FOREIGN KEY (\"patient_id\") REFERENCES \"public\".\"clinic_patients\" (\"id\") ON DELETE CASCADE, CONSTRAINT \"clinic_patient_link_invitations_user_id_fkey\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"clinic_users\" (\"id\") ON DELETE CASCADE)",
+      "description": "create \"clinic_patient_link_invitations\" table"
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_patient_link_invitations_patientId_idx\" ON \"public\".\"clinic_patient_link_invitations\" (\"patient_id\")",
+      "description": "create index \"clinic_patient_link_invitations_patientId_idx\" to table: \"clinic_patient_link_invitations\""
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_patient_link_invitations_userId_idx\" ON \"public\".\"clinic_patient_link_invitations\" (\"user_id\")",
+      "description": "create index \"clinic_patient_link_invitations_userId_idx\" to table: \"clinic_patient_link_invitations\""
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX \"clinic_patient_link_invitations_tokenHash_uidx\" ON \"public\".\"clinic_patient_link_invitations\" (\"token_hash\")",
+      "description": "create index \"clinic_patient_link_invitations_tokenHash_uidx\" to table: \"clinic_patient_link_invitations\""
+    }
+  ]
+}

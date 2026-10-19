@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { signOut } from 'firebase/auth';
+import { useStaffAccess } from '../lib/staffSessionContext';
 import { httpsCallable } from 'firebase/functions';
 import { Link, Navigate } from 'react-router-dom';
 import { auth, functions } from '../lib/firebase';
@@ -7,7 +8,7 @@ import { auth, functions } from '../lib/firebase';
 const fresh = () => ({ id: '', label: '', minutes: 20, mode: 'in_person', active: true });
 
 const AdminVisitTypes = () => {
-  const [access, setAccess] = useState('checking');
+  const { state: access } = useStaffAccess('admin');
   const [visitTypes, setVisitTypes] = useState([]);
   const [draft, setDraft] = useState(fresh());
   const [editingId, setEditingId] = useState('');
@@ -22,11 +23,6 @@ const AdminVisitTypes = () => {
     } catch (caught) { setError(caught?.message || 'Appointment formats could not be loaded.'); }
   }, []);
 
-  useEffect(() => onAuthStateChanged(auth, async (user) => {
-    if (!user) return setAccess('signed-out');
-    const token = await user.getIdTokenResult();
-    setAccess(token.claims.forcePasswordChange ? 'password-change' : token.claims.role === 'admin' ? 'allowed' : 'denied');
-  }), []);
   useEffect(() => { if (access === 'allowed') load(); }, [access, load]);
 
   const reset = () => { setDraft(fresh()); setEditingId(''); };

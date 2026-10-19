@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { signOut } from 'firebase/auth';
+import { useStaffAccess } from '../lib/staffSessionContext';
 import { httpsCallable } from 'firebase/functions';
 import { Link, Navigate } from 'react-router-dom';
 import { auth, functions } from '../lib/firebase';
@@ -9,9 +10,8 @@ const readableResource = (resourceType) => String(resourceType || 'system').repl
 const formatTime = (value) => value ? new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(new Date(value)) : 'Timestamp pending';
 
 const AdminAudit = () => {
-  const [access, setAccess] = useState('checking'); const [events, setEvents] = useState([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [filters, setFilters] = useState({ action: '', role: '', resource: '' });
+  const { state: access } = useStaffAccess('admin'); const [events, setEvents] = useState([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [filters, setFilters] = useState({ action: '', role: '', resource: '' });
   const load = useCallback(async () => { setLoading(true); setError(''); try { const result = await httpsCallable(functions, 'getAuditLog')({ limit: 50 }); setEvents(result.data.events || []); } catch (caught) { setError(caught?.message || 'The activity log could not be loaded.'); } finally { setLoading(false); } }, []);
-  useEffect(() => onAuthStateChanged(auth, async (user) => { if (!user) return setAccess('signed-out'); const token = await user.getIdTokenResult(); setAccess(token.claims.forcePasswordChange ? 'password-change' : token.claims.role === 'admin' ? 'allowed' : 'denied'); }), []);
   useEffect(() => { if (access === 'allowed') load(); }, [access, load]);
   const options = useMemo(() => ({ actions: [...new Set(events.map((event) => event.action))].sort(), roles: [...new Set(events.map((event) => event.actorRole))].sort(), resources: [...new Set(events.map((event) => event.resourceType))].sort() }), [events]);
   const visibleEvents = useMemo(() => events.filter((event) => (!filters.action || event.action === filters.action) && (!filters.role || event.actorRole === filters.role) && (!filters.resource || event.resourceType === filters.resource)), [events, filters]);

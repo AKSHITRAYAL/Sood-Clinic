@@ -1,0 +1,42 @@
+query GetPublicClinic @auth(level: PUBLIC, insecureReason: "Only published clinic contact and active catalog fields are returned; no patient, staff or private settings fields.") {
+  clinicProfile(key: {id: "sood-clinic"}) {
+    name phone email address timezone
+  }
+  branches(where: {active: {eq: true}}, limit: 20) {
+    id code name address timezone
+  }
+  departments(where: {active: {eq: true}, publicBookingEnabled: {eq: true}}, limit: 50) {
+    id name branch { id }
+  }
+  doctors(where: {active: {eq: true}, bookingEnabled: {eq: true}}, limit: 50) {
+    id name qualification registrationNumber bio photoPath branch { id }
+  }
+  services(where: {active: {eq: true}}, limit: 50) {
+    id code name durationMinutes bufferMinutes feePaise consultationMode
+  }
+}
+
+# UID is server-bound; there is no caller-controlled account identifier.
+query GetOwnSqlProfile @auth(level: USER) {
+  user(key: {id_expr: "auth.uid"}) { id displayName active }
+}
+
+query GetPublicClinicContact @auth(level: PUBLIC, insecureReason: "Published clinic contact information only; no private records or settings.") {
+  clinicProfile(key: {id: "sood-clinic"}) { name phone email address timezone }
+}
+
+mutation SaveOwnSqlProfile($displayName: String!, $requestId: UUID!)
+@auth(expr: "auth != null && auth.uid != '' && 'email_verified' in auth.token && auth.token.email_verified == true && vars.displayName.size() >= 2 && vars.displayName.size() <= 160 && vars.displayName.matches('^\\\\S(?:[^\\\\r\\\\n]*\\\\S)?$') && (!('forcePasswordChange' in auth.token) || auth.token.forcePasswordChange != true)")
+@transaction {
+  query @redact {
+    user(key: {id_expr: "auth.uid"}) @check(expr: "this == null || this.active", message: "ACCOUNT_INACTIVE") { active }
+    operationReceipt(key: {actorUid_expr: "auth.uid", requestId: $requestId})
+      @check(expr: "this == null", message: "REQUEST_ALREADY_APPLIED") { operation }
+  }
+  user_upsert(data: {id_expr: "auth.uid", displayName: $displayName, updatedAt_expr: "request.time"})
+  operationReceipt_insert(data: {actorUid_expr: "auth.uid", requestId: $requestId, operation: "save_own_profile"})
+  auditLog_insert(data: {
+    actorUid_expr: "auth.uid", actorRole_expr: "'role' in auth.token ? auth.token.role : 'patient'",
+    action: "account_profile_saved", resourceType: "account", resourceId_expr: "auth.uid"
+  })
+}

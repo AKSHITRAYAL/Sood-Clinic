@@ -1,5 +1,7 @@
 Current task list: `AI-PROMPT-next-tasks.md` if present; otherwise `files/04-backlog.md`.
 
+Active SQL migration (2026-10-19): read `SQL/PLAN.md`, current `SQL/phase 4.md` and the security handoff in `SQL/phase 3.md`. Staff directory/lifecycle/audit and shared authorization/doctor scope are deployed. P3-07d's account-bound single-use patient-link service is locally tested, but has no callable/UI and does not authorize legacy Firestore data. Local migration fixtures/manifest and catalogue candidates exist; `sql:rehearse` is synthetic-only with zero writes/apply readiness. Next: P4-02b target-ID reconciliation and lossless mappings; see `SQL/migration/README.md`. Auth remains credential/role authority; direct Firestore tokens retain their expiry boundary. Patient/booking storage remains legacy. Do not merge the separate scheduler worktree unchanged into SQL. Never auto-expire a staff-access lock after uncertain Auth/SQL completion; follow the documented recovery steps.
+
 # AGENTS.md — Sood Clinic
 
 > Entry point for any AI coding agent (Codex, Claude Code, Cursor, etc.).

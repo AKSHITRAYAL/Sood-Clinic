@@ -1,0 +1,225 @@
+# Phase 1 structure only. All API access is defined in connector operations.
+type User @table(name: "clinic_users", key: "id") {
+  id: String! @col(dataType: "varchar(128)")
+  displayName: String! @col(dataType: "varchar(160)")
+  active: Boolean! @default(value: true)
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type ClinicProfile @table(name: "clinic_profiles", key: "id") {
+  id: String!
+  name: String!
+  phone: String!
+  email: String!
+  address: String!
+  timezone: String! @default(value: "Asia/Kolkata")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type Branch @table(name: "clinic_branches") {
+  legacyId: String @unique
+  code: String! @unique
+  name: String!
+  address: String!
+  timezone: String! @default(value: "Asia/Kolkata")
+  active: Boolean! @default(value: true)
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type Department @table(name: "clinic_departments") {
+  legacyId: String @unique
+  branch: Branch!
+  code: String! @unique
+  name: String!
+  active: Boolean! @default(value: true)
+  publicBookingEnabled: Boolean! @default(value: false)
+  sortOrder: Int! @default(value: 0)
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type Doctor @table(name: "clinic_doctors") {
+  legacyId: String @unique
+  branch: Branch!
+  name: String!
+  qualification: String
+  registrationNumber: String! @unique
+  bio: String
+  photoPath: String
+  active: Boolean! @default(value: true)
+  bookingEnabled: Boolean! @default(value: false)
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type DoctorDepartment @table(name: "clinic_doctor_departments", key: ["doctor", "department"]) {
+  doctor: Doctor!
+  department: Department!
+}
+
+# Projection only: Firebase custom claims, not this table, grant staff access.
+type StaffProfile @table(name: "clinic_staff_profiles", key: "user") {
+  user: User!
+  doctor: Doctor
+  email: String! @default(value: "")
+  role: String! @default(value: "none")
+  doctorLegacyId: String
+  sessionValidAfterSeconds: Int64! @default(value: 0)
+  active: Boolean! @default(value: true)
+  requiresPasswordChange: Boolean! @default(value: false)
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type Patient @table(name: "clinic_patients") @index(fields: ["phone", "displayName"]) {
+  legacyId: String @unique
+  uhid: String! @unique
+  displayName: String!
+  phone: String! @col(dataType: "varchar(32)")
+  email: String
+  dateOfBirth: Date
+  gender: String
+  bloodGroup: String
+  address: String
+  archivedAt: Timestamp
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type PatientLink @table(name: "clinic_patient_links", key: ["patient", "user"]) @index(fields: ["userId"]) {
+  patient: Patient!
+  user: User!
+  relationship: String!
+  verifiedAt: Timestamp!
+  verifiedBy: String!
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+# One pending clinic-verified grant per patient/account. Store only a hash, never
+# the one-time code. These operations are not wired into production patients yet.
+type PatientLinkInvitation @table(name: "clinic_patient_link_invitations", key: ["patient", "user"]) {
+  patient: Patient!
+  user: User!
+  tokenHash: String! @unique @col(dataType: "varchar(64)")
+  relationship: String!
+  evidence: String!
+  verifiedBy: String!
+  expiresAt: Timestamp!
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+type Service @table(name: "clinic_services") {
+  code: String! @unique
+  name: String!
+  durationMinutes: Int!
+  bufferMinutes: Int! @default(value: 0)
+  feePaise: Int
+  consultationMode: String!
+  active: Boolean! @default(value: true)
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type DoctorService @table(name: "clinic_doctor_services", key: ["doctor", "service"]) {
+  doctor: Doctor!
+  service: Service!
+}
+
+# Private operational settings; never returned in public catalog operations.
+type ClinicSettings @table(name: "clinic_settings", key: "id") {
+  id: String!
+  bookingWindowDays: Int! @default(value: 14)
+  leadMinutes: Int! @default(value: 30)
+  cancelCutoffMinutes: Int! @default(value: 120)
+  autoConfirm: Boolean! @default(value: false)
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type DoctorSchedule @table(name: "clinic_doctor_schedules") @index(fields: ["doctorId", "weekday"]) {
+  doctor: Doctor!
+  weekday: Int!
+  startMinute: Int!
+  endMinute: Int!
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type ScheduleException @table(name: "clinic_schedule_exceptions") @index(fields: ["doctorId", "date"]) {
+  doctor: Doctor!
+  date: Date!
+  kind: String!
+  publicNote: String
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type ExceptionWindow @table(name: "clinic_exception_windows") {
+  exception: ScheduleException!
+  startMinute: Int!
+  endMinute: Int!
+}
+
+# No booking API until atomic interval protection is implemented in Phase 6.
+type Appointment @table(name: "clinic_appointments") @index(fields: ["doctorId", "clinicDate", "startsAt"]) @index(fields: ["patientId", "startsAt"]) {
+  legacyId: String @unique
+  reference: String! @unique
+  patient: Patient!
+  doctor: Doctor!
+  branch: Branch!
+  service: Service!
+  startsAt: Timestamp!
+  endsAt: Timestamp!
+  clinicDate: Date!
+  status: String!
+  source: String!
+  createdByUid: String
+  consentVersion: String!
+  consentAcceptedAt: Timestamp!
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type AppointmentEvent @table(name: "clinic_appointment_events") @index(fields: ["appointmentId", "occurredAt"]) {
+  appointment: Appointment!
+  action: String!
+  previousStatus: String
+  nextStatus: String!
+  actorUid: String
+  actorRole: String!
+  occurredAt: Timestamp! @default(expr: "request.time")
+}
+
+type Notification @table(name: "clinic_notifications") @index(fields: ["status", "sendAfter"]) {
+  dedupeKey: String! @unique
+  appointment: Appointment
+  channel: String!
+  template: String!
+  recipient: String!
+  status: String! @default(value: "queued")
+  attempts: Int! @default(value: 0)
+  sendAfter: Timestamp!
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+# IDs and action codes only; clinical text is stored in later clinical tables.
+type AuditLog @table(name: "clinic_audit_logs") @index(fields: ["occurredAt"]) {
+  actorUid: String
+  actorRole: String!
+  action: String!
+  resourceType: String!
+  resourceId: String!
+  occurredAt: Timestamp! @default(expr: "request.time")
+}
+
+# Scoped to the trusted actor; clients cannot claim another user's retry key.
+type OperationReceipt @table(name: "clinic_operation_receipts", key: ["actorUid", "requestId"]) {
+  actorUid: String!
+  requestId: UUID!
+  operation: String!
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+# Auth cannot participate in a SQL transaction. Hold this lock until reconciliation
+# and the completion audit commit; do not expire a live operation automatically.
+type StaffAccessLock @table(name: "clinic_staff_access_locks", key: "id") {
+  id: String!
+  requestId: UUID!
+  actorUid: String!
+  createdAt: Timestamp! @default(expr: "request.time")
+}

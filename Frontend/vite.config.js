@@ -6,6 +6,7 @@ import path from 'node:path'
 export default defineConfig(({ mode }) => ({
   plugins: [react()],
   resolve: {
+    dedupe: ['firebase'],
     alias: {
       '@app-entry': path.resolve(import.meta.dirname, mode === 'staff' ? 'src/entry/staff.jsx' : 'src/entry/public.jsx'),
     },

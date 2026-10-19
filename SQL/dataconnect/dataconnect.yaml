@@ -1,0 +1,14 @@
+specVersion: v1
+serviceId: ak-sood-clinic-service
+location: asia-south1
+schema:
+  source: ./schema
+  datasource:
+    postgresql:
+      database: ak-sood-clinic-database
+      cloudSql:
+        instanceId: ak-sood-clinic-instance
+      schemaValidation: COMPATIBLE
+connectorDirs:
+  - ./clinic
+  - ./admin

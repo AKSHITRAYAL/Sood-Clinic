@@ -6,7 +6,7 @@
   },
   "main": "index.js",
   "scripts": {
-    "lint": "node --check index.js && node --check assign-staff-role.js && node --check migrate-legacy-staff-role.js && node --check lib/staffAccess.js && node --check lib/appointmentPolicy.js && node --check lib/phone.js",
+    "lint": "node --check index.js && node --check assign-staff-role.js && node --check migrate-legacy-staff-role.js && node --check lib/staffAccess.js && node --check lib/appointmentPolicy.js && node --check lib/phone.js && node --check lib/sqlStaffDirectory.js && node --check lib/staffLifecycle.js && node --check lib/staffAuthorization.js && node --check lib/patientLinking.js",
     "seed": "node seed.js",
     "assign-staff-role": "node assign-staff-role.js",
     "migrate-manager-role": "node migrate-legacy-staff-role.js"

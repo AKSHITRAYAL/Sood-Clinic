@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { useState } from 'react';
+import { signOut } from 'firebase/auth';
+import { useStaffAccess } from '../lib/staffSessionContext';
 import { httpsCallable } from 'firebase/functions';
 import { Link, Navigate } from 'react-router-dom';
 import { auth, functions } from '../lib/firebase';
@@ -7,9 +8,8 @@ import { auth, functions } from '../lib/firebase';
 const emptyProfile = () => ({ title: '', displayName: '', phone: '', dateOfBirth: '', gender: '', maritalStatus: '', bloodGroup: '', addressLine1: '', city: '', state: '', postalCode: '', emergencyContactName: '', emergencyContactPhone: '', allergies: '', currentMedications: '', healthNotes: '', email: '' });
 
 const AdminPatients = () => {
-  const [access, setAccess] = useState('checking'); const [term, setTerm] = useState(''); const [results, setResults] = useState([]);
+  const { state: access } = useStaffAccess('admin'); const [term, setTerm] = useState(''); const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(null); const [profile, setProfile] = useState(emptyProfile()); const [notice, setNotice] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
-  useEffect(() => onAuthStateChanged(auth, async (user) => { if (!user) return setAccess('signed-out'); const token = await user.getIdTokenResult(); setAccess(token.claims.forcePasswordChange ? 'password-change' : token.claims.role === 'admin' ? 'allowed' : 'denied'); }), []);
   const search = async (event) => { event.preventDefault(); setError(''); setNotice(''); setSelected(null); if (term.trim().length < 2) return setError('Enter at least two characters.'); setBusy(true); try { const result = await httpsCallable(functions, 'searchPatients')({ term }); setResults(result.data.patients || []); if (!result.data.patients?.length) setNotice('No matching patients found.'); } catch (caught) { setError(caught.message || 'Patient search could not be completed.'); } finally { setBusy(false); } };
   const syncDirectory = async () => { setBusy(true); setError(''); setNotice(''); try { const result = await httpsCallable(functions, 'syncPatientDirectory')(); setNotice(`${result.data.indexed} patient record${result.data.indexed === 1 ? '' : 's'} indexed for secure search.`); } catch (caught) { setError(caught.message || 'Patient directory could not be synchronised.'); } finally { setBusy(false); } };
   const openPatient = async (item) => { setError(''); setNotice(''); setBusy(true); try { const result = await httpsCallable(functions, 'getAdminPatientProfile')({ uid: item.patientId || item.uid }); setSelected({ uid: result.data.uid, uhid: result.data.uhid || '' }); setProfile({ ...emptyProfile(), ...result.data.profile }); } catch (caught) { setError(caught.message || 'Patient record could not be opened.'); } finally { setBusy(false); } };

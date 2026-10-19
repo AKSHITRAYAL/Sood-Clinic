@@ -1,0 +1,37 @@
+# IAM only. The future callable must use patientLinking.js live Auth/evidence
+# validation. Knowing identifiers, email or phone never authorizes these writes.
+mutation IssuePatientLinkInvitation($patientId: UUID!, $targetUid: String!, $tokenHash: String!, $relationship: String!, $evidence: String!, $actorUid: String!, $actorRole: String!, $expiresAt: Timestamp!, $resourceId: String!)
+@auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    patient(key: {id: $patientId}) @check(expr: "this != null && this.archivedAt == null", message: "PATIENT_UNAVAILABLE") { archivedAt }
+    user(key: {id: $targetUid}) @check(expr: "this != null && this.active", message: "ACCOUNT_UNAVAILABLE") { active }
+    patientLink(key: {patientId: $patientId, userId: $targetUid}) @check(expr: "this == null", message: "ALREADY_LINKED") { relationship }
+  }
+  patientLinkInvitation_upsert(data: {patientId: $patientId, userId: $targetUid, tokenHash: $tokenHash, relationship: $relationship, evidence: $evidence, verifiedBy: $actorUid, expiresAt: $expiresAt, createdAt_expr: "request.time"})
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: "patient_link_invitation_issued", resourceType: "patient_link", resourceId: $resourceId})
+}
+
+query FindPatientLinkInvitation($tokenHash: String!, $targetUid: String!) @auth(level: NO_ACCESS) {
+  patientLinkInvitations(where: {tokenHash: {eq: $tokenHash}, userId: {eq: $targetUid}}, limit: 1) { patientId userId relationship verifiedBy }
+}
+
+mutation AcceptPatientLinkInvitation($patientId: UUID!, $targetUid: String!, $tokenHash: String!, $relationship: String!, $verifiedBy: String!, $resourceId: String!)
+@auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    patient(key: {id: $patientId}) @check(expr: "this != null && this.archivedAt == null", message: "PATIENT_UNAVAILABLE") { archivedAt }
+    user(key: {id: $targetUid}) @check(expr: "this != null && this.active", message: "ACCOUNT_UNAVAILABLE") { active }
+  }
+  # Conditional consumption locks the row before granting access; retries, expiry,
+  # replaced codes and racing revocation cannot grant from a stale lookup.
+  patientLinkInvitation_deleteMany(where: {patientId: {eq: $patientId}, userId: {eq: $targetUid}, tokenHash: {eq: $tokenHash}, relationship: {eq: $relationship}, verifiedBy: {eq: $verifiedBy}, expiresAt: {gt_expr: "request.time"}})
+    @check(expr: "this == 1", message: "LINK_CODE_UNAVAILABLE")
+  patientLink_insert(data: {patientId: $patientId, userId: $targetUid, relationship: $relationship, verifiedAt_expr: "request.time", verifiedBy: $verifiedBy})
+  auditLog_insert(data: {actorUid: $targetUid, actorRole: "patient", action: "patient_link_accepted", resourceType: "patient_link", resourceId: $resourceId})
+}
+
+mutation RevokePatientLink($patientId: UUID!, $targetUid: String!, $actorUid: String!, $actorRole: String!, $resourceId: String!)
+@auth(level: NO_ACCESS) @transaction {
+  patientLinkInvitation_deleteMany(where: {patientId: {eq: $patientId}, userId: {eq: $targetUid}})
+  patientLink_deleteMany(where: {patientId: {eq: $patientId}, userId: {eq: $targetUid}})
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: "patient_link_revoked", resourceType: "patient_link", resourceId: $resourceId})
+}

@@ -1,0 +1,246 @@
+{
+  "description": "Reviewed SQL Connect compiler preview; archive only, not a standalone migration runner.",
+  "projectId": "sood-clinic",
+  "serviceId": "ak-sood-clinic-service",
+  "reviewedDate": "2026-10-19",
+  "applied": false,
+  "additiveOnly": true,
+  "diffs": [
+    {
+      "sql": "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"",
+      "description": "Install Postgres extension \"uuid-ossp\""
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_settings\" (\"id\" text NOT NULL, \"auto_confirm\" boolean NOT NULL DEFAULT false, \"booking_window_days\" integer NOT NULL DEFAULT 14, \"cancel_cutoff_minutes\" integer NOT NULL DEFAULT 120, \"lead_minutes\" integer NOT NULL DEFAULT 30, \"updated_at\" timestamptz NOT NULL, PRIMARY KEY (\"id\"))",
+      "description": "create \"clinic_settings\" table"
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_audit_logs\" (\"id\" uuid NOT NULL DEFAULT uuid_generate_v4(), \"action\" text NOT NULL, \"actor_role\" text NOT NULL, \"actor_uid\" text NULL, \"occurred_at\" timestamptz NOT NULL, \"resource_id\" text NOT NULL, \"resource_type\" text NOT NULL, PRIMARY KEY (\"id\"))",
+      "description": "create \"clinic_audit_logs\" table"
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_audit_logs_occurredAt_idx\" ON \"public\".\"clinic_audit_logs\" (\"occurred_at\")",
+      "description": "create index \"clinic_audit_logs_occurredAt_idx\" to table: \"clinic_audit_logs\""
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_branches\" (\"id\" uuid NOT NULL DEFAULT uuid_generate_v4(), \"active\" boolean NOT NULL DEFAULT true, \"address\" text NOT NULL, \"code\" text NOT NULL, \"created_at\" timestamptz NOT NULL, \"legacy_id\" text NULL, \"name\" text NOT NULL, \"timezone\" text NOT NULL DEFAULT 'Asia/Kolkata', \"updated_at\" timestamptz NOT NULL, PRIMARY KEY (\"id\"))",
+      "description": "create \"clinic_branches\" table"
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX \"clinic_branches_code_uidx\" ON \"public\".\"clinic_branches\" (\"code\")",
+      "description": "create index \"clinic_branches_code_uidx\" to table: \"clinic_branches\""
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX \"clinic_branches_legacyId_uidx\" ON \"public\".\"clinic_branches\" (\"legacy_id\")",
+      "description": "create index \"clinic_branches_legacyId_uidx\" to table: \"clinic_branches\""
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_profiles\" (\"id\" text NOT NULL, \"address\" text NOT NULL, \"email\" text NOT NULL, \"name\" text NOT NULL, \"phone\" text NOT NULL, \"timezone\" text NOT NULL DEFAULT 'Asia/Kolkata', \"updated_at\" timestamptz NOT NULL, PRIMARY KEY (\"id\"))",
+      "description": "create \"clinic_profiles\" table"
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_doctors\" (\"id\" uuid NOT NULL DEFAULT uuid_generate_v4(), \"branch_id\" uuid NOT NULL, \"active\" boolean NOT NULL DEFAULT true, \"bio\" text NULL, \"booking_enabled\" boolean NOT NULL DEFAULT false, \"legacy_id\" text NULL, \"name\" text NOT NULL, \"photo_path\" text NULL, \"qualification\" text NULL, \"registration_number\" text NOT NULL, \"updated_at\" timestamptz NOT NULL, PRIMARY KEY (\"id\"), CONSTRAINT \"clinic_doctors_branch_id_fkey\" FOREIGN KEY (\"branch_id\") REFERENCES \"public\".\"clinic_branches\" (\"id\") ON DELETE CASCADE)",
+      "description": "create \"clinic_doctors\" table"
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_doctors_branchId_idx\" ON \"public\".\"clinic_doctors\" (\"branch_id\")",
+      "description": "create index \"clinic_doctors_branchId_idx\" to table: \"clinic_doctors\""
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX \"clinic_doctors_legacyId_uidx\" ON \"public\".\"clinic_doctors\" (\"legacy_id\")",
+      "description": "create index \"clinic_doctors_legacyId_uidx\" to table: \"clinic_doctors\""
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX \"clinic_doctors_registrationNumber_uidx\" ON \"public\".\"clinic_doctors\" (\"registration_number\")",
+      "description": "create index \"clinic_doctors_registrationNumber_uidx\" to table: \"clinic_doctors\""
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_patients\" (\"id\" uuid NOT NULL DEFAULT uuid_generate_v4(), \"address\" text NULL, \"archived_at\" timestamptz NULL, \"blood_group\" text NULL, \"created_at\" timestamptz NOT NULL, \"date_of_birth\" date NULL, \"display_name\" text NOT NULL, \"email\" text NULL, \"gender\" text NULL, \"legacy_id\" text NULL, \"phone\" character varying(32) NOT NULL, \"uhid\" text NOT NULL, \"updated_at\" timestamptz NOT NULL, PRIMARY KEY (\"id\"))",
+      "description": "create \"clinic_patients\" table"
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_patients_phone_displayName_idx\" ON \"public\".\"clinic_patients\" (\"phone\", \"display_name\")",
+      "description": "create index \"clinic_patients_phone_displayName_idx\" to table: \"clinic_patients\""
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX \"clinic_patients_legacyId_uidx\" ON \"public\".\"clinic_patients\" (\"legacy_id\")",
+      "description": "create index \"clinic_patients_legacyId_uidx\" to table: \"clinic_patients\""
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX \"clinic_patients_uhid_uidx\" ON \"public\".\"clinic_patients\" (\"uhid\")",
+      "description": "create index \"clinic_patients_uhid_uidx\" to table: \"clinic_patients\""
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_services\" (\"id\" uuid NOT NULL DEFAULT uuid_generate_v4(), \"active\" boolean NOT NULL DEFAULT true, \"buffer_minutes\" integer NOT NULL DEFAULT 0, \"code\" text NOT NULL, \"consultation_mode\" text NOT NULL, \"duration_minutes\" integer NOT NULL, \"fee_paise\" integer NULL, \"name\" text NOT NULL, \"updated_at\" timestamptz NOT NULL, PRIMARY KEY (\"id\"))",
+      "description": "create \"clinic_services\" table"
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX \"clinic_services_code_uidx\" ON \"public\".\"clinic_services\" (\"code\")",
+      "description": "create index \"clinic_services_code_uidx\" to table: \"clinic_services\""
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_appointments\" (\"id\" uuid NOT NULL DEFAULT uuid_generate_v4(), \"branch_id\" uuid NOT NULL, \"doctor_id\" uuid NOT NULL, \"patient_id\" uuid NOT NULL, \"service_id\" uuid NOT NULL, \"clinic_date\" date NOT NULL, \"consent_accepted_at\" timestamptz NOT NULL, \"consent_version\" text NOT NULL, \"created_at\" timestamptz NOT NULL, \"created_by_uid\" text NULL, \"ends_at\" timestamptz NOT NULL, \"legacy_id\" text NULL, \"reference\" text NOT NULL, \"source\" text NOT NULL, \"starts_at\" timestamptz NOT NULL, \"status\" text NOT NULL, \"updated_at\" timestamptz NOT NULL, PRIMARY KEY (\"id\"), CONSTRAINT \"clinic_appointments_branch_id_fkey\" FOREIGN KEY (\"branch_id\") REFERENCES \"public\".\"clinic_branches\" (\"id\") ON DELETE CASCADE, CONSTRAINT \"clinic_appointments_doctor_id_fkey\" FOREIGN KEY (\"doctor_id\") REFERENCES \"public\".\"clinic_doctors\" (\"id\") ON DELETE CASCADE, CONSTRAINT \"clinic_appointments_patient_id_fkey\" FOREIGN KEY (\"patient_id\") REFERENCES \"public\".\"clinic_patients\" (\"id\") ON DELETE CASCADE, CONSTRAINT \"clinic_appointments_service_id_fkey\" FOREIGN KEY (\"service_id\") REFERENCES \"public\".\"clinic_services\" (\"id\") ON DELETE CASCADE)",
+      "description": "create \"clinic_appointments\" table"
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_appointments_doctorId_clinicDate_startsAt_idx\" ON \"public\".\"clinic_appointments\" (\"doctor_id\", \"clinic_date\", \"starts_at\")",
+      "description": "create index \"clinic_appointments_doctorId_clinicDate_startsAt_idx\" to table: \"clinic_appointments\""
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_appointments_patientId_startsAt_idx\" ON \"public\".\"clinic_appointments\" (\"patient_id\", \"starts_at\")",
+      "description": "create index \"clinic_appointments_patientId_startsAt_idx\" to table: \"clinic_appointments\""
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_appointments_branchId_idx\" ON \"public\".\"clinic_appointments\" (\"branch_id\")",
+      "description": "create index \"clinic_appointments_branchId_idx\" to table: \"clinic_appointments\""
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_appointments_doctorId_idx\" ON \"public\".\"clinic_appointments\" (\"doctor_id\")",
+      "description": "create index \"clinic_appointments_doctorId_idx\" to table: \"clinic_appointments\""
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_appointments_patientId_idx\" ON \"public\".\"clinic_appointments\" (\"patient_id\")",
+      "description": "create index \"clinic_appointments_patientId_idx\" to table: \"clinic_appointments\""
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_appointments_serviceId_idx\" ON \"public\".\"clinic_appointments\" (\"service_id\")",
+      "description": "create index \"clinic_appointments_serviceId_idx\" to table: \"clinic_appointments\""
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX \"clinic_appointments_legacyId_uidx\" ON \"public\".\"clinic_appointments\" (\"legacy_id\")",
+      "description": "create index \"clinic_appointments_legacyId_uidx\" to table: \"clinic_appointments\""
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX \"clinic_appointments_reference_uidx\" ON \"public\".\"clinic_appointments\" (\"reference\")",
+      "description": "create index \"clinic_appointments_reference_uidx\" to table: \"clinic_appointments\""
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_appointment_events\" (\"id\" uuid NOT NULL DEFAULT uuid_generate_v4(), \"appointment_id\" uuid NOT NULL, \"action\" text NOT NULL, \"actor_role\" text NOT NULL, \"actor_uid\" text NULL, \"next_status\" text NOT NULL, \"occurred_at\" timestamptz NOT NULL, \"previous_status\" text NULL, PRIMARY KEY (\"id\"), CONSTRAINT \"clinic_appointment_events_appointment_id_fkey\" FOREIGN KEY (\"appointment_id\") REFERENCES \"public\".\"clinic_appointments\" (\"id\") ON DELETE CASCADE)",
+      "description": "create \"clinic_appointment_events\" table"
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_appointment_events_appointmentId_occurredAt_idx\" ON \"public\".\"clinic_appointment_events\" (\"appointment_id\", \"occurred_at\")",
+      "description": "create index \"clinic_appointment_events_appointmentId_occurredAt_idx\" to table: \"clinic_appointment_events\""
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_appointment_events_appointmentId_idx\" ON \"public\".\"clinic_appointment_events\" (\"appointment_id\")",
+      "description": "create index \"clinic_appointment_events_appointmentId_idx\" to table: \"clinic_appointment_events\""
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_departments\" (\"id\" uuid NOT NULL DEFAULT uuid_generate_v4(), \"branch_id\" uuid NOT NULL, \"active\" boolean NOT NULL DEFAULT true, \"code\" text NOT NULL, \"legacy_id\" text NULL, \"name\" text NOT NULL, \"public_booking_enabled\" boolean NOT NULL DEFAULT false, \"sort_order\" integer NOT NULL DEFAULT 0, \"updated_at\" timestamptz NOT NULL, PRIMARY KEY (\"id\"), CONSTRAINT \"clinic_departments_branch_id_fkey\" FOREIGN KEY (\"branch_id\") REFERENCES \"public\".\"clinic_branches\" (\"id\") ON DELETE CASCADE)",
+      "description": "create \"clinic_departments\" table"
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_departments_branchId_idx\" ON \"public\".\"clinic_departments\" (\"branch_id\")",
+      "description": "create index \"clinic_departments_branchId_idx\" to table: \"clinic_departments\""
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX \"clinic_departments_code_uidx\" ON \"public\".\"clinic_departments\" (\"code\")",
+      "description": "create index \"clinic_departments_code_uidx\" to table: \"clinic_departments\""
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX \"clinic_departments_legacyId_uidx\" ON \"public\".\"clinic_departments\" (\"legacy_id\")",
+      "description": "create index \"clinic_departments_legacyId_uidx\" to table: \"clinic_departments\""
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_doctor_departments\" (\"doctor_id\" uuid NOT NULL, \"department_id\" uuid NOT NULL, PRIMARY KEY (\"doctor_id\", \"department_id\"), CONSTRAINT \"clinic_doctor_departments_department_id_fkey\" FOREIGN KEY (\"department_id\") REFERENCES \"public\".\"clinic_departments\" (\"id\") ON DELETE CASCADE, CONSTRAINT \"clinic_doctor_departments_doctor_id_fkey\" FOREIGN KEY (\"doctor_id\") REFERENCES \"public\".\"clinic_doctors\" (\"id\") ON DELETE CASCADE)",
+      "description": "create \"clinic_doctor_departments\" table"
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_doctor_departments_departmentId_idx\" ON \"public\".\"clinic_doctor_departments\" (\"department_id\")",
+      "description": "create index \"clinic_doctor_departments_departmentId_idx\" to table: \"clinic_doctor_departments\""
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_doctor_departments_doctorId_idx\" ON \"public\".\"clinic_doctor_departments\" (\"doctor_id\")",
+      "description": "create index \"clinic_doctor_departments_doctorId_idx\" to table: \"clinic_doctor_departments\""
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_doctor_schedules\" (\"id\" uuid NOT NULL DEFAULT uuid_generate_v4(), \"doctor_id\" uuid NOT NULL, \"end_minute\" integer NOT NULL, \"start_minute\" integer NOT NULL, \"updated_at\" timestamptz NOT NULL, \"weekday\" integer NOT NULL, PRIMARY KEY (\"id\"), CONSTRAINT \"clinic_doctor_schedules_doctor_id_fkey\" FOREIGN KEY (\"doctor_id\") REFERENCES \"public\".\"clinic_doctors\" (\"id\") ON DELETE CASCADE)",
+      "description": "create \"clinic_doctor_schedules\" table"
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_doctor_schedules_doctorId_weekday_idx\" ON \"public\".\"clinic_doctor_schedules\" (\"doctor_id\", \"weekday\")",
+      "description": "create index \"clinic_doctor_schedules_doctorId_weekday_idx\" to table: \"clinic_doctor_schedules\""
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_doctor_schedules_doctorId_idx\" ON \"public\".\"clinic_doctor_schedules\" (\"doctor_id\")",
+      "description": "create index \"clinic_doctor_schedules_doctorId_idx\" to table: \"clinic_doctor_schedules\""
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_doctor_services\" (\"doctor_id\" uuid NOT NULL, \"service_id\" uuid NOT NULL, PRIMARY KEY (\"doctor_id\", \"service_id\"), CONSTRAINT \"clinic_doctor_services_doctor_id_fkey\" FOREIGN KEY (\"doctor_id\") REFERENCES \"public\".\"clinic_doctors\" (\"id\") ON DELETE CASCADE, CONSTRAINT \"clinic_doctor_services_service_id_fkey\" FOREIGN KEY (\"service_id\") REFERENCES \"public\".\"clinic_services\" (\"id\") ON DELETE CASCADE)",
+      "description": "create \"clinic_doctor_services\" table"
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_doctor_services_doctorId_idx\" ON \"public\".\"clinic_doctor_services\" (\"doctor_id\")",
+      "description": "create index \"clinic_doctor_services_doctorId_idx\" to table: \"clinic_doctor_services\""
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_doctor_services_serviceId_idx\" ON \"public\".\"clinic_doctor_services\" (\"service_id\")",
+      "description": "create index \"clinic_doctor_services_serviceId_idx\" to table: \"clinic_doctor_services\""
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_schedule_exceptions\" (\"id\" uuid NOT NULL DEFAULT uuid_generate_v4(), \"doctor_id\" uuid NOT NULL, \"date\" date NOT NULL, \"kind\" text NOT NULL, \"public_note\" text NULL, \"updated_at\" timestamptz NOT NULL, PRIMARY KEY (\"id\"), CONSTRAINT \"clinic_schedule_exceptions_doctor_id_fkey\" FOREIGN KEY (\"doctor_id\") REFERENCES \"public\".\"clinic_doctors\" (\"id\") ON DELETE CASCADE)",
+      "description": "create \"clinic_schedule_exceptions\" table"
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_schedule_exceptions_doctorId_date_idx\" ON \"public\".\"clinic_schedule_exceptions\" (\"doctor_id\", \"date\")",
+      "description": "create index \"clinic_schedule_exceptions_doctorId_date_idx\" to table: \"clinic_schedule_exceptions\""
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_schedule_exceptions_doctorId_idx\" ON \"public\".\"clinic_schedule_exceptions\" (\"doctor_id\")",
+      "description": "create index \"clinic_schedule_exceptions_doctorId_idx\" to table: \"clinic_schedule_exceptions\""
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_exception_windows\" (\"id\" uuid NOT NULL DEFAULT uuid_generate_v4(), \"exception_id\" uuid NOT NULL, \"end_minute\" integer NOT NULL, \"start_minute\" integer NOT NULL, PRIMARY KEY (\"id\"), CONSTRAINT \"clinic_exception_windows_exception_id_fkey\" FOREIGN KEY (\"exception_id\") REFERENCES \"public\".\"clinic_schedule_exceptions\" (\"id\") ON DELETE CASCADE)",
+      "description": "create \"clinic_exception_windows\" table"
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_exception_windows_exceptionId_idx\" ON \"public\".\"clinic_exception_windows\" (\"exception_id\")",
+      "description": "create index \"clinic_exception_windows_exceptionId_idx\" to table: \"clinic_exception_windows\""
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_notifications\" (\"id\" uuid NOT NULL DEFAULT uuid_generate_v4(), \"appointment_id\" uuid NULL, \"attempts\" integer NOT NULL DEFAULT 0, \"channel\" text NOT NULL, \"created_at\" timestamptz NOT NULL, \"dedupe_key\" text NOT NULL, \"recipient\" text NOT NULL, \"send_after\" timestamptz NOT NULL, \"status\" text NOT NULL DEFAULT 'queued', \"template\" text NOT NULL, PRIMARY KEY (\"id\"), CONSTRAINT \"clinic_notifications_appointment_id_fkey\" FOREIGN KEY (\"appointment_id\") REFERENCES \"public\".\"clinic_appointments\" (\"id\") ON DELETE SET NULL)",
+      "description": "create \"clinic_notifications\" table"
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_notifications_status_sendAfter_idx\" ON \"public\".\"clinic_notifications\" (\"status\", \"send_after\")",
+      "description": "create index \"clinic_notifications_status_sendAfter_idx\" to table: \"clinic_notifications\""
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_notifications_appointmentId_idx\" ON \"public\".\"clinic_notifications\" (\"appointment_id\")",
+      "description": "create index \"clinic_notifications_appointmentId_idx\" to table: \"clinic_notifications\""
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX \"clinic_notifications_dedupeKey_uidx\" ON \"public\".\"clinic_notifications\" (\"dedupe_key\")",
+      "description": "create index \"clinic_notifications_dedupeKey_uidx\" to table: \"clinic_notifications\""
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_users\" (\"id\" character varying(128) NOT NULL, \"active\" boolean NOT NULL DEFAULT true, \"created_at\" timestamptz NOT NULL, \"display_name\" character varying(160) NOT NULL, \"updated_at\" timestamptz NOT NULL, PRIMARY KEY (\"id\"))",
+      "description": "create \"clinic_users\" table"
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_patient_links\" (\"patient_id\" uuid NOT NULL, \"user_id\" text NOT NULL, \"created_at\" timestamptz NOT NULL, \"relationship\" text NOT NULL, \"verified_at\" timestamptz NOT NULL, \"verified_by\" text NOT NULL, PRIMARY KEY (\"patient_id\", \"user_id\"), CONSTRAINT \"clinic_patient_links_patient_id_fkey\" FOREIGN KEY (\"patient_id\") REFERENCES \"public\".\"clinic_patients\" (\"id\") ON DELETE CASCADE, CONSTRAINT \"clinic_patient_links_user_id_fkey\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"clinic_users\" (\"id\") ON DELETE CASCADE)",
+      "description": "create \"clinic_patient_links\" table"
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_patient_links_userId_idx\" ON \"public\".\"clinic_patient_links\" (\"user_id\")",
+      "description": "create index \"clinic_patient_links_userId_idx\" to table: \"clinic_patient_links\""
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_patient_links_patientId_idx\" ON \"public\".\"clinic_patient_links\" (\"patient_id\")",
+      "description": "create index \"clinic_patient_links_patientId_idx\" to table: \"clinic_patient_links\""
+    },
+    {
+      "sql": "CREATE TABLE \"public\".\"clinic_staff_profiles\" (\"user_id\" text NOT NULL, \"doctor_id\" uuid NULL, \"active\" boolean NOT NULL DEFAULT true, \"requires_password_change\" boolean NOT NULL DEFAULT false, \"updated_at\" timestamptz NOT NULL, PRIMARY KEY (\"user_id\"), CONSTRAINT \"clinic_staff_profiles_user_id_fkey\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"clinic_users\" (\"id\") ON DELETE CASCADE, CONSTRAINT \"clinic_staff_profiles_doctor_id_fkey\" FOREIGN KEY (\"doctor_id\") REFERENCES \"public\".\"clinic_doctors\" (\"id\") ON DELETE SET NULL)",
+      "description": "create \"clinic_staff_profiles\" table"
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_staff_profiles_doctorId_idx\" ON \"public\".\"clinic_staff_profiles\" (\"doctor_id\")",
+      "description": "create index \"clinic_staff_profiles_doctorId_idx\" to table: \"clinic_staff_profiles\""
+    },
+    {
+      "sql": "CREATE INDEX \"clinic_staff_profiles_userId_idx\" ON \"public\".\"clinic_staff_profiles\" (\"user_id\")",
+      "description": "create index \"clinic_staff_profiles_userId_idx\" to table: \"clinic_staff_profiles\""
+    }
+  ]
+}

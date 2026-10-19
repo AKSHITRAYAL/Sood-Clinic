@@ -42,14 +42,25 @@ jobs:
       - name: Validate Functions source
         run: npm --prefix functions run lint
 
+      - name: Compile and test SQL foundation locally
+        run: |
+          npm run test:migration
+          npm run sql:rehearse
+          npm run sql:compile
+          npm run sql:test
+
       - name: Run unit tests
         run: |
           npm run test:time
           npm run test:schedule
           npx vitest run functions/test
+          npx vitest run Frontend/src/services
 
       - name: Run Firestore rules tests
         run: npm run test:rules
+
+      - name: Verify live staff authority in local Auth and Functions
+        run: npm run test:staff-access
 
       - name: Lint and build both sites
         run: |

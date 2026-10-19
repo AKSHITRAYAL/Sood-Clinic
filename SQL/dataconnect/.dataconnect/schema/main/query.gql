@@ -1,0 +1,1158 @@
+extend type Query {
+  """
+  ✨ Look up a single `Appointment` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  appointment(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Appointment_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Appointment_FirstRow
+  ): Appointment @fdc_generated(from: "Appointment", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `AppointmentEvent` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  appointmentEvent(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: AppointmentEvent_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: AppointmentEvent_FirstRow
+  ): AppointmentEvent @fdc_generated(from: "AppointmentEvent", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `AuditLog` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  auditLog(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: AuditLog_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: AuditLog_FirstRow
+  ): AuditLog @fdc_generated(from: "AuditLog", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `Branch` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  branch(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Branch_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Branch_FirstRow
+  ): Branch @fdc_generated(from: "Branch", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `ClinicProfile` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  clinicProfile(
+    """
+    The unique ID of the object.
+    """
+    id: String
+
+    """
+    ✨ `_expr` server value variant of `id` (The unique ID of the object.)
+    """
+    id_expr: String_Expr
+
+    """
+    The key used to identify the object.
+    """
+    key: ClinicProfile_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: ClinicProfile_FirstRow
+  ): ClinicProfile @fdc_generated(from: "ClinicProfile", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `ClinicSettings` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  clinicSettings(
+    """
+    The unique ID of the object.
+    """
+    id: String
+
+    """
+    ✨ `_expr` server value variant of `id` (The unique ID of the object.)
+    """
+    id_expr: String_Expr
+
+    """
+    The key used to identify the object.
+    """
+    key: ClinicSettings_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: ClinicSettings_FirstRow
+  ): ClinicSettings @fdc_generated(from: "ClinicSettings", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `Department` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  department(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Department_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Department_FirstRow
+  ): Department @fdc_generated(from: "Department", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `Doctor` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  doctor(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Doctor_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Doctor_FirstRow
+  ): Doctor @fdc_generated(from: "Doctor", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `DoctorDepartment` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  doctorDepartment(
+    """
+    The key used to identify the object.
+    """
+    key: DoctorDepartment_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: DoctorDepartment_FirstRow
+  ): DoctorDepartment @fdc_generated(from: "DoctorDepartment", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `DoctorSchedule` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  doctorSchedule(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: DoctorSchedule_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: DoctorSchedule_FirstRow
+  ): DoctorSchedule @fdc_generated(from: "DoctorSchedule", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `DoctorService` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  doctorService(
+    """
+    The key used to identify the object.
+    """
+    key: DoctorService_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: DoctorService_FirstRow
+  ): DoctorService @fdc_generated(from: "DoctorService", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `ExceptionWindow` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  exceptionWindow(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: ExceptionWindow_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: ExceptionWindow_FirstRow
+  ): ExceptionWindow @fdc_generated(from: "ExceptionWindow", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `Notification` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  notification(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Notification_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Notification_FirstRow
+  ): Notification @fdc_generated(from: "Notification", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `OperationReceipt` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  operationReceipt(
+    """
+    The key used to identify the object.
+    """
+    key: OperationReceipt_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: OperationReceipt_FirstRow
+  ): OperationReceipt @fdc_generated(from: "OperationReceipt", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `Patient` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  patient(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Patient_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Patient_FirstRow
+  ): Patient @fdc_generated(from: "Patient", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `PatientLink` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  patientLink(
+    """
+    The key used to identify the object.
+    """
+    key: PatientLink_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PatientLink_FirstRow
+  ): PatientLink @fdc_generated(from: "PatientLink", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `PatientLinkInvitation` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  patientLinkInvitation(
+    """
+    The key used to identify the object.
+    """
+    key: PatientLinkInvitation_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: PatientLinkInvitation_FirstRow
+  ): PatientLinkInvitation @fdc_generated(from: "PatientLinkInvitation", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `ScheduleException` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  scheduleException(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: ScheduleException_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: ScheduleException_FirstRow
+  ): ScheduleException @fdc_generated(from: "ScheduleException", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `Service` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  service(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: Service_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: Service_FirstRow
+  ): Service @fdc_generated(from: "Service", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `StaffAccessLock` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  staffAccessLock(
+    """
+    The unique ID of the object.
+    """
+    id: String
+
+    """
+    ✨ `_expr` server value variant of `id` (The unique ID of the object.)
+    """
+    id_expr: String_Expr
+
+    """
+    The key used to identify the object.
+    """
+    key: StaffAccessLock_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: StaffAccessLock_FirstRow
+  ): StaffAccessLock @fdc_generated(from: "StaffAccessLock", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `StaffProfile` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  staffProfile(
+    """
+    The key used to identify the object.
+    """
+    key: StaffProfile_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: StaffProfile_FirstRow
+  ): StaffProfile @fdc_generated(from: "StaffProfile", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `User` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  user(
+    """
+    The unique ID of the object.
+    """
+    id: String
+
+    """
+    ✨ `_expr` server value variant of `id` (The unique ID of the object.)
+    """
+    id_expr: String_Expr
+
+    """
+    The key used to identify the object.
+    """
+    key: User_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: User_FirstRow
+  ): User @fdc_generated(from: "User", purpose: QUERY_SINGLE)
+  """
+  ✨ List `Appointment` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  appointments(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: Appointment_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [Appointment_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: Appointment_Having
+  ): [Appointment!]! @fdc_generated(from: "Appointment", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `AppointmentEvent` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  appointmentEvents(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: AppointmentEvent_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [AppointmentEvent_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: AppointmentEvent_Having
+  ): [AppointmentEvent!]! @fdc_generated(from: "AppointmentEvent", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `AuditLog` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  auditLogs(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: AuditLog_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [AuditLog_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: AuditLog_Having
+  ): [AuditLog!]! @fdc_generated(from: "AuditLog", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `Branch` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  branches(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: Branch_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [Branch_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: Branch_Having
+  ): [Branch!]! @fdc_generated(from: "Branch", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `ClinicProfile` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  clinicProfiles(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: ClinicProfile_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [ClinicProfile_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: ClinicProfile_Having
+  ): [ClinicProfile!]! @fdc_generated(from: "ClinicProfile", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `ClinicSettings` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  clinicSettingss(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: ClinicSettings_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [ClinicSettings_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: ClinicSettings_Having
+  ): [ClinicSettings!]! @fdc_generated(from: "ClinicSettings", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `Department` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  departments(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: Department_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [Department_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: Department_Having
+  ): [Department!]! @fdc_generated(from: "Department", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `Doctor` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  doctors(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: Doctor_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [Doctor_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: Doctor_Having
+  ): [Doctor!]! @fdc_generated(from: "Doctor", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `DoctorDepartment` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  doctorDepartments(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: DoctorDepartment_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [DoctorDepartment_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: DoctorDepartment_Having
+  ): [DoctorDepartment!]! @fdc_generated(from: "DoctorDepartment", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `DoctorSchedule` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  doctorSchedules(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: DoctorSchedule_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [DoctorSchedule_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: DoctorSchedule_Having
+  ): [DoctorSchedule!]! @fdc_generated(from: "DoctorSchedule", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `DoctorService` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  doctorServices(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: DoctorService_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [DoctorService_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: DoctorService_Having
+  ): [DoctorService!]! @fdc_generated(from: "DoctorService", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `ExceptionWindow` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  exceptionWindows(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: ExceptionWindow_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [ExceptionWindow_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: ExceptionWindow_Having
+  ): [ExceptionWindow!]! @fdc_generated(from: "ExceptionWindow", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `Notification` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  notifications(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: Notification_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [Notification_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: Notification_Having
+  ): [Notification!]! @fdc_generated(from: "Notification", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `OperationReceipt` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  operationReceipts(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: OperationReceipt_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [OperationReceipt_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: OperationReceipt_Having
+  ): [OperationReceipt!]! @fdc_generated(from: "OperationReceipt", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `Patient` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  patients(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: Patient_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [Patient_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: Patient_Having
+  ): [Patient!]! @fdc_generated(from: "Patient", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `PatientLink` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  patientLinks(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: PatientLink_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [PatientLink_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: PatientLink_Having
+  ): [PatientLink!]! @fdc_generated(from: "PatientLink", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `PatientLinkInvitation` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  patientLinkInvitations(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: PatientLinkInvitation_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [PatientLinkInvitation_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: PatientLinkInvitation_Having
+  ): [PatientLinkInvitation!]! @fdc_generated(from: "PatientLinkInvitation", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `ScheduleException` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  scheduleExceptions(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: ScheduleException_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [ScheduleException_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: ScheduleException_Having
+  ): [ScheduleException!]! @fdc_generated(from: "ScheduleException", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `Service` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  services(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: Service_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [Service_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: Service_Having
+  ): [Service!]! @fdc_generated(from: "Service", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `StaffAccessLock` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  staffAccessLocks(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: StaffAccessLock_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [StaffAccessLock_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: StaffAccessLock_Having
+  ): [StaffAccessLock!]! @fdc_generated(from: "StaffAccessLock", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `StaffProfile` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  staffProfiles(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: StaffProfile_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [StaffProfile_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: StaffProfile_Having
+  ): [StaffProfile!]! @fdc_generated(from: "StaffProfile", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `User` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  users(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: User_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [User_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: User_Having
+  ): [User!]! @fdc_generated(from: "User", purpose: QUERY_MULTIPLE)
+}

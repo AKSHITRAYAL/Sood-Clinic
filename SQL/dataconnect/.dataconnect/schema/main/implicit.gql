@@ -1,0 +1,166 @@
+extend type Appointment {
+  """
+  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
+  """
+  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "Appointment", purpose: IMPLICIT_KEY_FIELD)
+  """
+  ✨ Implicit foreign key field based on `Appointment`.`branch`. It must match the value of `Branch`.`id`. See `@ref` for how to customize it.
+  """
+  branchId: UUID! @fdc_generated(from: "Appointment.branch", purpose: IMPLICIT_REF_FIELD)
+  """
+  ✨ Implicit foreign key field based on `Appointment`.`doctor`. It must match the value of `Doctor`.`id`. See `@ref` for how to customize it.
+  """
+  doctorId: UUID! @fdc_generated(from: "Appointment.doctor", purpose: IMPLICIT_REF_FIELD)
+  """
+  ✨ Implicit foreign key field based on `Appointment`.`patient`. It must match the value of `Patient`.`id`. See `@ref` for how to customize it.
+  """
+  patientId: UUID! @fdc_generated(from: "Appointment.patient", purpose: IMPLICIT_REF_FIELD)
+  """
+  ✨ Implicit foreign key field based on `Appointment`.`service`. It must match the value of `Service`.`id`. See `@ref` for how to customize it.
+  """
+  serviceId: UUID! @fdc_generated(from: "Appointment.service", purpose: IMPLICIT_REF_FIELD)
+}
+extend type AppointmentEvent {
+  """
+  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
+  """
+  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "AppointmentEvent", purpose: IMPLICIT_KEY_FIELD)
+  """
+  ✨ Implicit foreign key field based on `AppointmentEvent`.`appointment`. It must match the value of `Appointment`.`id`. See `@ref` for how to customize it.
+  """
+  appointmentId: UUID! @fdc_generated(from: "AppointmentEvent.appointment", purpose: IMPLICIT_REF_FIELD)
+}
+extend type AuditLog {
+  """
+  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
+  """
+  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "AuditLog", purpose: IMPLICIT_KEY_FIELD)
+}
+extend type Branch {
+  """
+  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
+  """
+  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "Branch", purpose: IMPLICIT_KEY_FIELD)
+}
+extend type Department {
+  """
+  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
+  """
+  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "Department", purpose: IMPLICIT_KEY_FIELD)
+  """
+  ✨ Implicit foreign key field based on `Department`.`branch`. It must match the value of `Branch`.`id`. See `@ref` for how to customize it.
+  """
+  branchId: UUID! @fdc_generated(from: "Department.branch", purpose: IMPLICIT_REF_FIELD)
+}
+extend type Doctor {
+  """
+  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
+  """
+  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "Doctor", purpose: IMPLICIT_KEY_FIELD)
+  """
+  ✨ Implicit foreign key field based on `Doctor`.`branch`. It must match the value of `Branch`.`id`. See `@ref` for how to customize it.
+  """
+  branchId: UUID! @fdc_generated(from: "Doctor.branch", purpose: IMPLICIT_REF_FIELD)
+}
+extend type DoctorDepartment {
+  """
+  ✨ Implicit foreign key field based on `DoctorDepartment`.`doctor`. It must match the value of `Doctor`.`id`. See `@ref` for how to customize it.
+  """
+  doctorId: UUID! @fdc_generated(from: "DoctorDepartment.doctor", purpose: IMPLICIT_REF_FIELD)
+  """
+  ✨ Implicit foreign key field based on `DoctorDepartment`.`department`. It must match the value of `Department`.`id`. See `@ref` for how to customize it.
+  """
+  departmentId: UUID! @fdc_generated(from: "DoctorDepartment.department", purpose: IMPLICIT_REF_FIELD)
+}
+extend type DoctorSchedule {
+  """
+  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
+  """
+  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "DoctorSchedule", purpose: IMPLICIT_KEY_FIELD)
+  """
+  ✨ Implicit foreign key field based on `DoctorSchedule`.`doctor`. It must match the value of `Doctor`.`id`. See `@ref` for how to customize it.
+  """
+  doctorId: UUID! @fdc_generated(from: "DoctorSchedule.doctor", purpose: IMPLICIT_REF_FIELD)
+}
+extend type DoctorService {
+  """
+  ✨ Implicit foreign key field based on `DoctorService`.`doctor`. It must match the value of `Doctor`.`id`. See `@ref` for how to customize it.
+  """
+  doctorId: UUID! @fdc_generated(from: "DoctorService.doctor", purpose: IMPLICIT_REF_FIELD)
+  """
+  ✨ Implicit foreign key field based on `DoctorService`.`service`. It must match the value of `Service`.`id`. See `@ref` for how to customize it.
+  """
+  serviceId: UUID! @fdc_generated(from: "DoctorService.service", purpose: IMPLICIT_REF_FIELD)
+}
+extend type ExceptionWindow {
+  """
+  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
+  """
+  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "ExceptionWindow", purpose: IMPLICIT_KEY_FIELD)
+  """
+  ✨ Implicit foreign key field based on `ExceptionWindow`.`exception`. It must match the value of `ScheduleException`.`id`. See `@ref` for how to customize it.
+  """
+  exceptionId: UUID! @fdc_generated(from: "ExceptionWindow.exception", purpose: IMPLICIT_REF_FIELD)
+}
+extend type Notification {
+  """
+  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
+  """
+  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "Notification", purpose: IMPLICIT_KEY_FIELD)
+  """
+  ✨ Implicit foreign key field based on `Notification`.`appointment`. It must match the value of `Appointment`.`id`. See `@ref` for how to customize it.
+  """
+  appointmentId: UUID @fdc_generated(from: "Notification.appointment", purpose: IMPLICIT_REF_FIELD)
+}
+extend type Patient {
+  """
+  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
+  """
+  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "Patient", purpose: IMPLICIT_KEY_FIELD)
+}
+extend type PatientLink {
+  """
+  ✨ Implicit foreign key field based on `PatientLink`.`patient`. It must match the value of `Patient`.`id`. See `@ref` for how to customize it.
+  """
+  patientId: UUID! @fdc_generated(from: "PatientLink.patient", purpose: IMPLICIT_REF_FIELD)
+  """
+  ✨ Implicit foreign key field based on `PatientLink`.`user`. It must match the value of `User`.`id`. See `@ref` for how to customize it.
+  """
+  userId: String! @fdc_generated(from: "PatientLink.user", purpose: IMPLICIT_REF_FIELD)
+}
+extend type PatientLinkInvitation {
+  """
+  ✨ Implicit foreign key field based on `PatientLinkInvitation`.`patient`. It must match the value of `Patient`.`id`. See `@ref` for how to customize it.
+  """
+  patientId: UUID! @fdc_generated(from: "PatientLinkInvitation.patient", purpose: IMPLICIT_REF_FIELD)
+  """
+  ✨ Implicit foreign key field based on `PatientLinkInvitation`.`user`. It must match the value of `User`.`id`. See `@ref` for how to customize it.
+  """
+  userId: String! @fdc_generated(from: "PatientLinkInvitation.user", purpose: IMPLICIT_REF_FIELD)
+}
+extend type ScheduleException {
+  """
+  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
+  """
+  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "ScheduleException", purpose: IMPLICIT_KEY_FIELD)
+  """
+  ✨ Implicit foreign key field based on `ScheduleException`.`doctor`. It must match the value of `Doctor`.`id`. See `@ref` for how to customize it.
+  """
+  doctorId: UUID! @fdc_generated(from: "ScheduleException.doctor", purpose: IMPLICIT_REF_FIELD)
+}
+extend type Service {
+  """
+  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
+  """
+  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "Service", purpose: IMPLICIT_KEY_FIELD)
+}
+extend type StaffProfile {
+  """
+  ✨ Implicit foreign key field based on `StaffProfile`.`user`. It must match the value of `User`.`id`. See `@ref` for how to customize it.
+  """
+  userId: String! @fdc_generated(from: "StaffProfile.user", purpose: IMPLICIT_REF_FIELD)
+  """
+  ✨ Implicit foreign key field based on `StaffProfile`.`doctor`. It must match the value of `Doctor`.`id`. See `@ref` for how to customize it.
+  """
+  doctorId: UUID @fdc_generated(from: "StaffProfile.doctor", purpose: IMPLICIT_REF_FIELD)
+}

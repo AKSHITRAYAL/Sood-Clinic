@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { signOut } from 'firebase/auth';
+import { useStaffAccess } from '../lib/staffSessionContext';
 import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { Link, Navigate } from 'react-router-dom';
 import { httpsCallable } from 'firebase/functions';
@@ -10,14 +11,16 @@ import { closeDay, transitionAppointment } from '../services/appointmentService'
 import { allowedAppointmentTransitions, appointmentActionLabel } from '../lib/appointmentState';
 import { publicUrl } from '../lib/portals';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { getSqlStaffDirectory } from '../services/staffDirectoryService';
 
 const dateKey = (date = new Date()) => istDateKey(date);
 const greeting = () => { const { hour } = toIstParts(new Date()); return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'; };
 
 const StaffAdmin = () => {
-  const [state, setState] = useState('checking');
+  const { state } = useStaffAccess('admin');
   const [appointments, setAppointments] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [staffTotal, setStaffTotal] = useState(0);
   const [notice, setNotice] = useState('');
   const [filter, setFilter] = useState('scheduled');
   const [queueDate, setQueueDate] = useState(() => dateKey());
@@ -30,22 +33,23 @@ const StaffAdmin = () => {
   const [selectedDoctorId, setSelectedDoctorId] = useState('');
   const [dialog, setDialog] = useState(null);
 
-  useEffect(() => onAuthStateChanged(auth, async (user) => {
-    if (!user) { setState('signed-out'); return; }
-    const token = await user.getIdTokenResult();
-    setState(token.claims.forcePasswordChange === true ? 'password-change' : token.claims.role === 'admin' ? 'allowed' : 'denied');
-  }), []);
 
   useEffect(() => {
     if (state !== 'allowed') return undefined;
     const stopAppointments = onSnapshot(query(collection(firestore, 'appointments'), where('dateKey', '==', queueDate), orderBy('startsAt', 'asc')), (snapshot) => {
       setAppointments(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
     }, () => setNotice('Appointments could not be loaded. Check the administrator role assignment.'));
-    const stopStaff = onSnapshot(collection(firestore, 'staffProfiles'), (snapshot) => {
-      setStaff(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
-    }, () => setNotice('Staff directory could not be loaded.'));
-    return () => { stopAppointments(); stopStaff(); };
+    return () => { stopAppointments(); };
   }, [state, queueDate]);
+
+  useEffect(() => {
+    if (state !== 'allowed') return undefined;
+    let active = true;
+    getSqlStaffDirectory({ limit: 5 }).then((page) => {
+      if (active) { setStaff(page.staff.map((row) => ({ ...row, id: row.uid }))); setStaffTotal(page.total); }
+    }).catch((failure) => { if (active) { setStaff([]); setStaffTotal(0); setNotice(failure.message); } });
+    return () => { active = false; };
+  }, [state]);
 
   useEffect(() => {
     if (state !== 'allowed') return;
@@ -172,7 +176,7 @@ const StaffAdmin = () => {
     </header>
     <div className="staff-admin">
       <header className="staff-admin__heading"><div><p className="section-kicker">Clinic operations</p><h1>{greeting()}, {auth.currentUser?.displayName || 'Administrator'}</h1><span>Monitor appointments, manage clinic availability, and maintain the internal staff directory.</span></div><div className="staff-admin__identity"><strong>{auth.currentUser?.displayName || 'Administrator'}</strong><span>Clinic administrator</span></div></header>
-      <section className="admin-metrics" aria-label="Appointment overview"><article><span>Scheduled</span><strong>{summary.scheduled}</strong><small>Awaiting consultation</small></article><article><span>Completed</span><strong>{summary.completed}</strong><small>Closed consultations</small></article><article><span>Cancelled</span><strong>{summary.cancelled}</strong><small>Released time slots</small></article><article><span>Directory</span><strong>{staff.length}</strong><small>Internal staff records</small></article></section>
+      <section className="admin-metrics" aria-label="Appointment overview"><article><span>Scheduled</span><strong>{summary.scheduled}</strong><small>Awaiting consultation</small></article><article><span>Completed</span><strong>{summary.completed}</strong><small>Closed consultations</small></article><article><span>Cancelled</span><strong>{summary.cancelled}</strong><small>Released time slots</small></article><article><span>Directory</span><strong>{staffTotal}</strong><small>Internal staff records</small></article></section>
       {notice && <p className="admin-notice" role="status">{notice}</p>}
       <section className="admin-grid">
         <section className="admin-panel admin-panel--appointments"><div className="admin-panel__head"><div><p className="section-kicker">Appointment desk</p><h2>Consultation queue</h2></div><select aria-label="Filter appointments" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="scheduled">Scheduled</option><option value="confirmed">Confirmed</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option><option value="all">All appointments</option></select></div><div className="manager-queue__date" aria-label="Queue date"><button type="button" onClick={() => moveQueueDay(-1)}>← Previous</button><label>Clinic date<input type="date" value={queueDate} onChange={(event) => setQueueDate(event.target.value)} /></label><button type="button" onClick={() => setQueueDate(dateKey())}>Today</button><button type="button" onClick={() => moveQueueDay(1)}>Next →</button></div><div className="admin-appointment-list">{visibleAppointments.length ? visibleAppointments.map((appointment) => { const actions = allowedAppointmentTransitions(appointment.status, 'admin'); return <article key={appointment.id} className="admin-appointment"><div><strong>{patientName(appointment)}</strong><span>{formatDateTime(appointment.startsAt)}</span><small>{patientPhone(appointment)} · {appointment.reason || 'No reason supplied'}</small></div><div><span className={`appointment-status appointment-status--${appointment.status}`}>{appointment.status}</span>{actions.length > 0 && <div className="admin-appointment__actions">{actions.filter((status) => status !== 'no_show').map((status) => <button key={status} type="button" className={status === 'cancelled' ? 'button-danger' : ''} onClick={() => updateAppointment(appointment, status)}>{appointmentActionLabel(status)}</button>)}</div>}</div></article>; }) : <p className="empty-state">No {filter === 'all' ? '' : filter} appointments for {queueDate}.</p>}</div></section>

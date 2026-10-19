@@ -1,4 +1,5 @@
 {
+  "dataconnect": { "source": "SQL/dataconnect" },
   "functions": {
     "source": "functions"
   },
@@ -64,6 +65,7 @@
     }
   ],
   "emulators": {
+    "dataconnect": { "host": "127.0.0.1", "port": 9399, "postgresPort": 9398 },
     "auth": { "port": 9099 },
     "firestore": { "port": 8080 },
     "functions": { "port": 5001 },

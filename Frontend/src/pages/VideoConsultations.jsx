@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { signOut } from 'firebase/auth';
+import { useStaffAccess } from '../lib/staffSessionContext';
 import { httpsCallable } from 'firebase/functions';
 import { Link, Navigate } from 'react-router-dom';
 import { auth, functions } from '../lib/firebase';
@@ -11,8 +12,8 @@ const formatWhen = (value) => {
 };
 
 const VideoConsultations = () => {
-  const [user, setUser] = useState(undefined);
-  const [role, setRole] = useState('');
+  const { user, role: verifiedRole, state } = useStaffAccess();
+  const role = state === 'password-change' ? state : verifiedRole;
   const [appointments, setAppointments] = useState([]);
   const [links, setLinks] = useState({});
   const [busyId, setBusyId] = useState('');
@@ -24,12 +25,6 @@ const VideoConsultations = () => {
     catch (caught) { setError(caught?.message || 'Online consultations could not be loaded.'); }
   }, []);
 
-  useEffect(() => onAuthStateChanged(auth, async (next) => {
-    if (!next) { setUser(null); return; }
-    const token = await next.getIdTokenResult();
-    if (token.claims.forcePasswordChange) { setRole('password-change'); setUser(next); return; }
-    setRole(token.claims.role || ''); setUser(next);
-  }), []);
   useEffect(() => { if (user && role && role !== 'password-change') load(); }, [user, role, load]);
 
   const save = async (appointment) => {

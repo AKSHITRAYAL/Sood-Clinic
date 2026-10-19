@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 import { assertFails, assertSucceeds, initializeTestEnvironment } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore';
 
 const projectId = 'demo-sood-clinic';
 let testEnv;
@@ -73,8 +73,8 @@ describe('Firestore default-deny boundary', () => {
   it('keeps clinical history and documents out of manager/admin reads while allowing the owning patient and doctor', async () => {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
-      await setDoc(doc(db, 'patients', 'patient-one', 'medicalHistory', 'entry-one'), { details: 'Clinical history' });
-      await setDoc(doc(db, 'patients', 'patient-one', 'medicalDocuments', 'document-one'), { title: 'Clinic report' });
+      await setDoc(doc(db, 'patients', 'patient-one', 'medicalHistory', 'entry-one'), { doctorId: 'maharana', details: 'Clinical history' });
+      await setDoc(doc(db, 'patients', 'patient-one', 'medicalDocuments', 'document-one'), { doctorId: 'maharana', title: 'Clinic report' });
     });
     const patient = testEnv.authenticatedContext('patient-one', { email: 'patient@example.com' }).firestore();
     const doctor = testEnv.authenticatedContext('doctor-one', { role: 'doctor', doctorId: 'maharana' }).firestore();
@@ -127,6 +127,7 @@ describe('Firestore default-deny boundary', () => {
     await assertFails(setDoc(doc(db, 'staffProfiles', 'staff-one'), {
       uid: 'staff-one', email: 'staff@example.com', role: 'doctor', active: true,
     }));
+    await assertFails(getDoc(doc(db, 'staffProfiles', 'staff-one')));
   });
 
   it('denies direct browser schedule and exception writes even for the assigned doctor', async () => {
@@ -135,6 +136,35 @@ describe('Firestore default-deny boundary', () => {
     await assertFails(setDoc(doc(db, 'doctorSchedules', 'maharana'), schedule));
     await assertFails(setDoc(doc(db, 'doctorSchedules', 'another-doctor'), { ...schedule, doctorId: 'another-doctor' }));
     await assertFails(setDoc(doc(db, 'scheduleExceptions', 'maharana_2026-10-10'), { doctorId: 'maharana', dateKey: '2026-10-10', type: 'closed', sessions: [] }));
+    await assertFails(setDoc(doc(db, 'clinicSchedules', 'maharana'), schedule));
     await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), 'scheduleExceptions', 'maharana_2026-10-10')));
+  });
+
+  it('limits doctor appointment reads to their own scope, including collection queries', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'appointments', 'own'), { doctorId: 'doctor-a', patientId: 'patient-one' });
+      await setDoc(doc(db, 'appointments', 'other'), { doctorId: 'doctor-b', patientId: 'patient-two' });
+    });
+    const db = testEnv.authenticatedContext('doctor-one', { role: 'doctor', doctorId: 'doctor-a' }).firestore();
+    await assertSucceeds(getDoc(doc(db, 'appointments', 'own')));
+    await assertFails(getDoc(doc(db, 'appointments', 'other')));
+    await assertFails(getDocs(collection(db, 'appointments')));
+    await assertSucceeds(getDocs(query(collection(db, 'appointments'), where('doctorId', '==', 'doctor-a'))));
+  });
+
+  it('denies cross-doctor and unscoped clinical reads and ownership reassignment', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'patients', 'patient-one', 'medicalHistory', 'owned'), { doctorId: 'doctor-a', details: 'Fixture' });
+      await setDoc(doc(db, 'patients', 'patient-one', 'medicalHistory', 'other'), { doctorId: 'doctor-b', details: 'Fixture' });
+      await setDoc(doc(db, 'patients', 'patient-one', 'medicalDocuments', 'unscoped'), { title: 'Legacy fixture' });
+    });
+    const db = testEnv.authenticatedContext('doctor-one', { role: 'doctor', doctorId: 'doctor-a' }).firestore();
+    await assertSucceeds(getDoc(doc(db, 'patients', 'patient-one', 'medicalHistory', 'owned')));
+    await assertFails(getDoc(doc(db, 'patients', 'patient-one', 'medicalHistory', 'other')));
+    await assertFails(getDoc(doc(db, 'patients', 'patient-one', 'medicalDocuments', 'unscoped')));
+    await assertFails(updateDoc(doc(db, 'patients', 'patient-one', 'medicalHistory', 'owned'), { doctorId: 'doctor-b' }));
+    await assertFails(setDoc(doc(db, 'patients', 'patient-one', 'medicalHistory', 'new'), { doctorId: 'doctor-b' }));
   });
 });

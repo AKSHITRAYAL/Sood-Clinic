@@ -1,0 +1,56 @@
+# IAM only; no browser user (including a staff claim) may execute these.
+query CheckSqlFoundation @auth(level: NO_ACCESS) {
+  clinicProfile(key: {id: "sood-clinic"}) { id name timezone }
+}
+
+# Trusted migration uses existing published contact data, never patient fixtures.
+mutation ImportPublicClinicContact($name: String!, $phone: String!, $email: String!, $address: String!, $timezone: String!)
+@auth(level: NO_ACCESS) @transaction {
+  clinicProfile_upsert(data: {
+    id: "sood-clinic", name: $name, phone: $phone, email: $email,
+    address: $address, timezone: $timezone, updatedAt_expr: "request.time"
+  })
+  auditLog_insert(data: {actorRole: "system", action: "public_contact_imported", resourceType: "clinic_profile", resourceId: "sood-clinic"})
+}
+
+# Deterministic public reference fixtures; script refuses non-local emulators.
+mutation SeedFoundation @auth(level: NO_ACCESS) @transaction {
+  clinicProfile_upsert(data: {
+    id: "sood-clinic", name: "Sood Clinic", phone: "+918988207797",
+    email: "Atulsooddr@gmail.com",
+    address: "House No. 398, Sector 10, Panchkula, Haryana 134109, India",
+    timezone: "Asia/Kolkata", updatedAt_expr: "request.time"
+  })
+  branch_upsert(data: {
+    id: "00000000-0000-4000-8000-000000000001", legacyId: "sood-clinic",
+    code: "SOOD", name: "Sood Clinic",
+    address: "House No. 398, Sector 10, Panchkula, Haryana 134109, India",
+    timezone: "Asia/Kolkata", active: true, updatedAt_expr: "request.time"
+  })
+  department_upsert(data: {
+    id: "00000000-0000-4000-8000-000000000002", legacyId: "gastroenterology",
+    branchId: "00000000-0000-4000-8000-000000000001", code: "GASTRO",
+    name: "Gastroenterology", active: true, publicBookingEnabled: true,
+    sortOrder: 1, updatedAt_expr: "request.time"
+  })
+  doctor_upsert(data: {
+    id: "00000000-0000-4000-8000-000000000003", legacyId: "brig-ak-sood",
+    branchId: "00000000-0000-4000-8000-000000000001",
+    name: "Dr. Brig. A. K. Sood VSM (Retd)", qualification: "MBBS, MD, DNB, DM",
+    registrationNumber: "HR886", active: true, bookingEnabled: true,
+    updatedAt_expr: "request.time"
+  })
+  doctorDepartment_upsert(data: {
+    doctorId: "00000000-0000-4000-8000-000000000003",
+    departmentId: "00000000-0000-4000-8000-000000000002"
+  })
+  service_upsert(data: {
+    id: "00000000-0000-4000-8000-000000000004", code: "consultation",
+    name: "Clinic consultation", durationMinutes: 20, bufferMinutes: 0,
+    consultationMode: "in_person", active: true, updatedAt_expr: "request.time"
+  })
+  doctorService_upsert(data: {
+    doctorId: "00000000-0000-4000-8000-000000000003",
+    serviceId: "00000000-0000-4000-8000-000000000004"
+  })
+}
