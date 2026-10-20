@@ -428,8 +428,7 @@ function rehearse(records, { pageSize = 100, targetSnapshot, patientTargetSnapsh
     for (const reason of prepared.blockers || [prepared.reason]) report.timestampPreparation.blockers[reason] = (report.timestampPreparation.blockers[reason] || 0) + 1;
   };
   try { resolveId = catalogIdentity(targetSnapshot); } catch (error) { snapshotError = error.migrationCode || 'INVALID_TARGET_SNAPSHOT'; }
-  // shortcut: catalog lookups scan this bounded in-memory batch; index references
-  // before adding an actual export/checkpoint reader in the next migration step.
+  // shortcut: lookups scan the bounded in-memory batch; index/stream references before lifting its limits.
   for (let offset = 0; offset < records.length; offset += pageSize) {
     for (const record of records.slice(offset, offset + pageSize)) {
       const inspection = inspectRecord(record);
@@ -529,4 +528,41 @@ function rehearse(records, { pageSize = 100, targetSnapshot, patientTargetSnapsh
   report.timestampPreparation.blockers = Object.fromEntries(Object.entries(report.timestampPreparation.blockers).sort());
   return report;
 }
-module.exports = { manifest, inspectRecord, mapCatalogRecord, mapPatientRecord, mapAppointmentRecord, mapBookingConfig, mapScheduleRecord, mapClinicalRecord, mapExperienceRecord, mapRegistryRecord, assessPatientOwnership, assessSchedule, legacyUuid, validDate, validTimestamp, timestampNanos, paise, rehearse };
+// Private inspection decisions only; dependencies use the entire retained batch, not one page.
+function inspectMigrationRange(records, options, start, end) {
+  if (!Array.isArray(records) || records.length > 10000 || !Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || end > records.length) throw new Error('INVALID_INSPECTION_RANGE');
+  const output = [];
+  for (let index = start; index < end; index++) {
+    const record = records[index]; const inspection = inspectRecord(record);
+    if (inspection.status === 'rejected') {
+      output.push({ index, disposition: 'rejected', reasons: [inspection.reason] }); continue;
+    }
+    const category = inspection.category; const checks = [];
+    if (inspection.disposition === 'catalog_candidate') checks.push(mapCatalogRecord(record, records, options.targetSnapshot));
+    if (category === 'patients') checks.push(mapPatientRecord(record, records, options.patientTargetSnapshot), assessPatientOwnership(record, records, options));
+    if (category === 'public_config') checks.push(mapBookingConfig(record, records, options.serviceTargetSnapshot));
+    if (['appointments', 'appointment_events'].includes(category)) checks.push(mapAppointmentRecord(record, records, options));
+    if (['medical_history', 'medical_documents'].includes(category)) checks.push(mapClinicalRecord(record, records, options));
+    if (['feedback', 'audit'].includes(category)) checks.push(mapExperienceRecord(record, records, options));
+    if (['counters', 'booking_requests'].includes(category)) checks.push(mapRegistryRecord(record, records, options));
+    if (['schedules', 'exceptions', 'old_schedules'].includes(category) || (category === 'doctors' && Object.hasOwn(record.data, 'weeklySchedule'))) checks.push(assessSchedule(record, records), mapScheduleRecord(record, records, options));
+    const reasons = new Set(); let rejected = false;
+    const collect = result => {
+      if (result.status === 'rejected') rejected = true;
+      if (result.reason) reasons.add(result.reason);
+      for (const reason of result.blockers || []) reasons.add(reason);
+      for (const field of result.coverage?.fields || []) if (field.reason) reasons.add(field.reason);
+    };
+    for (const result of checks) {
+      collect(result);
+      if (result.status === 'mapped') collect(prepareMigrationTimestamps(result));
+    }
+    const excluded = checks.length === 0 && inspection.disposition !== 'deferred';
+    if (!checks.length) reasons.add(excluded ? 'NOT_A_MIGRATION_SOURCE' : 'MODULE_NOT_READY');
+    if (!excluded && !rejected) reasons.add('INSPECTION_ONLY');
+    if (!reasons.size || reasons.size > 128 || [...reasons].some(code => typeof code !== 'string' || !/^[A-Z][A-Z0-9_]{0,79}$/.test(code))) throw new Error('INVALID_INSPECTION_REASON');
+    output.push({ index, disposition: rejected ? 'rejected' : excluded ? 'excluded' : 'blocked', reasons: [...reasons].sort() });
+  }
+  return output;
+}
+module.exports = { manifest, inspectRecord, mapCatalogRecord, mapPatientRecord, mapAppointmentRecord, mapBookingConfig, mapScheduleRecord, mapClinicalRecord, mapExperienceRecord, mapRegistryRecord, assessPatientOwnership, assessSchedule, legacyUuid, validDate, validTimestamp, timestampNanos, paise, rehearse, inspectMigrationRange };

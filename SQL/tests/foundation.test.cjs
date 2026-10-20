@@ -8,6 +8,159 @@ let sql;
 let clinic;
 let admin;
 const accessDenied = (error) => /permission.denied|unauthenticated|not authorized|not allowed|NO_ACCESS/i.test(error.message);
+const { rehearseBranchStep, branchId: rehearsalBranchId } = require('../scripts/rehearse-branch.cjs');
+const { randomUUID, randomBytes } = require('node:crypto');
+
+async function withRehearsalBranch(run) {
+  const beforeAt = '2026-10-19T00:00:00.000000Z';
+  const input = { requestId: randomUUID(), action: 'apply', expectedName: 'Synthetic Before', expectedAt: beforeAt, name: 'Synthetic After', sourceInstant: '2026-10-20T00:00:00.123456789Z' };
+  await sql.query("INSERT INTO clinic_branches(id,code,name,address,timezone,active,created_at,updated_at) VALUES($1,'SQL-REHEARSAL-ONLY','Synthetic Before','Synthetic address','Asia/Kolkata',false,$2,$2)", [rehearsalBranchId, beforeAt]);
+  await sql.query("INSERT INTO clinic_legacy_source_instants(entity_type,entity_id,field,source_path,sql_value,exact_value) VALUES('Branch',$1,'updatedAt','synthetic/migration-rehearsal',$2,'2026-10-19T00:00:00.000000000Z')", [rehearsalBranchId, beforeAt]);
+  try { await run(input); }
+  finally {
+    await sql.query('ROLLBACK');
+    await sql.query("DELETE FROM clinic_audit_logs WHERE actor_uid='migration-rehearsal' AND resource_id=$1", [rehearsalBranchId]);
+    await sql.query("DELETE FROM clinic_operation_receipts WHERE actor_uid='migration-rehearsal'");
+    await sql.query("DELETE FROM clinic_legacy_source_instants WHERE entity_type='Branch' AND entity_id=$1", [rehearsalBranchId]);
+    await sql.query("DELETE FROM clinic_branches WHERE id=$1 AND code='SQL-REHEARSAL-ONLY'", [rehearsalBranchId]);
+  }
+}
+
+test('synthetic IAM CAS commits domain, exact evidence, audit and receipt together; retry is read-only', async () => withRehearsalBranch(async input => {
+  assert.deepEqual(await rehearseBranchStep(input), { status: 'applied', applied: 1, replayed: 0, productionReady: false });
+  assert.deepEqual(await rehearseBranchStep(input), { status: 'replayed', applied: 0, replayed: 1, productionReady: false });
+  const state = (await admin.executeQuery('InspectBranchRehearsal', { requestId: input.requestId })).data;
+  assert.equal(state.branch.name, 'Synthetic After');
+  assert.equal(state.legacySourceInstant.exactValue, input.sourceInstant);
+  const { timestampNanos } = require('../migration/rehearsal.cjs');
+  assert.equal(timestampNanos(state.legacySourceInstant.sqlValue), timestampNanos(state.branch.updatedAt));
+  assert.equal((await sql.query("SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid='migration-rehearsal'")).rows[0].n, 1);
+  await assert.rejects(rehearseBranchStep({ ...input, name: 'Synthetic Changed Request' }), /REHEARSAL_REQUEST_REUSE_CONFLICT/);
+}));
+
+test('synthetic CAS rejects stale content/version and transaction failure leaves no partial evidence/receipt', async () => withRehearsalBranch(async input => {
+  await assert.rejects(rehearseBranchStep({ ...input, expectedName: 'Synthetic Wrong Before' }), /REHEARSAL_WRITE_REJECTED/);
+  await assert.rejects(rehearseBranchStep({ ...input, expectedAt: '2026-10-18T00:00:00.000000Z' }), /REHEARSAL_WRITE_REJECTED/);
+  await sql.query("INSERT INTO clinic_audit_logs(id,actor_uid,actor_role,action,resource_type,resource_id,occurred_at) VALUES($1,'migration-rehearsal','system','synthetic_collision','synthetic_branch',$2,now())", [input.requestId, rehearsalBranchId]);
+  // The SDK hides the database constraint error; absence of a receipt alone cannot prove no commit.
+  await assert.rejects(rehearseBranchStep(input), /REHEARSAL_STATE_UNCERTAIN/);
+  const state = (await admin.executeQuery('InspectBranchRehearsal', { requestId: input.requestId })).data;
+  assert.equal(state.branch.name, input.expectedName);
+  assert.equal(state.legacySourceInstant.exactValue, '2026-10-19T00:00:00.000000000Z');
+  assert.equal(state.operationReceipt, null);
+}));
+
+test('synthetic concurrent retry applies once and conflicting CAS requests have one winner', async () => withRehearsalBranch(async input => {
+  const repeats = await Promise.all([rehearseBranchStep(input), rehearseBranchStep(input)]);
+  assert.equal(repeats.reduce((n, value) => n + value.applied, 0), 1);
+  const next = { ...input, requestId: randomUUID(), expectedName: input.name, expectedAt: '2026-10-20T00:00:00.123456Z', sourceInstant: '2026-10-21T00:00:00.000000001Z' };
+  const race = await Promise.allSettled([rehearseBranchStep({ ...next, name: 'Synthetic Winner A' }), rehearseBranchStep({ ...next, requestId: randomUUID(), name: 'Synthetic Winner B' })]);
+  assert.equal(race.filter(value => value.status === 'fulfilled').length, 1);
+  assert.match(race.find(value => value.status === 'rejected').reason.message, /REHEARSAL_WRITE_REJECTED/);
+}));
+
+test('synthetic encrypted before-image supports guarded logical restore with a fresh version, not a database restore', async () => withRehearsalBranch(async input => {
+  const fs = require('node:fs/promises'); const os = require('node:os'); const path = require('node:path');
+  const { encodeInspectionSource, openInspectionSource } = require('../migration/protected-reader.cjs');
+  const key = randomBytes(32); const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clinic-restore-')); await fs.chmod(dir, 0o700);
+  try {
+    const file = path.join(dir, 'before.bin');
+    const businessBefore = (await sql.query("SELECT to_jsonb(b) - 'updated_at' AS content FROM clinic_branches b WHERE id=$1", [rehearsalBranchId])).rows[0].content;
+    const contentSnapshot = { complete: true, tables: ['Branch'], rows: [{ entityType: 'Branch', key: [rehearsalBranchId], version: input.expectedAt, content: businessBefore }] };
+    await fs.writeFile(file, encodeInspectionSource([], { contentSnapshot }, key), { flag: 'wx', mode: 0o600 });
+    await rehearseBranchStep(input);
+    const before = (await (await openInspectionSource(file, key)).page()).targets.contentSnapshot.rows[0].content;
+    const restore = { ...input, requestId: randomUUID(), action: 'restore', expectedName: input.name, expectedAt: '2026-10-20T00:00:00.123456Z', name: before.name, sourceInstant: '2026-10-21T00:00:00.000000001Z' };
+    await rehearseBranchStep(restore);
+    const state = (await admin.executeQuery('InspectBranchRehearsal', { requestId: restore.requestId })).data;
+    assert.equal(state.branch.name, before.name); assert.equal(state.auditLog.action, 'migration_rehearsal_restore');
+    assert.deepEqual((await sql.query("SELECT to_jsonb(b) - 'updated_at' AS content FROM clinic_branches b WHERE id=$1", [rehearsalBranchId])).rows[0].content, before);
+    assert.equal(state.legacySourceInstant.exactValue, restore.sourceInstant);
+    await assert.rejects(rehearseBranchStep(input), /REHEARSAL_REPLAY_STATE_CHANGED/);
+    assert.equal((await rehearseBranchStep(restore)).status, 'replayed');
+    await assert.rejects(rehearseBranchStep({ ...restore, requestId: randomUUID(), expectedName: 'Synthetic Before Intervening Write' }), /REHEARSAL_WRITE_REJECTED/);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+}));
+
+test('synthetic rehearsal IAM operations deny every browser role and anonymous callers', async () => withRehearsalBranch(async input => {
+  const variables = { requestId: input.requestId, expectedName: input.expectedName, expectedAt: input.expectedAt, name: input.name, updatedAt: '2026-10-20T00:00:00.123456Z', exactValue: input.sourceInstant, operation: 'synthetic', action: 'migration_rehearsal_apply' };
+  for (const impersonate of [{ unauthenticated: true }, ...['patient', 'manager', 'doctor', 'admin'].map(role => ({ authClaims: { sub: `synthetic-${role}`, role } }))]) {
+    await assert.rejects(admin.executeMutation('RehearseBranchCompareAndSet', variables, { impersonate }), accessDenied);
+    await assert.rejects(admin.executeQuery('InspectBranchRehearsal', { requestId: input.requestId }, { impersonate }), accessDenied);
+  }
+}));
+
+test('synthetic driver refuses arbitrary IDs, actions, names and collapsed or non-advancing versions', async () => withRehearsalBranch(async input => {
+  for (const patch of [{ branchId: rehearsalBranchId }, { action: 'delete' }, { name: 'Not a synthetic name' }, { requestId: 'not-a-uuid' }, { sourceInstant: input.expectedAt }, { expectedAt: '2026-10-19T00:00:00.000000001Z' }, { sourceInstant: '2026-10-19T00:00:00.000000001Z' }]) await assert.rejects(rehearseBranchStep({ ...input, ...patch }), /REHEARSAL_INPUT_REJECTED/);
+  assert.equal((await admin.executeQuery('InspectBranchRehearsal', { requestId: input.requestId })).data.branch.name, input.expectedName);
+}));
+
+test('synthetic lost commit acknowledgement reconciles receipt rather than writing twice', async () => withRehearsalBranch(async input => {
+  const execute = admin.executeMutation;
+  admin.executeMutation = async (...args) => { await execute.apply(admin, args); throw new Error('Synthetic lost response'); };
+  try {
+    const result = await rehearseBranchStep(input);
+    assert.equal(result.status, 'replayed'); assert.equal(result.applied, 0);
+    assert.equal((await sql.query("SELECT count(*)::int n FROM clinic_operation_receipts WHERE actor_uid='migration-rehearsal'")).rows[0].n, 1);
+  } finally { admin.executeMutation = execute; }
+}));
+
+test('synthetic unknown transport outcome stays uncertain when no committed receipt can be confirmed', async () => withRehearsalBranch(async input => {
+  const execute = admin.executeMutation;
+  admin.executeMutation = async () => { throw new Error('Synthetic unknown transport outcome'); };
+  try { await assert.rejects(rehearseBranchStep(input), /REHEARSAL_STATE_UNCERTAIN/); }
+  finally { admin.executeMutation = execute; }
+  assert.equal((await admin.executeQuery('InspectBranchRehearsal', { requestId: input.requestId })).data.branch.name, input.expectedName);
+}));
+
+test('synthetic replay cannot ignore changed scope, source evidence or audit identity', async () => withRehearsalBranch(async input => {
+  await rehearseBranchStep(input);
+  await sql.query('UPDATE clinic_branches SET active=true WHERE id=$1', [rehearsalBranchId]);
+  await assert.rejects(rehearseBranchStep(input), /REHEARSAL_REPLAY_STATE_CHANGED/);
+  await sql.query('UPDATE clinic_branches SET active=false WHERE id=$1', [rehearsalBranchId]);
+  await sql.query("UPDATE clinic_legacy_source_instants SET source_path='synthetic/changed' WHERE entity_id=$1", [rehearsalBranchId]);
+  await assert.rejects(rehearseBranchStep(input), /REHEARSAL_REPLAY_STATE_CHANGED/);
+  await sql.query("UPDATE clinic_legacy_source_instants SET source_path='synthetic/migration-rehearsal' WHERE entity_id=$1", [rehearsalBranchId]);
+  await sql.query("UPDATE clinic_audit_logs SET actor_role='changed' WHERE id=$1", [input.requestId]);
+  await assert.rejects(rehearseBranchStep(input), /REHEARSAL_REPLAY_STATE_CHANGED/);
+}));
+
+test('local read-only target capture derives complete scoped columns/keys with exact timestamps and encrypted-only output', async () => withRehearsalBranch(async input => {
+  const { captureLocalTargets } = require('../scripts/capture-local-targets.cjs');
+  const fs = require('node:fs/promises'); const os = require('node:os'); const path = require('node:path');
+  const { openInspectionSource } = require('../migration/protected-reader.cjs');
+  const key = randomBytes(32); const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clinic-capture-')); await fs.chmod(dir, 0o700);
+  try {
+    const capture = await captureLocalTargets(key);
+    assert.equal(capture.mode, 'local_target_snapshot'); assert.equal(capture.productionReady, false);
+    assert.equal(Object.keys(capture.counts).length, 23); assert.ok(capture.counts.Branch >= 2);
+    assert.ok(Buffer.isBuffer(capture.encrypted)); assert.ok(!capture.encrypted.includes(Buffer.from('Synthetic Before')));
+    const file = path.join(dir, 'snapshot.bin'); await fs.writeFile(file, capture.encrypted, { mode: 0o600, flag: 'wx' });
+    const page = await (await openInspectionSource(file, key)).page();
+    const snapshot = page.targets.contentSnapshot;
+    assert.ok(!snapshot.tables.includes('PatientLinkInvitation')); assert.ok(!snapshot.tables.includes('AuditLog'));
+    const branch = snapshot.rows.find(row => row.entityType === 'Branch' && row.key[0] === rehearsalBranchId);
+    assert.equal(branch.content.updatedAt, input.expectedAt); assert.equal(branch.version, input.expectedAt);
+    assert.equal(branch.content.active, false); assert.equal(branch.content.legacyId, null);
+    const membership = snapshot.rows.find(row => row.entityType === 'DoctorDepartment');
+    assert.deepEqual(membership.key, [membership.content.doctorId, membership.content.departmentId]);
+    assert.equal((await admin.executeQuery('InspectBranchRehearsal', { requestId: input.requestId })).data.branch.name, input.expectedName);
+    await rehearseBranchStep(input);
+    const changed = await captureLocalTargets(key); const current = path.join(dir, 'current.bin');
+    await fs.writeFile(current, changed.encrypted, { mode: 0o600, flag: 'wx' });
+    const comparison = await (await openInspectionSource(file, key)).reconcileSnapshot(current);
+    assert.equal(comparison.target.changed, 2); // Domain and exact evidence, not excluded audit/receipts.
+    assert.equal(comparison.status, 'conflict'); assert.equal(comparison.readyForApply, false);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+}));
+
+test('local target capture refuses an oversized census rather than labeling a partial page complete', async () => {
+  const { captureLocalTargets } = require('../scripts/capture-local-targets.cjs');
+  try {
+    await sql.query("INSERT INTO clinic_branches(id,code,name,address,timezone,active,created_at,updated_at) SELECT gen_random_uuid(),'SQL-CAPTURE-BOUND-'||n,'Synthetic Capture Bound','Synthetic address','Asia/Kolkata',false,now(),now() FROM generate_series(1,10001) n");
+    await assert.rejects(captureLocalTargets(randomBytes(32)), /LOCAL_SNAPSHOT_REJECTED/);
+  } finally { await sql.query("DELETE FROM clinic_branches WHERE code LIKE 'SQL-CAPTURE-BOUND-%'"); }
+});
 
 before(async () => {
   admin = localDataConnect();

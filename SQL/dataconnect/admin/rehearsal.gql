@@ -1,0 +1,29 @@
+# LOCAL SYNTHETIC REHEARSAL ONLY. Undeployed; exclude from any production release.
+# The only caller also requires demo-sood-clinic and the exact loopback emulator.
+mutation RehearseBranchCompareAndSet(
+  $requestId: UUID!, $expectedName: String!, $expectedAt: Timestamp!,
+  $name: String!, $updatedAt: Timestamp!, $exactValue: String!,
+  $operation: String!, $action: String!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: "migration-rehearsal", requestId: $requestId})
+      @check(expr: "this == null", message: "REHEARSAL_RECEIPT_EXISTS") { operation }
+  }
+  branch_updateMany(
+    where: {id: {eq: "00000000-0000-4000-8000-000000009001"}, code: {eq: "SQL-REHEARSAL-ONLY"}, name: {eq: $expectedName}, updatedAt: {eq: $expectedAt}, active: {eq: false}},
+    data: {name: $name, updatedAt: $updatedAt}
+  ) @check(expr: "this == 1", message: "REHEARSAL_STALE_CONTENT_OR_VERSION")
+  legacySourceInstant_upsert(data: {
+    entityType: "Branch", entityId: "00000000-0000-4000-8000-000000009001", field: "updatedAt",
+    sourcePath: "synthetic/migration-rehearsal", sqlValue: $updatedAt, exactValue: $exactValue
+  })
+  auditLog_insert(data: {id: $requestId, actorUid: "migration-rehearsal", actorRole: "system", action: $action, resourceType: "synthetic_branch", resourceId: "00000000-0000-4000-8000-000000009001"})
+  operationReceipt_insert(data: {actorUid: "migration-rehearsal", requestId: $requestId, operation: $operation})
+}
+
+query InspectBranchRehearsal($requestId: UUID!) @auth(level: NO_ACCESS) {
+  branch(key: {id: "00000000-0000-4000-8000-000000009001"}) { name updatedAt code active }
+  legacySourceInstant(key: {entityType: "Branch", entityId: "00000000-0000-4000-8000-000000009001", field: "updatedAt"}) { sqlValue exactValue sourcePath }
+  operationReceipt(key: {actorUid: "migration-rehearsal", requestId: $requestId}) { operation }
+  auditLog(key: {id: $requestId}) { action actorUid actorRole resourceId resourceType }
+}

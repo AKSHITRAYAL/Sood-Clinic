@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { randomBytes } = require('node:crypto');
+const { randomBytes, createHmac, createCipheriv, createDecipheriv } = require('node:crypto');
 const { fixtures, patientTargetSnapshot } = require('../migration/fixtures.cjs');
 const { encodeInspectionSource, openInspectionSource } = require('../migration/protected-reader.cjs');
 const records = fixtures.filter(row => !/^integrations\/|^integrationOAuthStates\//.test(row.path));
@@ -15,6 +15,455 @@ async function sandbox(run) {
 }
 const decisions = page => page.records.map((_, index) => ({ index: page.start + index, disposition: 'blocked', reasons: ['MODULE_NOT_READY'] }));
 const save = (file, bytes) => fs.writeFile(file, bytes, { mode: 0o600, flag: 'wx' });
+
+const contentSnapshot = () => ({ complete: true, tables: ['Branch'], rows: [
+  { entityType: 'Branch', key: ['fixture-branch'], version: 'opaque-revision-1', content: { name: 'SYNTHETIC_PRIVATE_TARGET', active: false, sortOrder: 0, note: null } },
+] });
+
+const groups = {
+  Config: { path: /^clinic\/publicConfig$/, mapper: 'mapBookingConfig', kinds: { clinicSettings: ['ClinicSettings', ['id']], services: ['Service', ['id']] } },
+  Schedule: { path: /^(doctorSchedules|scheduleExceptions)\/[^/]+$/, mapper: 'mapScheduleRecord', kinds: { scheduleState: ['DoctorScheduleState', ['doctorId']], doctorSchedules: ['DoctorSchedule', ['id']], scheduleException: ['ScheduleException', ['id']], exceptionWindows: ['ExceptionWindow', ['id']] } },
+  Patient: { path: /^patients\/[^/]+$/, mapper: 'mapPatientRecord', primary: 'patient', kinds: { patient: ['Patient', ['id']], patientReportedProfile: ['PatientReportedProfile', ['patientId']] } },
+  Clinical: { path: /^patients\/[^/]+\/medical(?:History|Documents)\/[^/]+$/, mapper: 'mapClinicalRecord', kinds: { legacyMedicalHistory: ['LegacyMedicalHistory', ['id']], legacyMedicalDocument: ['LegacyMedicalDocument', ['id']] } },
+  Appointment: { path: /^appointments\/[^/]+(?:\/events\/[^/]+)?$/, mapper: 'mapAppointmentRecord', kinds: { appointment: ['Appointment', ['id']], appointmentEvent: ['AppointmentEvent', ['id']], appointmentPrivateDetails: ['AppointmentPrivateDetails', ['appointmentId']], appointmentLegacySlots: ['AppointmentLegacySlot', ['appointmentId', 'ordinal']] } },
+  Experience: { path: /^(patientFeedback|auditLogs)\/[^/]+$/, mapper: 'mapExperienceRecord', kinds: { legacyPatientFeedback: ['LegacyPatientFeedback', ['id']], legacyAuditRecord: ['LegacyAuditRecord', ['id']] } },
+  Registry: { path: /^(counters\/patientUhid|bookingRequests\/[^/]+)$/, mapper: 'mapRegistryRecord', kinds: { legacyUhidCounter: ['LegacyUhidCounter', ['id']], legacyBookingRequest: ['LegacyBookingRequest', ['id']] } },
+};
+function groupContent(name, rows = records, omitIdentity = false) {
+  const { fixtures: _fixtures, ...targets } = require('../migration/fixtures.cjs');
+  if (omitIdentity) delete targets[name === 'Config' ? 'serviceTargetSnapshot' : 'scheduleTargetSnapshot'];
+  const mappers = require('../migration/rehearsal.cjs');
+  const { prepareMigrationTimestamps } = require('../migration/instant-preservation.cjs');
+  const group = groups[name]; const kinds = { ...group.kinds, legacySourceInstants: ['LegacySourceInstant', ['entityType', 'entityId', 'field']] };
+  const snapshot = { complete: true, tables: Object.values(kinds).map(([type]) => type), rows: [] };
+  for (const record of rows.filter(row => row.source === 'firestore' && group.path.test(row.path))) {
+    const mapped = mappers[group.mapper](record, rows, name === 'Patient' ? targets.patientTargetSnapshot : name === 'Config' ? targets.serviceTargetSnapshot : targets);
+    const candidate = prepareMigrationTimestamps(mapped);
+    assert.equal(candidate.status, 'prepared');
+    for (const [kind, payload] of Object.entries(candidate.rows)) {
+      const [entityType, keys] = kinds[kind];
+      for (const content of Array.isArray(payload) ? payload : [payload]) snapshot.rows.push({ entityType, key: keys.map(field => content[field]), version: 'synthetic-version', content });
+    }
+  }
+  return { ...targets, contentSnapshot: snapshot };
+}
+for (const name of Object.keys(groups)) {
+  test(`${name} candidate comparison preserves exact rows/evidence and remains private and blocked`, async () => sandbox(async dir => {
+    const key = randomBytes(32); const targets = groupContent(name); const file = path.join(dir, 'source.bin');
+    await save(file, encodeInspectionSource(records, targets, key));
+    const report = (await openInspectionSource(file, key))[`reconcile${name}Candidates`]();
+    assert.ok(targets.contentSnapshot.rows.length > 0);
+    assert.equal(report.rows.equal, targets.contentSnapshot.rows.length); assert.equal(report.rows.conflicting, 0);
+    assert.equal(report.rows.unaccounted, 0); assert.equal(report.applied, 0); assert.equal(report.grants, 0); assert.equal(report.readyForApply, false);
+    assert.equal(report.sources.inspected, ['Patient', 'Config'].includes(name) ? 1 : 2);
+    assert.ok(report.blockers.includes('ATOMIC_VERSION_GUARD_PENDING'));
+    assert.ok(!JSON.stringify(report).includes('fixture')); assert.ok(!JSON.stringify(report).includes('Synthetic'));
+    if (name === 'Patient') assert.ok(report.blockers.includes('CLINIC_LINK_VERIFICATION_REQUIRED'));
+    if (name === 'Clinical') assert.ok(report.blockers.includes('DOCUMENT_STORAGE_VERIFICATION_PENDING'));
+    if (name === 'Experience') assert.ok(report.blockers.includes('FEEDBACK_PUBLICATION_CONSENT_REVIEW'));
+    if (name === 'Registry') assert.ok(report.blockers.includes('REQUEST_REPLAY_DISABLED'));
+    if (name === 'Config') assert.ok(report.blockers.includes('SETTINGS_SINGLETON_AUTHORITY_REVIEW'));
+    if (name === 'Schedule') assert.ok(report.blockers.includes('LEGACY_CLINIC_SCHEDULE_REVIEW'));
+  }));
+}
+
+test('patient content equality never clears disabled-account ownership review or grants links', async () => sandbox(async dir => {
+  const rows = structuredClone(records); rows.find(row => row.source === 'auth').data.disabled = true;
+  const key = randomBytes(32); const targets = groupContent('Patient', rows); const file = path.join(dir, 'source.bin');
+  await save(file, encodeInspectionSource(rows, targets, key));
+  const report = (await openInspectionSource(file, key)).reconcilePatientCandidates();
+  assert.equal(report.rows.equal, targets.contentSnapshot.rows.length);
+  assert.ok(report.blockers.includes('ACCOUNT_DISABLED')); assert.ok(report.blockers.includes('PATIENT_OWNERSHIP_REVIEW'));
+  assert.equal(report.grants, 0); assert.equal(report.readyForApply, false);
+}));
+
+test('patient private-profile conflicts and missing reused identity are not repaired', async () => sandbox(async dir => {
+  const key = randomBytes(32); const targets = groupContent('Patient'); const file = path.join(dir, 'source.bin');
+  targets.contentSnapshot.rows = targets.contentSnapshot.rows.filter(row => row.entityType !== 'Patient');
+  targets.contentSnapshot.rows.find(row => row.entityType === 'PatientReportedProfile').content.allergies = 'SYNTHETIC_PRIVATE_CONFLICT';
+  await save(file, encodeInspectionSource(records, targets, key));
+  const report = (await openInspectionSource(file, key)).reconcilePatientCandidates();
+  assert.equal(report.rows.absent, 1); assert.equal(report.rows.conflicting, 1);
+  assert.ok(report.blockers.includes('TARGET_IDENTITY_CONTENT_MISMATCH')); assert.ok(!JSON.stringify(report).includes('SYNTHETIC_PRIVATE_CONFLICT'));
+}));
+
+test('non-catalogue scopes detect target changes without leaking payloads', async () => sandbox(async dir => {
+  const key = randomBytes(32);
+  for (const name of ['Clinical', 'Appointment', 'Experience', 'Registry']) {
+    const targets = groupContent(name); targets.contentSnapshot.rows[0].content.unexpected = 'DO_NOT_LEAK';
+    const file = path.join(dir, `${name}.bin`); await save(file, encodeInspectionSource(records, targets, key));
+    const report = (await openInspectionSource(file, key))[`reconcile${name}Candidates`]();
+    assert.equal(report.rows.conflicting, 1); assert.equal(report.status, 'conflict'); assert.equal(report.applied, 0);
+    assert.ok(!JSON.stringify(report).includes('DO_NOT_LEAK'));
+  }
+}));
+
+test('per-row schedule/service decisions cannot adopt equal-content new keys', async () => sandbox(async dir => {
+  const key = randomBytes(32);
+  for (const name of ['Config', 'Schedule']) {
+    const targets = groupContent(name, records, true); const file = path.join(dir, `${name}.bin`);
+    await save(file, encodeInspectionSource(records, targets, key));
+    const report = (await openInspectionSource(file, key))[`reconcile${name}Candidates`]();
+    assert.ok(report.rows.conflicting > 0); assert.ok(report.blockers.includes('TARGET_UNLINKED_KEY_COLLISION'));
+    assert.ok(report.blockers.includes('TARGET_IDENTITY_UNCHECKED')); assert.equal(report.readyForApply, false);
+  }
+}));
+
+test('private patient and clinical malformed source values remain rejected before content equality', async () => sandbox(async dir => {
+  const key = randomBytes(32);
+  for (const name of ['Patient', 'Clinical']) {
+    const targets = groupContent(name); const rows = structuredClone(records);
+    if (name === 'Patient') rows.find(row => /^patients\/[^/]+$/.test(row.path)).data.allergies = { text: 'PRIVATE_INVALID_VALUE' };
+    else rows.find(row => row.path.includes('/medicalDocuments/')).data.url = 'javascript:PRIVATE_INVALID_VALUE';
+    const file = path.join(dir, `${name}.bin`); await save(file, encodeInspectionSource(rows, targets, key));
+    const report = (await openInspectionSource(file, key))[`reconcile${name}Candidates`]();
+    assert.equal(report.sources.rejected, 1); assert.equal(report.grants, 0); assert.equal(report.applied, 0);
+    assert.ok(!JSON.stringify(report).includes('PRIVATE_INVALID_VALUE'));
+  }
+}));
+
+function catalogContent(identity = require('../migration/fixtures.cjs').targetSnapshot) {
+  const { mapCatalogRecord } = require('../migration/rehearsal.cjs');
+  const { prepareMigrationTimestamps } = require('../migration/instant-preservation.cjs');
+  const kinds = { branch: ['Branch', ['id']], department: ['Department', ['id']], doctor: ['Doctor', ['id']], doctorDepartments: ['DoctorDepartment', ['doctorId', 'departmentId']], legacySourceInstants: ['LegacySourceInstant', ['entityType', 'entityId', 'field']] };
+  const snapshot = { complete: true, tables: Object.values(kinds).map(([type]) => type), rows: [] };
+  for (const record of records.filter(row => /^(branches|departments|doctors)\/[^/]+$/.test(row.path))) {
+    const candidate = prepareMigrationTimestamps(mapCatalogRecord(record, records, identity));
+    for (const [kind, payload] of Object.entries(candidate.rows)) {
+      const [entityType, keys] = kinds[kind];
+      for (const content of Array.isArray(payload) ? payload : [payload]) snapshot.rows.push({ entityType, key: keys.map(field => content[field]), version: 'synthetic-version', content });
+    }
+  }
+  return snapshot;
+}
+
+test('catalogue candidate reconciliation covers explicit identities, memberships and exact evidence without apply', async () => sandbox(async dir => {
+  const key = randomBytes(32); const snapshot = catalogContent(); const file = path.join(dir, 'catalog.bin');
+  const targetSnapshot = require('../migration/fixtures.cjs').targetSnapshot;
+  await save(file, encodeInspectionSource(records, { targetSnapshot, contentSnapshot: snapshot }, key));
+  const report = (await openInspectionSource(file, key)).reconcileCatalogCandidates();
+  assert.equal(report.sources.inspected, 3); assert.equal(report.sources.outOfScope, records.length - 3);
+  assert.equal(report.rows.equal, snapshot.rows.length); assert.equal(report.rows.conflicting, 0); assert.equal(report.rows.unaccounted, 0);
+  assert.equal(report.applied, 0); assert.equal(report.readyForApply, false);
+  assert.ok(report.blockers.includes('EXACT_TIMESTAMP_TRANSACTION_PENDING'));
+  assert.ok(!JSON.stringify(report).includes('fixture'));
+}));
+
+test('catalogue conflicting content and omitted target columns are never proposed as overwrites', async () => sandbox(async dir => {
+  const key = randomBytes(32); const snapshot = catalogContent(); const file = path.join(dir, 'catalog.bin');
+  snapshot.rows.find(row => row.entityType === 'Branch').content.name = 'SYNTHETIC_NEWER_SQL_NAME';
+  delete snapshot.rows.find(row => row.entityType === 'Department').content.description;
+  const targetSnapshot = require('../migration/fixtures.cjs').targetSnapshot;
+  await save(file, encodeInspectionSource(records, { targetSnapshot, contentSnapshot: snapshot }, key));
+  const report = (await openInspectionSource(file, key)).reconcileCatalogCandidates();
+  assert.equal(report.rows.conflicting, 2); assert.ok(report.blockers.includes('TARGET_CANDIDATE_CONTENT_CONFLICT'));
+  assert.equal(report.readyForApply, false); assert.ok(!JSON.stringify(report).includes('SYNTHETIC_NEWER_SQL_NAME'));
+}));
+
+test('catalogue missing reused identities and unaccounted existing target rows retain conflicts', async () => sandbox(async dir => {
+  const key = randomBytes(32); const snapshot = catalogContent(); const file = path.join(dir, 'catalog.bin');
+  snapshot.rows = snapshot.rows.filter(row => row.entityType !== 'Branch');
+  snapshot.rows.push({ entityType: 'Branch', key: ['unrelated'], version: 'synthetic-version', content: { name: 'Do not delete' } });
+  const targetSnapshot = require('../migration/fixtures.cjs').targetSnapshot;
+  await save(file, encodeInspectionSource(records, { targetSnapshot, contentSnapshot: snapshot }, key));
+  const report = (await openInspectionSource(file, key)).reconcileCatalogCandidates();
+  assert.equal(report.rows.absent, 1); assert.equal(report.rows.unaccounted, 1);
+  assert.ok(report.blockers.includes('TARGET_IDENTITY_CONTENT_MISMATCH'));
+  assert.ok(report.blockers.includes('TARGET_CONTENT_UNACCOUNTED'));
+}));
+
+test('catalogue new deterministic keys cannot adopt existing target rows even when content equals', async () => sandbox(async dir => {
+  const key = randomBytes(32); const snapshot = catalogContent(undefined); const file = path.join(dir, 'catalog.bin');
+  // Explicitly generate new-ID candidates rather than the helper default's existing identities.
+  const { mapCatalogRecord } = require('../migration/rehearsal.cjs');
+  const { prepareMigrationTimestamps } = require('../migration/instant-preservation.cjs');
+  const branch = records.find(row => row.path.startsWith('branches/'));
+  const content = prepareMigrationTimestamps(mapCatalogRecord(branch, records)).rows.branch;
+  snapshot.rows = [{ entityType: 'Branch', key: [content.id], version: 'synthetic-version', content }];
+  await save(file, encodeInspectionSource(records, { contentSnapshot: snapshot }, key));
+  const report = (await openInspectionSource(file, key)).reconcileCatalogCandidates();
+  assert.ok(report.blockers.includes('TARGET_UNLINKED_KEY_COLLISION')); assert.equal(report.readyForApply, false);
+}));
+
+test('catalogue partial content scopes, NULL versions and invalid source values remain blocked', async () => sandbox(async dir => {
+  const key = randomBytes(32); const snapshot = catalogContent(); const file = path.join(dir, 'catalog.bin');
+  snapshot.rows = snapshot.rows.filter(row => row.entityType === 'Branch'); snapshot.tables = ['Branch']; snapshot.rows[0].version = null;
+  const rows = structuredClone(records); rows.find(row => row.path.startsWith('doctors/')).data.active = 'yes';
+  const targetSnapshot = require('../migration/fixtures.cjs').targetSnapshot;
+  await save(file, encodeInspectionSource(rows, { targetSnapshot, contentSnapshot: snapshot }, key));
+  const report = (await openInspectionSource(file, key)).reconcileCatalogCandidates();
+  assert.equal(report.sources.rejected, 1);
+  assert.ok(report.blockers.includes('TARGET_CONTENT_SCOPE_MISSING'));
+  assert.ok(report.blockers.includes('TARGET_VERSION_EVIDENCE_MISSING')); assert.equal(report.applied, 0);
+}));
+
+test('catalogue reconciliation keeps non-catalogue rows and timestamp evidence out of scope', async () => sandbox(async dir => {
+  const key = randomBytes(32); const snapshot = catalogContent(); const file = path.join(dir, 'catalog.bin');
+  snapshot.tables.push('Patient');
+  snapshot.rows.push({ entityType: 'Patient', key: ['private-patient'], version: 'v1', content: {} });
+  snapshot.rows.push({ entityType: 'LegacySourceInstant', key: ['Patient', 'private-patient', 'updatedAt'], version: 'v1', content: { entityType: 'Patient' } });
+  const targetSnapshot = require('../migration/fixtures.cjs').targetSnapshot;
+  await save(file, encodeInspectionSource(records, { targetSnapshot, contentSnapshot: snapshot }, key));
+  const report = (await openInspectionSource(file, key)).reconcileCatalogCandidates();
+  assert.equal(report.rows.outOfScope, 2); assert.equal(report.rows.unaccounted, 0);
+  const missing = path.join(dir, 'missing.bin'); await save(missing, encodeInspectionSource(records, {}, key));
+  assert.throws((await openInspectionSource(missing, key)).reconcileCatalogCandidates, /CANDIDATE_RECONCILIATION_REJECTED/);
+}));
+
+test('content reconciliation compares private source/target snapshots without granting apply readiness', async () => sandbox(async dir => {
+  const key = randomBytes(32); const snapshot = contentSnapshot();
+  const base = path.join(dir, 'base.bin'); const current = path.join(dir, 'current.bin');
+  await save(base, encodeInspectionSource(records, { contentSnapshot: snapshot }, key));
+  await save(current, encodeInspectionSource([...records].reverse(), { contentSnapshot: snapshot }, key));
+  const report = await (await openInspectionSource(base, key)).reconcileSnapshot(current);
+  assert.equal(report.status, 'unchanged'); assert.equal(report.conflicts, 0);
+  assert.equal(report.source.unchanged, records.length); assert.equal(report.target.unchanged, 1);
+  assert.equal(report.applied, 0); assert.equal(report.readyForApply, false);
+  assert.ok(report.blockers.includes('ATOMIC_VERSION_GUARD_PENDING'));
+  assert.ok(!JSON.stringify(report).includes('SYNTHETIC_PRIVATE_TARGET'));
+  assert.ok(!JSON.stringify(report).includes('fixture'));
+}));
+
+test('source edits/additions/removals and target edits/version changes produce independent conflicts', async () => sandbox(async dir => {
+  const key = randomBytes(32); const snapshot = contentSnapshot();
+  const base = path.join(dir, 'base.bin'); const current = path.join(dir, 'current.bin');
+  await save(base, encodeInspectionSource(records, { contentSnapshot: snapshot }, key));
+  const changed = structuredClone(records); changed[0].data.extra = 'SYNTHETIC_CHANGED'; changed.pop();
+  changed.push({ source: 'static', path: 'synthetic-new', data: { title: 'New' } });
+  const after = structuredClone(snapshot); after.rows[0].content.note = '';
+  after.rows[0].version = 'opaque-revision-2';
+  await save(current, encodeInspectionSource(changed, { contentSnapshot: after }, key));
+  const report = await (await openInspectionSource(base, key)).reconcileSnapshot(current);
+  assert.equal(report.status, 'conflict'); assert.equal(report.conflicts, 4);
+  assert.equal(report.source.changed, 1); assert.equal(report.source.added, 1); assert.equal(report.source.removed, 1);
+  assert.equal(report.target.changed, 1); assert.equal(report.target.contentChanged, 1); assert.equal(report.target.versionChanged, 1);
+}));
+
+test('unchanged content cannot hide version-only changes or absence of version evidence', async () => sandbox(async dir => {
+  const key = randomBytes(32); const base = path.join(dir, 'base.bin'); const snapshot = contentSnapshot();
+  await save(base, encodeInspectionSource(records, { contentSnapshot: snapshot }, key));
+  const session = await openInspectionSource(base, key);
+  for (const version of ['opaque-revision-2', null]) {
+    const changed = structuredClone(snapshot); changed.rows[0].version = version;
+    const current = path.join(dir, version === null ? 'missing.bin' : 'version.bin');
+    await save(current, encodeInspectionSource(records, { contentSnapshot: changed }, key));
+    const report = await session.reconcileSnapshot(current);
+    assert.equal(report.target.contentChanged, 0); assert.equal(report.target.versionChanged, 1);
+    assert.equal(report.status, 'conflict');
+    if (version === null) assert.ok(report.blockers.includes('TARGET_VERSION_EVIDENCE_MISSING'));
+  }
+}));
+
+test('target additions/deletions and changed identity metadata cannot be silently adopted', async () => sandbox(async dir => {
+  const key = randomBytes(32); const base = path.join(dir, 'base.bin'); const snapshot = contentSnapshot();
+  await save(base, encodeInspectionSource(records, { contentSnapshot: snapshot }, key));
+  const after = structuredClone(snapshot); after.rows[0].key = ['different-row'];
+  const current = path.join(dir, 'current.bin');
+  await save(current, encodeInspectionSource(records, { contentSnapshot: after, patientTargetSnapshot }, key));
+  const report = await (await openInspectionSource(base, key)).reconcileSnapshot(current);
+  assert.equal(report.target.added, 1); assert.equal(report.target.removed, 1);
+  assert.equal(report.conflicts, 3); assert.ok(report.blockers.includes('TARGET_IDENTITY_SNAPSHOT_CHANGED'));
+}));
+
+test('equal versions cannot conceal content changes and unchanged null versions remain blocked', async () => sandbox(async dir => {
+  const key = randomBytes(32); const base = path.join(dir, 'base.bin'); const snapshot = contentSnapshot();
+  await save(base, encodeInspectionSource(records, { contentSnapshot: snapshot }, key));
+  const after = structuredClone(snapshot); delete after.rows[0].content.note;
+  const current = path.join(dir, 'current.bin'); await save(current, encodeInspectionSource(records, { contentSnapshot: after }, key));
+  const report = await (await openInspectionSource(base, key)).reconcileSnapshot(current);
+  assert.equal(report.target.changed, 1); assert.equal(report.target.contentChanged, 1); assert.equal(report.target.versionChanged, 0);
+  assert.equal(report.status, 'conflict');
+  snapshot.rows[0].version = null;
+  const missing = path.join(dir, 'missing.bin'); await save(missing, encodeInspectionSource(records, { contentSnapshot: snapshot }, key));
+  const nullReport = await (await openInspectionSource(missing, key)).reconcileSnapshot(missing);
+  assert.equal(nullReport.status, 'unchanged'); assert.equal(nullReport.target.missingVersion, 1);
+  assert.ok(nullReport.blockers.includes('TARGET_VERSION_EVIDENCE_MISSING')); assert.equal(nullReport.readyForApply, false);
+}));
+
+test('target snapshot contracts reject duplicates, incomplete scopes, unsafe keys and implicit versions', () => {
+  const key = randomBytes(32);
+  for (const alter of [
+    snapshot => { snapshot.complete = false; },
+    snapshot => { snapshot.tables = []; },
+    snapshot => { snapshot.tables = ['UnknownEntity']; },
+    snapshot => { snapshot.rows.push(snapshot.rows[0]); },
+    snapshot => { snapshot.rows[0].key = []; },
+    snapshot => { snapshot.rows[0].key = [Number.MAX_SAFE_INTEGER + 1]; },
+    snapshot => { delete snapshot.rows[0].version; },
+    snapshot => { snapshot.rows[0].extra = 'DO_NOT_LEAK'; },
+  ]) {
+    const snapshot = contentSnapshot(); alter(snapshot);
+    assert.throws(() => encodeInspectionSource(records, { contentSnapshot: snapshot }, key), error => error.message === 'PROTECTED_SOURCE_REJECTED');
+  }
+});
+
+test('reconciliation fails closed on missing snapshots, scope mismatch, wrong keys and tampered artifacts', async () => sandbox(async dir => {
+  const key = randomBytes(32); const base = path.join(dir, 'base.bin');
+  await save(base, encodeInspectionSource(records, { contentSnapshot: contentSnapshot() }, key));
+  const session = await openInspectionSource(base, key);
+  const variants = [
+    encodeInspectionSource(records, {}, key),
+    encodeInspectionSource(records, { contentSnapshot: { complete: true, tables: ['Patient'], rows: [] } }, key),
+    encodeInspectionSource(records, { contentSnapshot: contentSnapshot() }, randomBytes(32)),
+  ];
+  const corrupt = encodeInspectionSource(records, { contentSnapshot: contentSnapshot() }, key); corrupt[corrupt.length - 1] ^= 1; variants.push(corrupt);
+  for (let index = 0; index < variants.length; index++) {
+    const file = path.join(dir, `bad-${index}.bin`); await save(file, variants[index]);
+    await assert.rejects(session.reconcileSnapshot(file), error => error.message === 'CONTENT_RECONCILIATION_REJECTED');
+  }
+}));
+
+test('automatic inspection runs full-batch dependencies across pages and returns only safe counts', async () => sandbox(async dir => {
+  const fixtureModule = require('../migration/fixtures.cjs');
+  const { fixtures: _fixtures, ...targets } = fixtureModule;
+  const key = randomBytes(32); const file = path.join(dir, 'source.bin');
+  await save(file, encodeInspectionSource(records, targets, key));
+  let checkpointPath; let count = 0; let n = 0;
+  const totals = { blocked: 0, rejected: 0, excluded: 0 }; const reasons = {};
+  while (true) {
+    const session = await openInspectionSource(file, key);
+    const destination = path.join(dir, `auto-${n++}.bin`);
+    const report = await session.inspectAndSave({ ...(checkpointPath ? { checkpointPath } : {}), limit: 2, destination });
+    count += report.inspected;
+    for (const status of Object.keys(totals)) totals[status] += report[status];
+    for (const [code, count] of Object.entries(report.reasons)) reasons[code] = (reasons[code] || 0) + count;
+    assert.equal(report.applied, 0); assert.equal(report.readyForApply, false);
+    assert.ok(!JSON.stringify(report).includes('fixture'));
+    assert.ok(!Object.hasOwn(report.reasons, 'MISSING_REFERENCE'));
+    checkpointPath = destination;
+    if (report.done) break;
+  }
+  assert.equal(count, records.length);
+  assert.equal(totals.blocked + totals.rejected + totals.excluded, records.length);
+  assert.ok(totals.blocked > 0); assert.ok(totals.excluded > 0);
+  const whole = await (await openInspectionSource(file, key)).inspectAndSave({ limit: 500, destination: path.join(dir, 'whole.bin') });
+  for (const status of Object.keys(totals)) assert.equal(totals[status], whole[status]);
+  assert.deepEqual(reasons, whole.reasons);
+  const final = await (await openInspectionSource(file, key)).inspectAndSave({ checkpointPath, destination: path.join(dir, 'nothing.bin') });
+  assert.equal(final.done, true); assert.equal(final.inspected, 0);
+  await assert.rejects(fs.stat(path.join(dir, 'nothing.bin')), { code: 'ENOENT' });
+}));
+
+test('automatic inspection rejects unmapped fields without losing retained private source', async () => sandbox(async dir => {
+  const rows = structuredClone(records); rows[0].data.unknown = 'SYNTHETIC_PRIVATE_VALUE';
+  const key = randomBytes(32); const file = path.join(dir, 'source.bin');
+  await save(file, encodeInspectionSource(rows, {}, key));
+  const session = await openInspectionSource(file, key);
+  const report = await session.inspectAndSave({ limit: 1, destination: path.join(dir, 'checkpoint.bin') });
+  assert.equal(report.rejected, 1); assert.ok(report.reasons.UNKNOWN_FIELD);
+  assert.ok(!JSON.stringify(report).includes('SYNTHETIC_PRIVATE_VALUE'));
+  assert.equal((await session.page({ limit: 1 })).records[0].data.unknown, 'SYNTHETIC_PRIVATE_VALUE');
+}));
+
+test('automatic inspection executes value, target identity, ownership and exact-time validators', async () => sandbox(async dir => {
+  const fixtureModule = require('../migration/fixtures.cjs'); const { fixtures: _fixtures, ...targets } = fixtureModule;
+  const rows = structuredClone(records);
+  rows.find(row => row.path.startsWith('patientFeedback/')).data.rating = 9;
+  targets.targetSnapshot = { ...targets.targetSnapshot, branches: [...targets.targetSnapshot.branches, targets.targetSnapshot.branches[0]] };
+  const key = randomBytes(32); const file = path.join(dir, 'source.bin'); await save(file, encodeInspectionSource(rows, targets, key));
+  const report = await (await openInspectionSource(file, key)).inspectAndSave({ limit: 500, destination: path.join(dir, 'checkpoint.bin') });
+  assert.ok(report.rejected > 0);
+  assert.ok(report.reasons.PATIENT_OWNERSHIP_REVIEW);
+  assert.ok(Object.keys(report.reasons).some(code => code.includes('TARGET')));
+  const validTargets = { ...targets, targetSnapshot: fixtureModule.targetSnapshot };
+  const other = path.join(dir, 'value-source.bin'); await save(other, encodeInspectionSource(rows, validTargets, key));
+  const invalidValue = await (await openInspectionSource(other, key)).inspectAndSave({ limit: 500, destination: path.join(dir, 'value-checkpoint.bin') });
+  assert.ok(invalidValue.reasons.INVALID_FEEDBACK_FIELD);
+  assert.ok(invalidValue.reasons.EXACT_TIMESTAMP_TRANSACTION_PENDING);
+}));
+
+test('automatic resume rejects caller-authored decisions and caller-supplied result overrides', async () => sandbox(async dir => {
+  const key = randomBytes(32); const file = path.join(dir, 'source.bin'); await save(file, encodeInspectionSource(records, {}, key));
+  const session = await openInspectionSource(file, key); const page = await session.page({ limit: 2 });
+  const manual = path.join(dir, 'manual.bin'); await session.saveCheckpoint(page, decisions(page), manual);
+  const dest = path.join(dir, 'automatic.bin');
+  await assert.rejects(session.inspectAndSave({ checkpointPath: manual, destination: dest }), /INSPECTION_VALIDATION_REJECTED/);
+  await assert.rejects(session.inspectAndSave({ destination: dest, results: decisions(page) }), /INSPECTION_VALIDATION_REJECTED/);
+  await assert.rejects(fs.stat(dest), { code: 'ENOENT' });
+}));
+
+test('durable checkpoints retain every earlier decision across page sizes and process restarts', async () => sandbox(async dir => {
+  const key = randomBytes(32); const file = path.join(dir, 'source.bin');
+  await save(file, encodeInspectionSource(records, {}, key));
+  let session = await openInspectionSource(file, key);
+  const first = await session.page({ limit: 2 }); const a = path.join(dir, 'a.bin');
+  await session.saveCheckpoint(first, decisions(first), a);
+  session = await openInspectionSource(file, key);
+  const second = await session.page({ checkpointPath: a, limit: 3 }); const b = path.join(dir, 'b.bin');
+  await session.saveCheckpoint(second, decisions(second), b);
+  const bytes = await fs.readFile(b);
+  const derived = createHmac('sha256', key).update('clinic-inspection-v1/checkpoint').digest();
+  const decrypt = createDecipheriv('aes-256-gcm', derived, bytes.subarray(8, 20));
+  decrypt.setAAD(Buffer.from('checkpoint')); decrypt.setAuthTag(bytes.subarray(20, 36));
+  const payload = JSON.parse(Buffer.concat([decrypt.update(bytes.subarray(36)), decrypt.final()]).toString());
+  assert.deepEqual(payload.entries.map(row => row.index), [0, 1, 2, 3, 4]);
+  assert.equal(payload.applied, 0);
+  const iv = randomBytes(12); const encrypt = createCipheriv('aes-256-gcm', derived, iv);
+  encrypt.setAAD(Buffer.from('checkpoint'));
+  const ciphertext = Buffer.concat([encrypt.update(JSON.stringify({ ...payload, entries: payload.entries.slice(2) })), encrypt.final()]);
+  const incomplete = path.join(dir, 'incomplete.bin');
+  await save(incomplete, Buffer.concat([Buffer.from('SOODSQL1'), iv, encrypt.getAuthTag(), ciphertext]));
+  await assert.rejects(session.page({ checkpointPath: incomplete }), /INSPECTION_CHECKPOINT_REJECTED/);
+  const resumed = await (await openInspectionSource(file, key)).page({ checkpointPath: b });
+  assert.equal(resumed.start, 5); assert.equal(resumed.readyForApply, false);
+  assert.equal((await fs.stat(b)).mode & 0o777, 0o600);
+  assert.equal((await fs.stat(b)).nlink, 1);
+  assert.deepEqual((await fs.readdir(dir)).sort(), ['a.bin', 'b.bin', 'incomplete.bin', 'source.bin']);
+}));
+
+test('sync failures distinguish rejected publication from uncertain durability without deleting published evidence', async () => sandbox(async dir => {
+  const key = randomBytes(32); const file = path.join(dir, 'source.bin');
+  await save(file, encodeInspectionSource(records, {}, key));
+  const session = await openInspectionSource(file, key); const page = await session.page({ limit: 2 });
+  const originalOpen = fs.open; let failDirectory = false;
+  fs.open = async (...args) => {
+    const handle = await originalOpen(...args);
+    if (failDirectory ? args[0] === dir : path.basename(args[0]).startsWith('.inspection-')) {
+      handle.sync = async () => { throw new Error('SYNTHETIC_PRIVATE_FAILURE'); };
+    }
+    return handle;
+  };
+  try {
+    const rejected = path.join(dir, 'rejected.bin');
+    await assert.rejects(session.saveCheckpoint(page, decisions(page), rejected), error => error.message === 'INSPECTION_CHECKPOINT_WRITE_REJECTED');
+    assert.deepEqual(await fs.readdir(dir), ['source.bin']);
+    failDirectory = true;
+    const uncertain = path.join(dir, 'uncertain.bin');
+    await assert.rejects(session.saveCheckpoint(page, decisions(page), uncertain), error => error.message === 'INSPECTION_CHECKPOINT_WRITE_UNCERTAIN');
+    assert.equal((await session.page({ checkpointPath: uncertain })).start, 2);
+    assert.deepEqual((await fs.readdir(dir)).sort(), ['source.bin', 'uncertain.bin']);
+  } finally { fs.open = originalOpen; }
+}));
+
+test('checkpoint publication never replaces an existing file, symlink or concurrent winner', async () => sandbox(async dir => {
+  const key = randomBytes(32); const file = path.join(dir, 'source.bin');
+  await save(file, encodeInspectionSource(records, {}, key));
+  const session = await openInspectionSource(file, key); const page = await session.page({ limit: 2 });
+  const dest = path.join(dir, 'checkpoint.bin');
+  const outcomes = await Promise.allSettled([session.saveCheckpoint(page, decisions(page), dest), session.saveCheckpoint(page, decisions(page), dest)]);
+  assert.equal(outcomes.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(outcomes.find(result => result.status === 'rejected').reason.message, 'INSPECTION_CHECKPOINT_WRITE_REJECTED');
+  const original = await fs.readFile(dest);
+  await assert.rejects(session.saveCheckpoint(page, decisions(page), dest), /INSPECTION_CHECKPOINT_WRITE_REJECTED/);
+  assert.deepEqual(await fs.readFile(dest), original);
+  const alias = path.join(dir, 'alias.bin'); await fs.symlink(dest, alias);
+  await assert.rejects(session.saveCheckpoint(page, decisions(page), alias), /INSPECTION_CHECKPOINT_WRITE_REJECTED/);
+  assert.deepEqual(await fs.readFile(dest), original);
+  assert.deepEqual((await fs.readdir(dir)).sort(), ['alias.bin', 'checkpoint.bin', 'source.bin']);
+}));
+
+test('unsafe checkpoint destinations and invalid decisions publish nothing', async () => sandbox(async dir => {
+  const key = randomBytes(32); const file = path.join(dir, 'source.bin');
+  await save(file, encodeInspectionSource(records, {}, key));
+  const session = await openInspectionSource(file, key); const page = await session.page({ limit: 2 });
+  const dest = path.join(dir, 'checkpoint.bin');
+  await assert.rejects(session.saveCheckpoint(page, [], dest), /INSPECTION_CHECKPOINT_WRITE_REJECTED/);
+  await fs.chmod(dir, 0o755);
+  await assert.rejects(session.saveCheckpoint(page, decisions(page), dest), /INSPECTION_CHECKPOINT_WRITE_REJECTED/);
+  await fs.chmod(dir, 0o700);
+  await assert.rejects(session.saveCheckpoint(page, decisions(page), 'relative.bin'), /INSPECTION_CHECKPOINT_WRITE_REJECTED/);
+  assert.deepEqual(await fs.readdir(dir), ['source.bin']);
+}));
 
 test('encrypted source preserves complete unknown-field evidence without plaintext files or SQL access', async () => sandbox(async dir => {
   const key = randomBytes(32); const source = structuredClone(records);
@@ -84,6 +533,8 @@ test('source serialization rejects unsafe/lossy values, accessors, duplicates, e
   const rows = structuredClone(records); let called = false;
   Object.defineProperty(rows[0].data, 'bad', { enumerable: true, get() { called = true; return 'private'; } });
   assert.throws(() => encodeInspectionSource(rows, {}, key), /PROTECTED_SOURCE_REJECTED/); assert.equal(called, false);
+  const hidden = structuredClone(records); Object.defineProperty(hidden[0].data, 'hidden', { value: 'must-not-disappear' });
+  assert.throws(() => encodeInspectionSource(hidden, {}, key), /PROTECTED_SOURCE_REJECTED/);
   assert.throws(() => encodeInspectionSource([...records, records[0]], {}, key), /PROTECTED_SOURCE_REJECTED/);
   assert.throws(() => encodeInspectionSource(Array(10001).fill(records[0]), {}, key), /PROTECTED_SOURCE_REJECTED/);
   assert.throws(() => encodeInspectionSource(fixtures, {}, key), /PROTECTED_SOURCE_REJECTED/);
@@ -117,4 +568,17 @@ test('code revision and randomized encryption remain stable/reproducible at the 
   const first = await openInspectionSource(fileA, key); const second = await openInspectionSource(fileB, key);
   assert.equal(first.revision, second.revision); assert.match(first.revision, /^[a-f0-9]{64}$/);
   assert.deepEqual((await first.page({ limit: 500 })).records, (await second.page({ limit: 500 })).records);
+  const page = await first.page({ limit: 2 }); const checkpoint = first.checkpoint(page, decisions(page));
+  // A holder of the test key can sign an old contract; revision checks must still reject it.
+  const derived = createHmac('sha256', key).update('clinic-inspection-v1/checkpoint').digest();
+  const decrypt = createDecipheriv('aes-256-gcm', derived, checkpoint.subarray(8, 20));
+  decrypt.setAAD(Buffer.from('checkpoint')); decrypt.setAuthTag(checkpoint.subarray(20, 36));
+  const payload = JSON.parse(Buffer.concat([decrypt.update(checkpoint.subarray(36)), decrypt.final()]).toString());
+  for (const patch of [{ revision: '0'.repeat(64) }, { applied: 1 }, { entries: [] }]) {
+    const iv = randomBytes(12); const encrypt = createCipheriv('aes-256-gcm', derived, iv); encrypt.setAAD(Buffer.from('checkpoint'));
+    const ciphertext = Buffer.concat([encrypt.update(JSON.stringify({ ...payload, ...patch })), encrypt.final()]);
+    const invalid = path.join(dir, `invalid-${Object.keys(patch)[0]}.bin`);
+    await save(invalid, Buffer.concat([Buffer.from('SOODSQL1'), iv, encrypt.getAuthTag(), ciphertext]));
+    await assert.rejects(second.page({ checkpointPath: invalid }), /INSPECTION_CHECKPOINT_REJECTED/);
+  }
 }));
