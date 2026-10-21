@@ -6,7 +6,7 @@
   },
   "main": "index.js",
   "scripts": {
-    "lint": "node --check index.js && node --check assign-staff-role.js && node --check migrate-legacy-staff-role.js && node --check lib/staffAccess.js && node --check lib/appointmentPolicy.js && node --check lib/phone.js && node --check lib/sqlStaffDirectory.js && node --check lib/staffLifecycle.js && node --check lib/staffAuthorization.js && node --check lib/patientLinking.js",
+    "lint": "node --check index.js && node --check assign-staff-role.js && node --check migrate-legacy-staff-role.js && node --check lib/staffAccess.js && node --check lib/appointmentPolicy.js && node --check lib/phone.js && node --check lib/sqlStaffDirectory.js && node --check lib/staffLifecycle.js && node --check lib/staffAuthorization.js && node --check lib/patientLinking.js && node --check lib/clinicContact.js && node --check lib/sqlCatalogue.js && node --check lib/bookingSettings.js && node --check lib/patientAuthorization.js && node --check lib/sqlPatientProfiles.js && node --check lib/sqlPatientAppointments.js && node --check lib/sqlPatientHandlers.js && node --check lib/sqlPatientBackend.js && node --check lib/sqlPatientLinkAttempts.js && node --check lib/sqlAuditLog.js && node --check lib/sqlClinicDay.js && node --check lib/sqlWeeklyHours.js && node --check lib/sqlSpecialHours.js && node --check lib/engine/units.js && node --check lib/engine/placement.js && node --check lib/engine/availability.js && node --check lib/engine/reference.js && node --check lib/engine/visitType.js",
     "seed": "node seed.js",
     "assign-staff-role": "node assign-staff-role.js",
     "migrate-manager-role": "node migrate-legacy-staff-role.js"

@@ -1,0 +1,83 @@
+# IAM only. Callables validate current Auth; one singleton version serializes policy and format edits.
+query ReadBookingSettings @auth(level: NO_ACCESS) {
+  clinicSettings(key: {id: "primary"}) {
+    id bookingWindowDays leadMinutes intervalMinutes bufferBeforeMinutes bufferAfterMinutes cancelCutoffMinutes autoConfirm updatedAt
+  }
+  services(limit: 13, orderBy: [{legacySortOrder: ASC}, {id: ASC}]) {
+    id legacyId code name durationMinutes bufferMinutes consultationMode active legacySortOrder updatedAt
+  }
+}
+query GetBookingSettingsReceipt($actorUid: String!, $requestId: UUID!) @auth(level: NO_ACCESS) {
+  operationReceipt(key: {actorUid: $actorUid, requestId: $requestId}) { operation }
+}
+mutation SaveBookingSettings(
+  $actorUid: String!, $requestId: UUID!, $operation: String!, $expectedUpdatedAt: Timestamp!,
+  $bookingWindowDays: Int!, $leadMinutes: Int!, $intervalMinutes: Int!,
+  $bufferBeforeMinutes: Int!, $bufferAfterMinutes: Int!, $cancelCutoffMinutes: Int!, $autoConfirm: Boolean!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: $actorUid, requestId: $requestId})
+      @check(expr: "this == null", message: "BOOKING_REQUEST_APPLIED") { operation }
+  }
+  clinicSettings_updateMany(
+    where: {id: {eq: "primary"}, updatedAt: {eq: $expectedUpdatedAt}},
+    data: {bookingWindowDays: $bookingWindowDays, leadMinutes: $leadMinutes, intervalMinutes: $intervalMinutes,
+      bufferBeforeMinutes: $bufferBeforeMinutes, bufferAfterMinutes: $bufferAfterMinutes,
+      cancelCutoffMinutes: $cancelCutoffMinutes, autoConfirm: $autoConfirm, updatedAt_expr: "request.time"}
+  ) @check(expr: "this == 1", message: "BOOKING_CONFIG_VERSION_CHANGED")
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: "admin", action: "booking_policy_saved", resourceType: "booking_settings", resourceId: "primary"})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}
+
+mutation CreateBookingService(
+  $actorUid: String!, $requestId: UUID!, $operation: String!, $expectedUpdatedAt: Timestamp!,
+  $id: UUID!, $legacyId: String!, $name: String!, $durationMinutes: Int!, $consultationMode: String!, $active: Boolean!,
+  $sortOrder: Int!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: $actorUid, requestId: $requestId})
+      @check(expr: "this == null", message: "BOOKING_REQUEST_APPLIED") { operation }
+    otherServices: services(where: {id: {ne: $id}}, limit: 13)
+      @check(expr: "this.size() < 12", message: "BOOKING_FORMAT_LIMIT") { id }
+    activeServices: services(where: {id: {ne: $id}, active: {eq: true}}, limit: 1)
+      @check(expr: "vars.active || this.size() > 0", message: "BOOKING_LAST_ACTIVE_FORMAT") { id }
+  }
+  clinicSettings_updateMany(
+    where: {id: {eq: "primary"}, updatedAt: {eq: $expectedUpdatedAt}},
+    data: {updatedAt_expr: "request.time"}
+  ) @check(expr: "this == 1", message: "BOOKING_CONFIG_VERSION_CHANGED")
+  service_insert(
+
+    data: {id: $id, legacyId: $legacyId, code: $legacyId, legacySortOrder: $sortOrder, bufferMinutes: 0,
+      name: $name, durationMinutes: $durationMinutes, consultationMode: $consultationMode, active: $active, updatedAt_expr: "request.time"}
+  )
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: "admin", action: "booking_visit_format_saved", resourceType: "booking_service", resourceId: $legacyId})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}
+
+
+mutation UpdateBookingService(
+  $actorUid: String!, $requestId: UUID!, $operation: String!, $expectedUpdatedAt: Timestamp!,
+  $id: UUID!, $legacyId: String!, $name: String!, $durationMinutes: Int!, $consultationMode: String!, $active: Boolean!,
+  $expectedServiceUpdatedAt: Timestamp!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: $actorUid, requestId: $requestId})
+      @check(expr: "this == null", message: "BOOKING_REQUEST_APPLIED") { operation }
+    otherServices: services(where: {id: {ne: $id}}, limit: 13)
+      @check(expr: "this.size() < 12", message: "BOOKING_FORMAT_LIMIT") { id }
+    activeServices: services(where: {id: {ne: $id}, active: {eq: true}}, limit: 1)
+      @check(expr: "vars.active || this.size() > 0", message: "BOOKING_LAST_ACTIVE_FORMAT") { id }
+  }
+  clinicSettings_updateMany(
+    where: {id: {eq: "primary"}, updatedAt: {eq: $expectedUpdatedAt}},
+    data: {updatedAt_expr: "request.time"}
+  ) @check(expr: "this == 1", message: "BOOKING_CONFIG_VERSION_CHANGED")
+  service_updateMany(
+    where: {id: {eq: $id}, legacyId: {eq: $legacyId}, code: {eq: $legacyId}, updatedAt: {eq: $expectedServiceUpdatedAt}, consultationMode: {eq: $consultationMode}},
+    data: {
+      name: $name, durationMinutes: $durationMinutes, consultationMode: $consultationMode, active: $active, updatedAt_expr: "request.time"}
+  ) @check(expr: "this == 1", message: "BOOKING_SERVICE_VERSION_CHANGED")
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: "admin", action: "booking_visit_format_saved", resourceType: "booking_service", resourceId: $legacyId})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}

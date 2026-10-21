@@ -1,0 +1,135 @@
+# IAM-only catalogue API. Runtime callables validate current Auth and strict inputs.
+query ReadSqlCatalogue @auth(level: NO_ACCESS) {
+  branches(limit: 1001, orderBy: [{id: ASC}]) { id legacyId code name address timezone active updatedAt }
+  departments(limit: 1001, orderBy: [{id: ASC}]) { id legacyId branchId code name description active publicBookingEnabled sortOrder updatedAt }
+  doctors(limit: 1001, orderBy: [{id: ASC}]) { id legacyId branchId name qualification registrationNumber active bookingEnabled updatedAt }
+  doctorDepartments(limit: 12001, orderBy: [{doctorId: ASC}, {departmentId: ASC}]) { doctorId departmentId sortOrder }
+}
+query GetCatalogueReceipt($actorUid: String!, $requestId: UUID!) @auth(level: NO_ACCESS) {
+  operationReceipt(key: {actorUid: $actorUid, requestId: $requestId}) { operation }
+}
+
+mutation CreateCatalogueBranch(
+  $actorUid: String!, $requestId: UUID!, $operation: String!, $id: UUID!, $legacyId: String!,
+  $name: String!, $active: Boolean!, $code: String!, $address: String!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: $actorUid, requestId: $requestId})
+      @check(expr: "this == null", message: "CATALOGUE_REQUEST_APPLIED") { operation }
+  }
+  branch_insert(
+    data: {id: $id, legacyId: $legacyId, name: $name, active: $active, code: $code, address: $address, timezone: "Asia/Kolkata", updatedAt_expr: "request.time"}
+  )
+
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: "admin", action: "booking_catalog_branch_saved", resourceType: "catalogue_branch", resourceId: $legacyId})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}
+
+mutation UpdateCatalogueBranch(
+  $actorUid: String!, $requestId: UUID!, $operation: String!, $id: UUID!, $legacyId: String!,
+  $expectedUpdatedAt: Timestamp!, $name: String!, $active: Boolean!, $code: String!, $address: String!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: $actorUid, requestId: $requestId})
+      @check(expr: "this == null", message: "CATALOGUE_REQUEST_APPLIED") { operation }
+  }
+  branch_updateMany(
+    where: {id: {eq: $id}, legacyId: {eq: $legacyId}, updatedAt: {eq: $expectedUpdatedAt}},
+    data: { name: $name, active: $active, code: $code, address: $address, timezone: "Asia/Kolkata", updatedAt_expr: "request.time"}
+  ) @check(expr: "this == 1", message: "CATALOGUE_VERSION_CHANGED")
+
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: "admin", action: "booking_catalog_branch_saved", resourceType: "catalogue_branch", resourceId: $legacyId})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}
+
+mutation CreateCatalogueDepartment(
+  $actorUid: String!, $requestId: UUID!, $operation: String!, $id: UUID!, $legacyId: String!,
+  $name: String!, $active: Boolean!, $branchId: UUID!, $code: String!, $description: String!, $sortOrder: Int!, $publicBookingEnabled: Boolean!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: $actorUid, requestId: $requestId})
+      @check(expr: "this == null", message: "CATALOGUE_REQUEST_APPLIED") { operation }
+  }
+  department_insert(
+    data: {id: $id, legacyId: $legacyId, name: $name, active: $active, branchId: $branchId, code: $code, description: $description, sortOrder: $sortOrder, publicBookingEnabled: $publicBookingEnabled, updatedAt_expr: "request.time"}
+  )
+
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: "admin", action: "booking_catalog_department_saved", resourceType: "catalogue_department", resourceId: $legacyId})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}
+
+mutation UpdateCatalogueDepartment(
+  $actorUid: String!, $requestId: UUID!, $operation: String!, $id: UUID!, $legacyId: String!,
+  $expectedUpdatedAt: Timestamp!, $name: String!, $active: Boolean!, $branchId: UUID!, $code: String!, $description: String!, $sortOrder: Int!, $publicBookingEnabled: Boolean!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: $actorUid, requestId: $requestId})
+      @check(expr: "this == null", message: "CATALOGUE_REQUEST_APPLIED") { operation }
+  }
+  department_updateMany(
+    where: {id: {eq: $id}, legacyId: {eq: $legacyId}, updatedAt: {eq: $expectedUpdatedAt}, branchId: {eq: $branchId}},
+    data: { name: $name, active: $active, branchId: $branchId, code: $code, description: $description, sortOrder: $sortOrder, publicBookingEnabled: $publicBookingEnabled, updatedAt_expr: "request.time"}
+  ) @check(expr: "this == 1", message: "CATALOGUE_VERSION_CHANGED")
+
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: "admin", action: "booking_catalog_department_saved", resourceType: "catalogue_department", resourceId: $legacyId})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}
+
+mutation CreateCatalogueDoctor(
+  $actorUid: String!, $requestId: UUID!, $operation: String!, $id: UUID!, $legacyId: String!,
+  $name: String!, $active: Boolean!, $branchId: UUID!, $qualification: String!, $registrationNumber: String!, $bookingEnabled: Boolean!, $departmentIds: [UUID!]!, $member0: Boolean!, $member1: Boolean!, $member2: Boolean!, $member3: Boolean!, $member4: Boolean!, $member5: Boolean!, $member6: Boolean!, $member7: Boolean!, $member8: Boolean!, $member9: Boolean!, $member10: Boolean!, $member11: Boolean!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: $actorUid, requestId: $requestId})
+      @check(expr: "this == null", message: "CATALOGUE_REQUEST_APPLIED") { operation }
+    departments(where: {id: {in: $departmentIds}, branchId: {eq: $branchId}}, limit: 12) @check(expr: "this.size() == vars.departmentIds.size()", message: "CATALOGUE_DEPARTMENT_SCOPE") { id }
+  }
+  doctor_insert(
+    data: {id: $id, legacyId: $legacyId, name: $name, active: $active, branchId: $branchId, qualification: $qualification, registrationNumber: $registrationNumber, bookingEnabled: $bookingEnabled, updatedAt_expr: "request.time"}
+  )
+  doctorDepartment_deleteMany(where: {doctorId: {eq: $id}})
+  member0: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 0 ? vars.departmentIds[0] : vars.departmentIds[0]", sortOrder: 0}) @include(if: $member0)
+  member1: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 1 ? vars.departmentIds[1] : vars.departmentIds[0]", sortOrder: 1}) @include(if: $member1)
+  member2: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 2 ? vars.departmentIds[2] : vars.departmentIds[0]", sortOrder: 2}) @include(if: $member2)
+  member3: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 3 ? vars.departmentIds[3] : vars.departmentIds[0]", sortOrder: 3}) @include(if: $member3)
+  member4: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 4 ? vars.departmentIds[4] : vars.departmentIds[0]", sortOrder: 4}) @include(if: $member4)
+  member5: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 5 ? vars.departmentIds[5] : vars.departmentIds[0]", sortOrder: 5}) @include(if: $member5)
+  member6: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 6 ? vars.departmentIds[6] : vars.departmentIds[0]", sortOrder: 6}) @include(if: $member6)
+  member7: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 7 ? vars.departmentIds[7] : vars.departmentIds[0]", sortOrder: 7}) @include(if: $member7)
+  member8: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 8 ? vars.departmentIds[8] : vars.departmentIds[0]", sortOrder: 8}) @include(if: $member8)
+  member9: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 9 ? vars.departmentIds[9] : vars.departmentIds[0]", sortOrder: 9}) @include(if: $member9)
+  member10: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 10 ? vars.departmentIds[10] : vars.departmentIds[0]", sortOrder: 10}) @include(if: $member10)
+  member11: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 11 ? vars.departmentIds[11] : vars.departmentIds[0]", sortOrder: 11}) @include(if: $member11)
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: "admin", action: "booking_catalog_doctor_saved", resourceType: "catalogue_doctor", resourceId: $legacyId})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}
+
+mutation UpdateCatalogueDoctor(
+  $actorUid: String!, $requestId: UUID!, $operation: String!, $id: UUID!, $legacyId: String!,
+  $expectedUpdatedAt: Timestamp!, $name: String!, $active: Boolean!, $branchId: UUID!, $qualification: String!, $registrationNumber: String!, $bookingEnabled: Boolean!, $departmentIds: [UUID!]!, $member0: Boolean!, $member1: Boolean!, $member2: Boolean!, $member3: Boolean!, $member4: Boolean!, $member5: Boolean!, $member6: Boolean!, $member7: Boolean!, $member8: Boolean!, $member9: Boolean!, $member10: Boolean!, $member11: Boolean!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: $actorUid, requestId: $requestId})
+      @check(expr: "this == null", message: "CATALOGUE_REQUEST_APPLIED") { operation }
+    departments(where: {id: {in: $departmentIds}, branchId: {eq: $branchId}}, limit: 12) @check(expr: "this.size() == vars.departmentIds.size()", message: "CATALOGUE_DEPARTMENT_SCOPE") { id }
+  }
+  doctor_updateMany(
+    where: {id: {eq: $id}, legacyId: {eq: $legacyId}, updatedAt: {eq: $expectedUpdatedAt}, branchId: {eq: $branchId}},
+    data: { name: $name, active: $active, branchId: $branchId, qualification: $qualification, registrationNumber: $registrationNumber, bookingEnabled: $bookingEnabled, updatedAt_expr: "request.time"}
+  ) @check(expr: "this == 1", message: "CATALOGUE_VERSION_CHANGED")
+  doctorDepartment_deleteMany(where: {doctorId: {eq: $id}})
+  member0: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 0 ? vars.departmentIds[0] : vars.departmentIds[0]", sortOrder: 0}) @include(if: $member0)
+  member1: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 1 ? vars.departmentIds[1] : vars.departmentIds[0]", sortOrder: 1}) @include(if: $member1)
+  member2: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 2 ? vars.departmentIds[2] : vars.departmentIds[0]", sortOrder: 2}) @include(if: $member2)
+  member3: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 3 ? vars.departmentIds[3] : vars.departmentIds[0]", sortOrder: 3}) @include(if: $member3)
+  member4: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 4 ? vars.departmentIds[4] : vars.departmentIds[0]", sortOrder: 4}) @include(if: $member4)
+  member5: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 5 ? vars.departmentIds[5] : vars.departmentIds[0]", sortOrder: 5}) @include(if: $member5)
+  member6: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 6 ? vars.departmentIds[6] : vars.departmentIds[0]", sortOrder: 6}) @include(if: $member6)
+  member7: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 7 ? vars.departmentIds[7] : vars.departmentIds[0]", sortOrder: 7}) @include(if: $member7)
+  member8: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 8 ? vars.departmentIds[8] : vars.departmentIds[0]", sortOrder: 8}) @include(if: $member8)
+  member9: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 9 ? vars.departmentIds[9] : vars.departmentIds[0]", sortOrder: 9}) @include(if: $member9)
+  member10: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 10 ? vars.departmentIds[10] : vars.departmentIds[0]", sortOrder: 10}) @include(if: $member10)
+  member11: doctorDepartment_insert(data: {doctorId: $id, departmentId_expr: "vars.departmentIds.size() > 11 ? vars.departmentIds[11] : vars.departmentIds[0]", sortOrder: 11}) @include(if: $member11)
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: "admin", action: "booking_catalog_doctor_saved", resourceType: "catalogue_doctor", resourceId: $legacyId})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}

@@ -1,0 +1,35 @@
+# IAM only; future callable must use current verified-patient Auth, never browser actorUid.
+# Operational guardian links do not establish clinical-consent authority.
+query ReadLinkedPatientHealth($actorUid: String!, $patientId: UUID!) @auth(level: NO_ACCESS) {
+  user(key: {id: $actorUid}) { active }
+  patientLinks(where: {patientId: {eq: $patientId}, userId: {eq: $actorUid}, relationship: {eq: "self"}, verifiedBy: {ne: ""}}, limit: 1) {
+    relationship verifiedBy verifiedAt
+    patient {
+      id archivedAt updatedAt bloodGroup
+      health: patientReportedProfile_on_patient { allergies currentMedications healthNotes }
+    }
+  }
+}
+
+mutation SaveLinkedPatientHealth(
+  $actorUid: String!, $patientId: UUID!, $requestId: UUID!, $operation: String!, $expectedUpdatedAt: Timestamp!,
+  $bloodGroup: String, $allergies: String, $currentMedications: String, $healthNotes: String
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: $actorUid, requestId: $requestId}) @check(expr: "this == null", message: "PATIENT_REQUEST_APPLIED") { operation }
+  }
+  # Share the demographic account/link lock order and native patient revision.
+  user_updateMany(where: {id: {eq: $actorUid}, active: {eq: true}}, data: {active: true})
+    @check(expr: "this == 1", message: "ACCOUNT_UNAVAILABLE")
+  patientLink_updateMany(
+    where: {patientId: {eq: $patientId}, userId: {eq: $actorUid}, relationship: {eq: "self"}, verifiedBy: {ne: ""}},
+    data: {userId: $actorUid}
+  ) @check(expr: "this == 1", message: "PATIENT_HEALTH_LINK_UNAVAILABLE")
+  patient_updateMany(
+    where: {id: {eq: $patientId}, archivedAt: {isNull: true}, updatedAt: {eq: $expectedUpdatedAt}},
+    data: {bloodGroup: $bloodGroup, updatedAt_expr: "request.time"}
+  ) @check(expr: "this == 1", message: "PATIENT_VERSION_CHANGED")
+  patientReportedProfile_upsert(data: {patientId: $patientId, allergies: $allergies, currentMedications: $currentMedications, healthNotes: $healthNotes})
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: "patient", action: "patient_health_saved", resourceType: "patient", resourceId_expr: "vars.patientId"})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}

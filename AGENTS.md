@@ -1,5 +1,17 @@
 Current task list: `AI-PROMPT-next-tasks.md` if present; otherwise `files/04-backlog.md`.
 
+USER WORKFLOW OVERRIDE (2026-10-20): code first; a separate AI writes/runs tests. Implementation AI maintains only concise scheduled batches in `SQL/TEST-QUEUE.md`; test AI owns `SQL/TEST-RESULTS.md` and test files. Read both before work; never overwrite the other AI's results/tests or claim scheduled checks passed. Publish batches BUILDING→READY; moving source fingerprints invalidate test evidence. Only quick syntax/compile/lint checks here, no repeated full suites. This overrides the older tests-first protocol below for new work. No untested deployment, production mutation, paid test resources or weakened release/security gates. Avoid additional documentation files; one short phase note per batch is enough.
+
+State pointers: batch status and ownership live only in `SQL/TEST-QUEUE.md` and `SQL/TEST-RESULTS.md`; phase percentages in `SQL/PROGRESS.md`; app state and deploy history in `AI_STATE.md`; module contracts in the `SQL/phase *.md` logs. Do not restate status here.
+
+Durable rules carried by earlier status notes:
+
+- Delivery priority (2026-10-20 user request): build usable workflows, not generic rehearsal tooling. Contact/catalogue/booking-policy/format editors and the linked-patient demographic, appointment-history and self-reported-health backends are implemented through live Auth, generated SDKs and version/audit/receipt transactions — all unmounted and unexported (full contract: `SQL/phase 5.md`). New source moves every runtime publicConfig consumer and catalogue check together; patient/public UI uses published windows and exact-minute cutoffs, never an invented consultation fallback. Fees/doctor offerings are never inferred; schedules/occupancy/appointments/Calendar remain legacy. Not deployed: settings/catalogue census/import, reviewed buffer semantics, and the source/guest release gates. Never deploy just an editor or writer.
+- Compiler supports only one query block per mutation: duplicate-date preflight relies on the subsequent shared CAS, not a schema uniqueness constraint; every future SQL closure/import writer must follow that state-revision protocol.
+- Generated admin SDKs do not support `_Data` variables; bounded writes use padded primitive arrays with conditional inserts.
+- Guardian operational links never grant clinical access without a reviewed consent policy; patient reads stay on operational fields only.
+- Do not deploy around the remaining clinical-document, scheduler, source, identity, backup or guest release gates.
+
 RELEASE STOP (2026-10-20): run `npm run sql:release-check` before ANY SQL release. Current draft intentionally exits 1 with synthetic operations/SDKs and guest relation review blockers. Exclude/remove `SQL/dataconnect/admin/rehearsal.gql`, regenerate CJS/ESM/types and resolve the guest DDL/API review; never silence a guard to ship. Only `SQL/scripts/rehearse-branch.cjs` calls the test operations, requiring the exact demo/loopback emulator, fixed inactive synthetic branch and guarded inputs. The client guard is not server-side production authorization. Never deploy these test operations or turn the driver into a real importer. A source-check pass is not release approval.
 
 Active SQL migration (2026-10-19): read `SQL/PLAN.md`, current `SQL/phase 4.md`, `SQL/migration/README.md` and the security handoff in `SQL/phase 3.md`. Current local schema has 33 tables; last verified deployment has 22. All Phase 4 additions remain LOCAL ONLY, without a cloud migration preview/release. Patient/booking storage remains legacy. Preserve dirty files and do not merge the Firestore scheduler worktree unchanged.
@@ -32,7 +44,7 @@ Read-only local target capture now derives all columns/ordered primary keys for 
 
 Next: trusted real source/census and retained-domain import/commit-checkpoint/restore contracts, retaining P4-02b2 ownership/authority blockers and never applying unresolved real candidates. Cumulative inspection snapshots alone cannot detect selection of an older valid checkpoint without a trusted tip. Unknown transaction outcome stays uncertain until committed state/receipt reconciliation; do not guess rollback, clear locks or retry with a new ID blindly. A protected local reader may process blocked synthetic rows but cannot clear gates or enable apply. Do not infer patient ownership from contact/UID/snapshot matching or historical actor roles, doctor offerings/prices from current service configuration, or missing actions/consent/timestamps. Real migration remains behind backup/restore, guest DDL/API review and clinic evidence gates.
 
-Every final work report must include all phase percentages and overall estimate from `SQL/PROGRESS.md`. Latest verification (2026-10-20): 276 unique passing tests (202 SQL/migration, 60 existing units, 14 rules), compile/lints/both builds and syntax/diff checks. Expected local release-check exits 1 with three blockers; its tests pass. Phase 4 estimate 89%, weighted overall ~57%. No production import/release or new paid resource.
+Every final work report must include all phase percentages and the overall estimate from `SQL/PROGRESS.md` plus the current test evidence from `SQL/TEST-RESULTS.md`; never claim a check that was not run. `npm run sql:release-check` still exits 1 with its documented blockers (EXPECTED HOLD). No production import, release or new paid resource.
 
 # AGENTS.md — Sood Clinic
 
@@ -59,34 +71,38 @@ both served from **one Firebase project** (`sood-clinic`), one domain name, one 
 
 | Path | What |
 |---|---|
-| `Frontend/` | React 18 + Vite 8 + Tailwind 3 + react-router 7 SPA. Pages in `src/pages`, shared bits in `src/components`, Firebase init in `src/lib/firebase.js`. All CSS is in `src/index.css` (~42 KB, hand-written, plus some Tailwind utilities). |
-| `functions/` | Firebase Functions (Node, region `asia-south1`): `clinicApi` (Express, **currently unused/dead**) and `manageStaffAccount` (callable). Also `seed.js` and `assign-staff-role.js` (local admin scripts). |
+| `Frontend/` | React 18 + Vite 8 + Tailwind 3 + react-router 7 SPA. Pages in `src/pages`, shared bits in `src/components`, Firebase init in `src/lib/firebase.js`. All CSS is in `src/index.css` (~42 KB, hand-written, plus some Tailwind utilities). Two entries build separate bundles: `src/entry/public.jsx` → `dist/public`, `src/entry/staff.jsx` → `dist/staff`. |
+| `functions/` | Firebase Functions (Node 22, region `asia-south1`): ~40 callables exported from `functions/index.js` (booking/availability, staff lifecycle, catalogue/contact/policy, calendar, feedback, video, SQL staff directory). The legacy `clinicApi` Express surface was removed 2026-10-10. Local admin scripts: `seed.js`, `assign-staff-role.js`, migration helpers. |
 | `firestore.rules`, `firestore.indexes.json` | Access control and indexes. |
-| `firebase.json`, `.firebaserc` | Hosting (single site `sood-clinic`, serves `Frontend/dist`), Firestore, Functions. Project alias `default` = `sood-clinic`. |
+| `firebase.json`, `.firebaserc` | Hosting — two sites on one project: public `sood-clinic`, staff `sood-clinic-staff` (serves the `Frontend/dist` builds), plus Firestore and Functions config. Project alias `default` = `sood-clinic`. |
 
 Auth model: Firebase Auth email/password. Staff roles are **custom claims** (`role` = `admin` | `doctor` | `manager`, doctor also has `doctorId`). Patients are any authenticated user without a staff role.
 
-## 3. Commands (verified 2026-09-30)
+## 3. Commands
 
 ```bash
 cd Frontend
 npm ci
-npm run build               # succeeds; one 818 KB JS chunk
 npm run lint                # passes clean
+npm run build               # builds both the public and staff bundles
 npm run dev
 
-cd ../functions
-npm install && npm run lint # only does `node --check`; there are no tests
+cd ..
+npm run test:time           # IST helper tests
+npm run test:rules          # Firestore rules via the demo-project emulator
+npm --prefix functions run lint
 ```
 
-Deploy (current): `firebase deploy --only hosting:sood-clinic --project sood-clinic`.
-That ships **Hosting only**. Rules, indexes and functions are NOT deployed by it (see `files/08-dev-workflow-testing.md`).
+The canonical full check list (SQL compile, `sql:test`, vitest suites, `sql:release-check`) lives in `SQL/TEST-QUEUE.md` §Commands.
+
+Deploy Hosting only: `NO_UPDATE_NOTIFIER=1 npx firebase-tools deploy --only hosting:public,hosting:staff --project sood-clinic` (build `Frontend` first).
+It ships **Hosting only** — rules, indexes and functions are NOT deployed by it and need explicit approval (see `files/08-dev-workflow-testing.md`).
 
 ## 4. Golden rules (do not break these)
 
 1. **Never trust the browser.** Anything that changes appointments, slots, roles, money or clinical data must be validated server-side (callable Function or tightly constrained rules). Target state: clients cannot write `appointments` / `appointmentSlots` directly.
 2. **Roles come only from custom claims** set by the Admin SDK. Never derive a role from Firestore data the client can write, from localStorage, or from the URL.
-3. **Least privilege.** Manager ≠ doctor. Clinical data (visit notes, history, documents, prescriptions) is doctor-only (+ the owning patient where stated in `docs/03`). Do not widen a rule to "make the UI work"; fix the query or the design.
+3. **Least privilege.** Manager ≠ doctor. Clinical data (visit notes, history, documents, prescriptions) is doctor-only (+ the owning patient where stated in `files/03`). Do not widen a rule to "make the UI work"; fix the query or the design.
 4. **Time is Asia/Kolkata (IST, UTC+05:30, no DST).** Store instants as Firestore `Timestamp`. Also store a `dateKey` (`YYYY-MM-DD`, IST) for day queries. Never use `Date` local getters (`getDay`, `getHours`, `toISOString().slice(0,10)`) for business logic in the browser or in Functions (Functions run in UTC). Use the shared IST helper (task P0-05).
 5. **Firestore has no nested arrays.** Store windows as `[{ start: "08:00", end: "10:00" }]`, never `[["08:00","10:00"]]`.
 6. **No secrets in the repo.** Firebase web config is public by design; service-account keys, `.env`, tokens are not. `.gitignore` already covers them. Do not weaken it.

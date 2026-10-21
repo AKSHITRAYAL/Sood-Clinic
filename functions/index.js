@@ -16,6 +16,14 @@ const { requireLiveAdmin, createStaffDirectory, sqlStaffStore } = require('./lib
 const { getDataConnect } = require('firebase-admin/data-connect');
 const { createStaffLifecycle, sqlStaffLifecycleStore } = require('./lib/staffLifecycle');
 const { requireLiveStaff, requireOAuthAdministrator } = require('./lib/staffAuthorization');
+const { createClinicContact, sqlClinicContactStore } = require('./lib/clinicContact');
+const { createSqlCatalogue, sqlCatalogueStore } = require('./lib/sqlCatalogue');
+const { createSqlPatientBackend, sqlPatientCallableOptions } = require('./lib/sqlPatientBackend');
+const { createSqlAuditLogBackend } = require('./lib/sqlAuditLog');
+const { createSqlClinicDayBackend } = require('./lib/sqlClinicDay');
+const { createSqlWeeklyHoursBackend } = require('./lib/sqlWeeklyHours');
+const { createSqlSpecialHoursBackend } = require('./lib/sqlSpecialHours');
+const { createBookingSettings, sqlBookingSettingsStore, selectVisitType } = require('./lib/bookingSettings');
 
 admin.initializeApp();
 setGlobalOptions({ region: 'asia-south1', maxInstances: 10 });
@@ -357,124 +365,45 @@ exports.getSqlStaffDirectory = onCall({ ...callableOptions, timeoutSeconds: 60, 
   }
 });
 
+const clinicContactService = () => createClinicContact({
+  auth: admin.auth(),
+  store: sqlClinicContactStore(getDataConnect({ serviceId: 'ak-sood-clinic-service', location: 'asia-south1', connector: 'clinic-admin' })),
+});
+exports.getAdminClinicContact = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', maxInstances: 1 }, request => clinicContactService().get(request));
+exports.saveAdminClinicContact = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', maxInstances: 1 }, request => clinicContactService().save(request));
+
+const sqlCatalogueService = () => createSqlCatalogue({
+  auth: admin.auth(),
+  store: sqlCatalogueStore(getDataConnect({ serviceId: 'ak-sood-clinic-service', location: 'asia-south1', connector: 'clinic-admin' })),
+});
+const bookingSettingsService = () => createBookingSettings({
+  auth: admin.auth(),
+  store: sqlBookingSettingsStore(getDataConnect({ serviceId: 'ak-sood-clinic-service', location: 'asia-south1', connector: 'clinic-admin' })),
+});
+
 // Public booking reads its catalogue through this narrow contract rather than
 // embedding clinic/doctor IDs in the client.
 exports.getBookingCatalog = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async () => {
-  const [branchSnapshot, departmentSnapshot, doctorSnapshot, configSnapshot] = await Promise.all([
-    db.collection('branches').get(),
-    db.collection('departments').get(),
-    db.collection('doctors').get(),
-    db.collection('clinic').doc('publicConfig').get(),
-  ]);
-  const departments = departmentSnapshot.docs.filter((item) => item.get('active') === true && item.get('publicBookingEnabled') === true).map((item) => ({
-    id: item.id, branchId: item.get('branchId'), name: trimmed(item.get('name'), 120), description: trimmed(item.get('description'), 300), sortOrder: Number(item.get('sortOrder')) || 0,
-  }));
-  const doctors = doctorSnapshot.docs.filter((item) => item.get('active') === true && item.get('bookingEnabled') === true).map((item) => ({
-    id: item.id, branchId: item.get('branchId'), departmentIds: Array.isArray(item.get('departmentIds')) ? item.get('departmentIds') : [], name: trimmed(item.get('name'), 160), qualification: trimmed(item.get('qualification'), 160),
-  }));
-  const branches = branchSnapshot.docs.filter((item) => item.get('active') === true).map((item) => ({ id: item.id, name: trimmed(item.get('name'), 120), timezone: item.get('timezone') || 'Asia/Kolkata' }));
-  const config = bookingConfig(configSnapshot);
-  return { branches, departments, doctors, booking: { bookingWindowDays: config.bookingWindowDays, visitTypes: config.visitTypes.filter((item) => item.active).map((item) => ({ id: item.id, label: item.label, minutes: item.minutes, mode: item.mode })) } };
+  const [catalogue, config] = await Promise.all([sqlCatalogueService().public(), bookingSettingsService().runtime()]);
+  return { ...catalogue, booking: { bookingWindowDays: config.bookingWindowDays, cancelCutoffMinutes: config.cancelCutoffMinutes, visitTypes: config.visitTypes.filter(item => item.active).map(({ id, label, minutes, mode }) => ({ id, label, minutes, mode })) } };
 });
 
-const catalogId = (value, label) => {
-  const id = trimmed(value, 80);
-  if (!/^[a-z][a-z0-9_-]{1,79}$/.test(id)) throw new HttpsError('invalid-argument', `${label} must use lowercase letters, numbers, hyphens, or underscores.`);
-  return id;
-};
-const catalogText = (value, label, max = 160, required = true) => {
-  const text = trimmed(value, max);
-  if (required && !text) throw new HttpsError('invalid-argument', `${label} is required.`);
-  return text;
-};
 
-// Public catalog documents are deliberately read-only in Firestore rules. This
-// callable gives administrators the narrow, validated write path so a clinic can
-// grow beyond the original seed provider without a client-side privilege hole.
-exports.getAdminBookingCatalog = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
-  await requireAdmin(request);
-  const [branchSnapshot, departmentSnapshot, doctorSnapshot] = await Promise.all([
-    db.collection('branches').orderBy('name').get(),
-    db.collection('departments').orderBy('sortOrder').get(),
-    db.collection('doctors').orderBy('name').get(),
-  ]);
-  return {
-    branches: branchSnapshot.docs.map((item) => ({ id: item.id, name: trimmed(item.get('name'), 120), code: trimmed(item.get('code'), 40), timezone: item.get('timezone') || 'Asia/Kolkata', active: item.get('active') === true })),
-    departments: departmentSnapshot.docs.map((item) => ({ id: item.id, branchId: trimmed(item.get('branchId'), 80), name: trimmed(item.get('name'), 120), description: trimmed(item.get('description'), 300), active: item.get('active') === true, publicBookingEnabled: item.get('publicBookingEnabled') === true, sortOrder: Number(item.get('sortOrder')) || 0 })),
-    doctors: doctorSnapshot.docs.map((item) => ({ id: item.id, branchId: trimmed(item.get('branchId'), 80), departmentIds: Array.isArray(item.get('departmentIds')) ? item.get('departmentIds').map((value) => trimmed(value, 80)).filter(Boolean) : [], name: trimmed(item.get('name'), 160), qualification: trimmed(item.get('qualification'), 160), active: item.get('active') === true, bookingEnabled: item.get('bookingEnabled') === true })),
-  };
-});
-
-exports.manageBookingCatalog = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
-  await requireAdmin(request);
-  const { action, record = {} } = request.data || {};
-  if (action === 'branch') {
-    const id = catalogId(record.id, 'Branch ID');
-    const payload = { name: catalogText(record.name, 'Branch name', 120), code: catalogText(record.code, 'Branch code', 40), timezone: 'Asia/Kolkata', active: record.active === true, updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid };
-    await db.collection('branches').doc(id).set(payload, { merge: true });
-    await auditStaffAccess({ actorUid: request.auth.uid, action: 'booking_catalog_branch_saved', targetUid: id, meta: { active: payload.active } });
-    return { message: 'Branch saved.' };
-  }
-  if (action === 'department') {
-    const id = catalogId(record.id, 'Department ID'); const branchId = catalogId(record.branchId, 'Branch ID');
-    if (!(await db.collection('branches').doc(branchId).get()).exists) throw new HttpsError('failed-precondition', 'Choose an existing branch.');
-    const sortOrder = Number(record.sortOrder);
-    if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 9999) throw new HttpsError('invalid-argument', 'Sort order must be a whole number between 0 and 9999.');
-    const payload = { branchId, name: catalogText(record.name, 'Department name', 120), description: catalogText(record.description, 'Description', 300, false), active: record.active === true, publicBookingEnabled: record.publicBookingEnabled === true, sortOrder, updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid };
-    await db.collection('departments').doc(id).set(payload, { merge: true });
-    await auditStaffAccess({ actorUid: request.auth.uid, action: 'booking_catalog_department_saved', targetUid: id, meta: { branchId, active: payload.active, publicBookingEnabled: payload.publicBookingEnabled } });
-    return { message: 'Department saved.' };
-  }
-  if (action === 'doctor') {
-    const id = isDoctorId(record.id) ? record.id : catalogId(record.id, 'Doctor ID'); const branchId = catalogId(record.branchId, 'Branch ID');
-    const departmentIds = Array.isArray(record.departmentIds) ? [...new Set(record.departmentIds.map((value) => catalogId(value, 'Department ID')))] : [];
-    if (!departmentIds.length || departmentIds.length > 12) throw new HttpsError('invalid-argument', 'Choose between one and twelve departments.');
-    const [branchSnapshot, ...departmentSnapshots] = await Promise.all([db.collection('branches').doc(branchId).get(), ...departmentIds.map((departmentId) => db.collection('departments').doc(departmentId).get())]);
-    if (!branchSnapshot.exists || departmentSnapshots.some((item) => !item.exists || item.get('branchId') !== branchId)) throw new HttpsError('failed-precondition', 'Every selected department must belong to the selected branch.');
-    const payload = { branchId, departmentIds, name: catalogText(record.name, 'Doctor name', 160), qualification: catalogText(record.qualification, 'Qualification', 160, false), active: record.active === true, bookingEnabled: record.bookingEnabled === true, updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid };
-    await db.collection('doctors').doc(id).set(payload, { merge: true });
-    await auditStaffAccess({ actorUid: request.auth.uid, action: 'booking_catalog_doctor_saved', targetUid: id, meta: { branchId, active: payload.active, bookingEnabled: payload.bookingEnabled } });
-    return { message: 'Doctor saved.' };
-  }
-  throw new HttpsError('invalid-argument', 'Unsupported catalogue action.');
-});
+// Catalogue readers, editors and booking validation move together; no Firestore fallback.
+exports.getAdminBookingCatalog = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, request => sqlCatalogueService().get(request));
+exports.manageBookingCatalog = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, request => sqlCatalogueService().save(request));
 
 // Visit formats are configuration rather than a client-side convention. This
 // keeps the public selector, appointment record and staff video workflow on one
 // server-validated contract, and makes a future data-store migration explicit.
-exports.getAdminBookingConfiguration = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
-  await requireAdmin(request);
-  const config = bookingConfig(await db.collection('clinic').doc('publicConfig').get());
-  return { visitTypes: config.visitTypes };
-});
-
-exports.saveBookingVisitTypes = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
-  await requireAdmin(request);
-  const visitTypes = normaliseVisitTypes(request.data?.visitTypes, { requireAtLeastOne: true });
-  await db.collection('clinic').doc('publicConfig').set({ visitTypes, updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
-  await auditStaffAccess({ actorUid: request.auth.uid, action: 'booking_visit_types_saved', targetUid: 'publicConfig', meta: { count: visitTypes.length } });
-  return { message: 'Appointment formats saved.', visitTypes };
-});
+exports.getAdminBookingConfiguration = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, request => bookingSettingsService().get(request));
+exports.saveBookingVisitTypes = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, request => bookingSettingsService().saveService(request));
+exports.saveBookingPolicy = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, request => bookingSettingsService().saveSettings(request));
 
 // --- Appointment engine ----------------------------------------------------
 // Firestore is the sole appointment authority. Google Calendar is deliberately
 // an external busy-time source and best-effort event mirror, never a replacement
 // for the transaction below.
-const DEFAULT_BOOKING_CONFIG = Object.freeze({
-  timezone: 'Asia/Kolkata',
-  bookingWindowDays: 14,
-  leadMinutes: 30,
-  slotMinutes: 20,
-  intervalMinutes: 20,
-  bufferBeforeMinutes: 0,
-  bufferAfterMinutes: 0,
-  autoConfirm: false,
-  patientCancellationCutoffHours: 2,
-});
-const DEFAULT_VISIT_TYPES = Object.freeze([
-  Object.freeze({ id: 'consultation', label: 'In-clinic consultation', minutes: 20, mode: 'in_person', active: true }),
-  Object.freeze({ id: 'video-consultation', label: 'Online video consultation', minutes: 20, mode: 'video', active: true }),
-]);
 
 const asDate = (value) => {
   if (!value) return null;
@@ -615,49 +544,6 @@ const assertPhoneBookingCapacity = async (phoneKey, now = new Date()) => {
   }
 };
 
-const bookingConfig = (data) => {
-  const configured = data?.data() || {};
-  const number = (name, fallback, min, max) => Number.isInteger(configured[name]) && configured[name] >= min && configured[name] <= max ? configured[name] : fallback;
-  return {
-    ...DEFAULT_BOOKING_CONFIG,
-    bookingWindowDays: number('bookingWindowDays', DEFAULT_BOOKING_CONFIG.bookingWindowDays, 1, 90),
-    leadMinutes: number('leadMinutes', DEFAULT_BOOKING_CONFIG.leadMinutes, 0, 24 * 60),
-    slotMinutes: number('slotMinutes', DEFAULT_BOOKING_CONFIG.slotMinutes, 5, 240),
-    intervalMinutes: number('intervalMinutes', DEFAULT_BOOKING_CONFIG.intervalMinutes, 5, 240),
-    bufferBeforeMinutes: number('bufferBeforeMinutes', DEFAULT_BOOKING_CONFIG.bufferBeforeMinutes, 0, 120),
-    bufferAfterMinutes: number('bufferAfterMinutes', DEFAULT_BOOKING_CONFIG.bufferAfterMinutes, 0, 120),
-    autoConfirm: configured.autoConfirm === true,
-    patientCancellationCutoffHours: number('patientCancellationCutoffHours', DEFAULT_BOOKING_CONFIG.patientCancellationCutoffHours, 0, 168),
-    visitTypes: normaliseVisitTypes(configured.visitTypes),
-  };
-};
-
-const normaliseVisitTypes = (value, { requireAtLeastOne = false } = {}) => {
-  const configured = Array.isArray(value) && value.length ? value : DEFAULT_VISIT_TYPES;
-  if (!Array.isArray(configured) || configured.length > 12) throw new HttpsError('invalid-argument', 'Choose between one and twelve appointment formats.');
-  const seen = new Set();
-  const types = configured.map((item) => {
-    const id = catalogId(item?.id, 'Appointment format ID');
-    if (seen.has(id)) throw new HttpsError('invalid-argument', 'Appointment format IDs must be unique.');
-    seen.add(id);
-    const label = catalogText(item?.label, 'Appointment format label', 100);
-    const minutes = Number(item?.minutes);
-    if (!Number.isInteger(minutes) || minutes < 5 || minutes > 240) throw new HttpsError('invalid-argument', 'Appointment duration must be between 5 and 240 minutes.');
-    const mode = item?.mode === 'video' ? 'video' : item?.mode === 'in_person' || !item?.mode ? 'in_person' : null;
-    if (!mode) throw new HttpsError('invalid-argument', 'Appointment format must be in-clinic or video.');
-    return { id, label, minutes, mode, active: item?.active !== false };
-  });
-  const active = types.filter((item) => item.active);
-  if (requireAtLeastOne && !active.length) throw new HttpsError('invalid-argument', 'Keep at least one appointment format available.');
-  return types;
-};
-
-const visitTypeFor = (config, visitTypeId) => {
-  const visitType = config.visitTypes.find((item) => item.id === visitTypeId && item.active);
-  if (visitType) return visitType;
-  if (visitTypeId && visitTypeId !== 'consultation') throw publicError('invalid-argument', 'The selected appointment format is unavailable.');
-  return config.visitTypes.find((item) => item.id === 'consultation' && item.active) || { id: 'consultation', label: 'In-clinic consultation', minutes: config.slotMinutes, mode: 'in_person', active: true };
-};
 
 const slotBusyRanges = async (doctorId, dateKey) => {
   const snapshot = await db.collection('appointmentSlots').where('doctorId', '==', doctorId).where('dateKey', '==', dateKey).get();
@@ -700,19 +586,19 @@ const externalBusyRanges = async ({ doctorId, dateKey }) => {
 };
 
 const availabilityContext = async ({ doctorId, dateKey, visitTypeId }) => {
-  const [doctorSnapshot, scheduleSnapshot, exceptionSnapshot, configSnapshot] = await Promise.all([
+  const [doctor, legacySchedule, scheduleSnapshot, exceptionSnapshot, config] = await Promise.all([
+    sqlCatalogueService().availableDoctor(doctorId),
+    // Legacy embedded hours remain a scheduling source, never catalogue authority.
     db.collection('doctors').doc(doctorId).get(),
     db.collection('doctorSchedules').doc(doctorId).get(),
     db.collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`).get(),
-    db.collection('clinic').doc('publicConfig').get(),
+    bookingSettingsService().runtime(),
   ]);
-  if (!doctorSnapshot.exists || doctorSnapshot.get('active') !== true || doctorSnapshot.get('bookingEnabled') !== true) throw publicError('not-found', 'This doctor is not currently available for online bookings.');
-  const config = bookingConfig(configSnapshot);
-  const visitType = visitTypeFor(config, visitTypeId);
+  const visitType = selectVisitType(config, visitTypeId);
   const [slots, external] = await Promise.all([slotBusyRanges(doctorId, dateKey), externalBusyRanges({ doctorId, dateKey })]);
   return {
-    doctor: doctorSnapshot.data(),
-    weeklySessions: (scheduleSnapshot.get('sessions') || doctorSnapshot.get('weeklySchedule') || []).map((session) => ({
+    doctor,
+    weeklySessions: (scheduleSnapshot.get('sessions') || legacySchedule.get('weeklySchedule') || []).map((session) => ({
       weekday: session.weekday,
       start: session.start || session.startTime,
       end: session.end || session.endTime,
@@ -779,8 +665,7 @@ exports.createBooking = onCall({ ...callableOptions, timeoutSeconds: 30, memory:
   const appointmentSlots = buildAvailability({ doctorId, dateKey, weeklySessions: context.weeklySessions, exception: context.exception, durationMinutes: context.visitType.minutes, intervalMinutes: context.config.intervalMinutes, bufferBeforeMinutes: context.config.bufferBeforeMinutes, bufferAfterMinutes: context.config.bufferAfterMinutes, leadMinutes: context.config.leadMinutes, bookingWindowDays: context.config.bookingWindowDays, busyRanges: context.busyRanges });
   const requested = appointmentSlots.find((slot) => slot.time === time);
   if (!requested) throw publicError('failed-precondition', 'That time is no longer available. Please choose another slot.');
-  const [branchSnapshot, departmentSnapshot, doctorSnapshot] = await Promise.all([db.collection('branches').doc(branchId).get(), db.collection('departments').doc(departmentId).get(), db.collection('doctors').doc(doctorId).get()]);
-  if (!branchSnapshot.exists || branchSnapshot.get('active') !== true || !departmentSnapshot.exists || departmentSnapshot.get('branchId') !== branchId || departmentSnapshot.get('active') !== true || departmentSnapshot.get('publicBookingEnabled') !== true || !doctorSnapshot.exists || doctorSnapshot.get('branchId') !== branchId || !(doctorSnapshot.get('departmentIds') || []).includes(departmentId)) throw publicError('failed-precondition', 'The selected clinic service is not available.');
+  await sqlCatalogueService().validateSelection({ branchId, departmentId, doctorId });
 
   const requestRef = db.collection('bookingRequests').doc(clientRequestId);
   const exceptionRef = db.collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`);
@@ -917,7 +802,7 @@ exports.cancelPatientAppointment = onCall({ ...callableOptions, timeoutSeconds: 
   const appointmentId = trimmed(request.data?.appointmentId, 200);
   if (!/^[A-Za-z0-9_-]{1,200}$/.test(appointmentId)) throw publicError('invalid-argument', 'Invalid appointment.');
   const reason = trimmed(request.data?.reason, 300) || 'Cancelled by patient';
-  const config = bookingConfig(await db.collection('clinic').doc('publicConfig').get());
+  const config = await bookingSettingsService().runtime();
   const ref = db.collection('appointments').doc(appointmentId);
   let cancelledAppointment;
   await db.runTransaction(async (transaction) => {
@@ -946,7 +831,7 @@ exports.reschedulePatientAppointment = onCall({ ...callableOptions, timeoutSecon
   const time = trimmed(request.data?.time, 5);
   if (!/^[A-Za-z0-9_-]{1,200}$/.test(appointmentId) || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw publicError('invalid-argument', 'Choose a valid new appointment time.');
 
-  const config = bookingConfig(await db.collection('clinic').doc('publicConfig').get());
+  const config = await bookingSettingsService().runtime();
   const ref = db.collection('appointments').doc(appointmentId);
   const initial = await ref.get();
   if (!initial.exists) throw publicError('not-found', 'Appointment not found.');
@@ -1085,3 +970,34 @@ exports.disconnectGoogleCalendar = onCall({ ...callableOptions }, async (request
   await db.collection('integrations').doc('googleCalendar').set({ active: false, disconnectedAt: FieldValue.serverTimestamp(), disconnectedBy: request.auth.uid, syncStatus: 'disconnected' }, { merge: true });
   return { disconnected: true };
 });
+
+// SQL patient slice: handlers already enforce App Check, live patient/staff Auth
+// and the durable link-attempt guard; the coordinated cutover (mounting the
+// staged pages, retiring legacy readers) stays behind the release gates.
+const sqlPatientHandler = name => request => createSqlPatientBackend({ auth: admin.auth(), dc: staffSql() })[name](request);
+exports.listSqlPatientProfiles = onCall(sqlPatientCallableOptions, sqlPatientHandler('listSqlPatientProfiles'));
+exports.getSqlPatientProfile = onCall(sqlPatientCallableOptions, sqlPatientHandler('getSqlPatientProfile'));
+exports.saveSqlPatientProfile = onCall(sqlPatientCallableOptions, sqlPatientHandler('saveSqlPatientProfile'));
+exports.getSqlPatientHealth = onCall(sqlPatientCallableOptions, sqlPatientHandler('getSqlPatientHealth'));
+exports.saveSqlPatientHealth = onCall(sqlPatientCallableOptions, sqlPatientHandler('saveSqlPatientHealth'));
+exports.listSqlPatientAppointments = onCall(sqlPatientCallableOptions, sqlPatientHandler('listSqlPatientAppointments'));
+exports.getSqlPatientAppointment = onCall(sqlPatientCallableOptions, sqlPatientHandler('getSqlPatientAppointment'));
+exports.searchSqlStaffPatients = onCall(sqlPatientCallableOptions, sqlPatientHandler('searchSqlStaffPatients'));
+exports.getSqlStaffPatientProfile = onCall(sqlPatientCallableOptions, sqlPatientHandler('getSqlStaffPatientProfile'));
+exports.saveSqlStaffPatientProfile = onCall(sqlPatientCallableOptions, sqlPatientHandler('saveSqlStaffPatientProfile'));
+exports.issueSqlPatientLink = onCall(sqlPatientCallableOptions, sqlPatientHandler('issueSqlPatientLink'));
+exports.revokeSqlPatientLink = onCall(sqlPatientCallableOptions, sqlPatientHandler('revokeSqlPatientLink'));
+exports.acceptSqlPatientLink = onCall(sqlPatientCallableOptions, sqlPatientHandler('acceptSqlPatientLink'));
+
+// Admin activity viewer over the SQL audit projection; every read writes its
+// own audit event, and the unmounted UI keeps it off live staff routes.
+exports.listSqlAdminAuditLog = onCall(sqlPatientCallableOptions, request => createSqlAuditLogBackend({ auth: admin.auth(), dc: staffSql() }).listSqlAdminAuditLog(request));
+
+// Staff schedule slice (B011–B013): clinic-day reader and weekly/special-hours
+// editors under the same App-Check-enforced options; pages stay unmounted until
+// the coordinated release.
+exports.listSqlStaffClinicDay = onCall(sqlPatientCallableOptions, request => createSqlClinicDayBackend({ auth: admin.auth(), dc: staffSql() }).listSqlStaffClinicDay(request));
+exports.getSqlDoctorWeeklyHours = onCall(sqlPatientCallableOptions, request => createSqlWeeklyHoursBackend({ auth: admin.auth(), dc: staffSql() }).getSqlDoctorWeeklyHours(request));
+exports.saveSqlDoctorWeeklyHours = onCall(sqlPatientCallableOptions, request => createSqlWeeklyHoursBackend({ auth: admin.auth(), dc: staffSql() }).saveSqlDoctorWeeklyHours(request));
+exports.getSqlDoctorSpecialHours = onCall(sqlPatientCallableOptions, request => createSqlSpecialHoursBackend({ auth: admin.auth(), dc: staffSql() }).getSqlDoctorSpecialHours(request));
+exports.saveSqlDoctorSpecialHours = onCall(sqlPatientCallableOptions, request => createSqlSpecialHoursBackend({ auth: admin.auth(), dc: staffSql() }).saveSqlDoctorSpecialHours(request));

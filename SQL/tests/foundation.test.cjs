@@ -11,6 +11,592 @@ const accessDenied = (error) => /permission.denied|unauthenticated|not authorize
 const { rehearseBranchStep, branchId: rehearsalBranchId } = require('../scripts/rehearse-branch.cjs');
 const { randomUUID, randomBytes } = require('node:crypto');
 
+async function patientHealthFixture(suffix, run) {
+  await patientProfileFixture(suffix, async fixture => {
+    const readHealth = () => fixture.api.getHealth(fixture.request({ patientId: fixture.patientId }));
+    const health = { bloodGroup: 'AB+', allergies: 'Synthetic allergy', currentMedications: 'Synthetic medication', healthNotes: 'Synthetic notes\nSecond line' };
+    const saveHealth = async (patch = {}, snapshot, requestId = randomUUID()) => {
+      const current = snapshot || await readHealth();
+      return fixture.api.saveHealth(fixture.request({ patientId: fixture.patientId, requestId, expectedUpdatedAt: current.updatedAt, profile: { ...health, ...patch } }));
+    };
+    await run({ ...fixture, health, readHealth, saveHealth });
+  });
+}
+
+test('SQL patient health creates and clears only self-reported fields with the shared native revision and ID-only audit', async () => patientHealthFixture(101, async ({ health, readHealth, saveHealth, patientId, uid, read }) => {
+  const empty = await readHealth();
+  assert.deepEqual(empty.profile, { bloodGroup: null, allergies: null, currentMedications: null, healthNotes: null });
+  await sql.query("UPDATE clinic_patients SET email='private@example.test',legacy_created_by_uid='private-actor' WHERE id=$1", [patientId]);
+  await saveHealth(); const current = await readHealth();
+  assert.deepEqual(current.profile, health); assert.notEqual(current.updatedAt, empty.updatedAt);
+  assert.equal((await read()).profile.updatedAt, current.updatedAt);
+  assert.equal(Object.hasOwn((await read()).profile, 'healthNotes'), false);
+  assert.deepEqual((await sql.query('SELECT email,legacy_created_by_uid FROM clinic_patients WHERE id=$1', [patientId])).rows[0], { email: 'private@example.test', legacy_created_by_uid: 'private-actor' });
+  assert.equal((await sql.query("SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1 AND action='patient_health_saved'", [uid])).rows[0].n, 1);
+  assert.equal(JSON.stringify((await sql.query('SELECT * FROM clinic_audit_logs WHERE actor_uid=$1', [uid])).rows).includes('Synthetic allergy'), false);
+  await saveHealth({ bloodGroup: null, allergies: '', currentMedications: null, healthNotes: '' });
+  assert.deepEqual((await readHealth()).profile, empty.profile);
+}));
+
+test('SQL patient health denies other patients and guardian links, including a relationship change just before commit', async () => patientHealthFixture(102, async ({ api, request, patientId, uid, readHealth, saveHealth, store }) => {
+  await assert.rejects(api.getHealth(request({ patientId: randomUUID() })), error => error.code === 'permission-denied');
+  const current = await readHealth(); const commit = store.saveHealth;
+  store.saveHealth = async data => {
+    await sql.query("UPDATE clinic_patient_links SET relationship='guardian' WHERE patient_id=$1 AND user_id=$2", [patientId, uid]);
+    return commit(data);
+  };
+  await assert.rejects(saveHealth({}, current), error => error.code === 'permission-denied');
+  await assert.rejects(readHealth(), error => error.code === 'permission-denied');
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_patient_reported_profiles WHERE patient_id=$1', [patientId])).rows[0].n, 0);
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_operation_receipts WHERE actor_uid=$1', [uid])).rows[0].n, 0);
+}));
+
+test('SQL health and demographic editors share one revision and concurrent changes cannot overwrite each other', async () => patientHealthFixture(103, async ({ readHealth, saveHealth, read, save, patientId, uid }) => {
+  const health = await readHealth(); const demographics = await read();
+  assert.equal(health.updatedAt, demographics.profile.updatedAt);
+  const outcomes = await Promise.allSettled([saveHealth({ allergies: 'Synthetic changed allergy' }, health), save({ city: 'Synthetic changed city' }, demographics)]);
+  assert.equal(outcomes.filter(row => row.status === 'fulfilled').length, 1);
+  assert.equal(outcomes.find(row => row.status === 'rejected').reason.code, 'aborted');
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_operation_receipts WHERE actor_uid=$1', [uid])).rows[0].n, 1);
+  const patient = (await sql.query('SELECT city,blood_group FROM clinic_patients WHERE id=$1', [patientId])).rows[0];
+  assert.ok((patient.city === null && patient.blood_group === 'AB+') || (patient.city === 'Synthetic changed city' && patient.blood_group === null));
+}));
+
+test('SQL health lost acknowledgements replay once and request IDs cannot cross into demographic writes', async () => patientHealthFixture(104, async ({ readHealth, saveHealth, read, save, store, uid, revoke }) => {
+  const current = await readHealth(); const demographics = await read(); const requestId = randomUUID(); const commit = store.saveHealth;
+  store.saveHealth = async data => { await commit(data); throw Error('Synthetic lost health acknowledgement'); };
+  assert.deepEqual(await saveHealth({}, current, requestId), { saved: true });
+  assert.deepEqual(await saveHealth({}, current, requestId), { saved: true });
+  await assert.rejects(saveHealth({ healthNotes: 'Different' }, current, requestId), error => error.code === 'already-exists');
+  await assert.rejects(save({}, demographics, requestId), error => error.code === 'already-exists');
+  assert.equal((await sql.query("SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1 AND action='patient_health_saved'", [uid])).rows[0].n, 1);
+  await revoke();
+  await assert.rejects(saveHealth({}, current, requestId), error => error.code === 'permission-denied');
+}));
+
+test('SQL health late audit failure rolls back blood group, private row, native revision and receipt together', async () => patientHealthFixture(105, async ({ readHealth, saveHealth, patientId, uid }) => {
+  const before = await readHealth();
+  // Exact synthetic actor only; remove the local fault-injection constraint in finally.
+  await sql.query("ALTER TABLE clinic_audit_logs ADD CONSTRAINT synthetic_health_audit_failure CHECK (NOT(actor_uid='sql-link-105' AND action='patient_health_saved'))");
+  try {
+    await assert.rejects(saveHealth({}, before), error => error.code === 'unavailable');
+    assert.deepEqual(await readHealth(), before);
+    assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_patient_reported_profiles WHERE patient_id=$1', [patientId])).rows[0].n, 0);
+    assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_operation_receipts WHERE actor_uid=$1', [uid])).rows[0].n, 0);
+  } finally {
+    await sql.query('ROLLBACK');
+    await sql.query('ALTER TABLE clinic_audit_logs DROP CONSTRAINT synthetic_health_audit_failure');
+  }
+}));
+
+test('SQL patient health rejects inactive/archived/current-staff access and returns no raw clinical errors', async () => patientHealthFixture(106, async ({ readHealth, saveHealth, patientId, uid, auth }) => {
+  const current = await readHealth();
+  await sql.query('UPDATE clinic_users SET active=false WHERE id=$1', [uid]);
+  await assert.rejects(readHealth(), error => error.code === 'permission-denied');
+  await sql.query('UPDATE clinic_users SET active=true WHERE id=$1', [uid]);
+  await sql.query('UPDATE clinic_patients SET archived_at=now() WHERE id=$1', [patientId]);
+  await assert.rejects(saveHealth({}, current), error => error.code === 'permission-denied');
+  await sql.query('UPDATE clinic_patients SET archived_at=null WHERE id=$1', [patientId]);
+  for (const role of ['doctor', 'admin', 'manager']) {
+    await auth.setCustomUserClaims(uid, { role });
+    await assert.rejects(readHealth(), error => error.code === 'permission-denied');
+  }
+}));
+
+test('patient health IAM operations deny anonymous and every browser role', async () => {
+  const scope = { actorUid: 'spoof', patientId: randomUUID() };
+  const data = { ...scope, requestId: randomUUID(), operation: 'spoof', expectedUpdatedAt: '2026-10-20T00:00:00Z', bloodGroup: null, allergies: null, currentMedications: null, healthNotes: null };
+  for (const impersonate of [{ unauthenticated: true }, ...['patient', 'doctor', 'manager', 'admin'].map(role => ({ authClaims: { sub: `health-${role}`, role } }))]) {
+    await assert.rejects(admin.executeQuery('ReadLinkedPatientHealth', scope, { impersonate }), accessDenied);
+    await assert.rejects(admin.executeMutation('SaveLinkedPatientHealth', data, { impersonate }), accessDenied);
+  }
+});
+
+async function patientAppointmentFixture(suffix, run) {
+  await patientProfileFixture(suffix, async fixture => {
+    const { createSqlPatientAppointments, sqlPatientAppointmentStore } = require('../../functions/lib/sqlPatientAppointments');
+    const store = sqlPatientAppointmentStore(admin);
+    const api = createSqlPatientAppointments({ auth: fixture.auth, store });
+    const ids = [];
+    const add = async ({ patientId = fixture.patientId, startsAt = '2026-10-20T03:00:00.123456Z', reference = `SYNTHETIC-APPOINTMENT-${suffix}-${String(ids.length).padStart(3, '0')}` } = {}) => {
+      const id = randomUUID(); ids.push(id);
+      await sql.query("INSERT INTO clinic_appointments(id,reference,patient_id,doctor_id,branch_id,service_id,starts_at,ends_at,clinic_date,status,source,visit_mode,consent_version,consent_accepted_at,created_at,updated_at) SELECT $1,$2,$3,d.id,d.branch_id,s.id,$4::timestamptz,$4::timestamptz+interval '30 minutes',($4::timestamptz AT TIME ZONE 'Asia/Kolkata')::date,'confirmed','patient','in_person','synthetic-only',now(),now(),now() FROM clinic_doctors d CROSS JOIN clinic_services s LIMIT 1", [id, reference, patientId, startsAt]);
+      return id;
+    };
+    const list = cursor => api.list(fixture.request({ patientId: fixture.patientId, ...(cursor ? { cursor } : {}) }));
+    const get = appointmentId => api.get(fixture.request({ patientId: fixture.patientId, appointmentId }));
+    try { await run({ ...fixture, api, store, add, list, get }); }
+    finally {
+      await sql.query('ROLLBACK');
+      await sql.query('DELETE FROM clinic_appointment_private_details WHERE appointment_id=ANY($1::uuid[])', [ids]);
+      await sql.query('DELETE FROM clinic_appointments WHERE id=ANY($1::uuid[])', [ids]);
+    }
+  });
+}
+
+test('SQL patient appointment history returns only linked operational details, never private snapshots/video/clinical payloads', async () => patientAppointmentFixture(91, async ({ add, list, get }) => {
+  const id = await add();
+  await sql.query("INSERT INTO clinic_appointment_private_details(appointment_id,reason,snapshot_phone,video_join_url,legacy_slot_list_present) VALUES($1,'Private synthetic reason','Private synthetic phone','https://example.test/private-capability',false)", [id]);
+  const result = await list();
+  assert.equal(result.appointments.length, 1); assert.equal(result.nextCursor, null);
+  const appointment = (await get(id)).appointment;
+  assert.equal(appointment.id, id); assert.equal(appointment.startsAt, '2026-10-20T03:00:00.123456Z');
+  assert.equal(appointment.timezone, 'Asia/Kolkata'); assert.equal(appointment.clinicDate, '2026-10-20');
+  for (const key of ['reason', 'snapshotPhone', 'videoJoinUrl', 'createdByUid', 'patientId', 'legacyId', 'consentVersion']) assert.equal(Object.hasOwn(appointment, key), false);
+  assert.equal(JSON.stringify(result).includes('Private synthetic'), false);
+}));
+
+test('SQL appointment keyset pagination handles tied native instants without duplicates or skipped rows', async () => patientAppointmentFixture(92, async ({ add, list }) => {
+  const ids = [];
+  for (let n = 0; n < 23; n++) ids.push(await add());
+  const later = await add({ startsAt: '2026-10-20T03:00:00.123457Z' });
+  const first = await list(); assert.equal(first.appointments.length, 20); assert.equal(first.appointments[0].id, later);
+  assert.equal(first.nextCursor.startsAt, '2026-10-20T03:00:00.123456Z');
+  const second = await list(first.nextCursor); assert.equal(second.appointments.length, 4); assert.equal(second.nextCursor, null);
+  const all = [...first.appointments, ...second.appointments];
+  assert.equal(new Set(all.map(row => row.id)).size, 24);
+  assert.deepEqual(new Set(all.map(row => row.id)), new Set([...ids, later]));
+  assert.deepEqual((await list(first.nextCursor)).appointments, second.appointments);
+}));
+
+test('SQL appointment access never adopts guest bookings and rejects cross-patient detail IDs and revoked links', async () => patientAppointmentFixture(93, async ({ add, list, get, revoke, api, request, patientId }) => {
+  const owned = await add(); const guest = await add({ patientId: null });
+  assert.deepEqual((await list()).appointments.map(row => row.id), [owned]);
+  await assert.rejects(get(guest), error => error.code === 'not-found');
+  await assert.rejects(api.get(request({ patientId: '40000000-0000-4000-8000-000000000001', appointmentId: owned })), error => error.code === 'permission-denied');
+  await revoke();
+  await assert.rejects(list(), error => error.code === 'permission-denied');
+  await assert.rejects(get(owned), error => error.code === 'permission-denied');
+  assert.equal((await sql.query('SELECT patient_id FROM clinic_appointments WHERE id=$1', [owned])).rows[0].patient_id, patientId);
+}));
+
+test('SQL appointment history fails closed for inactive accounts, archived patients and current staff sessions', async () => patientAppointmentFixture(94, async ({ add, list, get, auth, uid, patientId }) => {
+  const id = await add();
+  await sql.query('UPDATE clinic_users SET active=false WHERE id=$1', [uid]);
+  await assert.rejects(list(), error => error.code === 'permission-denied');
+  await sql.query('UPDATE clinic_users SET active=true WHERE id=$1', [uid]);
+  await sql.query('UPDATE clinic_patients SET archived_at=now() WHERE id=$1', [patientId]);
+  await assert.rejects(get(id), error => error.code === 'permission-denied');
+  await sql.query('UPDATE clinic_patients SET archived_at=null WHERE id=$1', [patientId]);
+  await auth.setCustomUserClaims(uid, { role: 'manager' });
+  await assert.rejects(list(), error => error.code === 'permission-denied');
+}));
+
+test('SQL appointment projection rejects unreviewed historical mode/date/status instead of inventing values', async () => patientAppointmentFixture(95, async ({ add, list, get }) => {
+  const id = await add();
+  for (const statement of ["visit_mode=null", "visit_mode='in_person',clinic_date='2026-10-19'", "clinic_date='2026-10-20',status='invented'"]) {
+    await sql.query(`UPDATE clinic_appointments SET ${statement} WHERE id=$1`, [id]);
+    await assert.rejects(list(), error => error.code === 'failed-precondition');
+    await assert.rejects(get(id), error => error.code === 'failed-precondition');
+  }
+}));
+
+test('patient appointment IAM queries deny all browser roles, including spoofed patient identity', async () => {
+  for (const impersonate of [{ unauthenticated: true }, ...['patient', 'manager', 'doctor', 'admin'].map(role => ({ authClaims: { sub: `appointment-${role}`, role } }))]) {
+    const common = { actorUid: 'sql-link-91', patientId: randomUUID() };
+    await assert.rejects(admin.executeQuery('ListLinkedPatientAppointments', common, { impersonate }), accessDenied);
+    await assert.rejects(admin.executeQuery('ListLinkedPatientAppointmentsBefore', { ...common, beforeStartsAt: '2026-10-20T03:00:00.123456Z', beforeReference: 'SYNTHETIC' }, { impersonate }), accessDenied);
+    await assert.rejects(admin.executeQuery('ReadLinkedPatientAppointment', { ...common, appointmentId: randomUUID() }, { impersonate }), accessDenied);
+  }
+});
+
+async function patientProfileFixture(suffix, run) {
+  const { getAuth } = functionsRequire('firebase-admin/auth');
+  const staffUid = `sql-profile-administrator-${suffix}`;
+  await getAuth(admin.app).createUser({ uid: staffUid });
+  await getAuth(admin.app).setCustomUserClaims(staffUid, { role: 'admin' });
+  const fixture = await linkingFixture(suffix, staffUid);
+  const { createSqlPatientProfiles, sqlPatientProfileStore } = require('../../functions/lib/sqlPatientProfiles');
+  const store = sqlPatientProfileStore(admin);
+  const api = createSqlPatientProfiles({ auth: fixture.auth, store });
+  const request = data => ({ auth: { uid: fixture.uid, token: { email_verified: true, auth_time: Math.floor(Date.now() / 1000) + 1 } }, data });
+  const read = () => api.get(request({ patientId: fixture.patientId }));
+  const save = async (patch = {}, snapshot, requestId = randomUUID()) => {
+    const current = snapshot || await read();
+    return api.save(request({ patientId: fixture.patientId, requestId, expectedUpdatedAt: current.profile.updatedAt, profile: { displayName: 'Synthetic Patient', phone: '+919876543210', title: 'Dr.', gender: 'Male', maritalStatus: 'Single', ...patch } }));
+  };
+  try {
+    await fixture.accept((await fixture.issue()).code);
+    await run({ ...fixture, store, api, request, read, save });
+  } finally {
+    await sql.query('ROLLBACK');
+    await sql.query('DELETE FROM clinic_patient_link_invitations WHERE user_id=$1', [fixture.uid]);
+    await sql.query('DELETE FROM clinic_patient_links WHERE user_id=$1', [fixture.uid]);
+    await sql.query('DELETE FROM clinic_patient_reported_profiles WHERE patient_id=$1', [fixture.patientId]);
+    await sql.query('DELETE FROM clinic_patients WHERE id=$1', [fixture.patientId]);
+    await sql.query('DELETE FROM clinic_users WHERE id=$1', [fixture.uid]);
+    await sql.query('DELETE FROM clinic_operation_receipts WHERE actor_uid=$1', [fixture.uid]);
+    await sql.query('DELETE FROM clinic_audit_logs WHERE actor_uid=$1 OR resource_id=$2', [fixture.uid, `${fixture.patientId}/${fixture.uid}`]);
+    await fixture.auth.deleteUser(fixture.uid);
+    await fixture.auth.deleteUser(staffUid);
+    await sql.query('DELETE FROM clinic_audit_logs WHERE actor_uid=$1', [staffUid]);
+  }
+}
+
+test('SQL linked demographics save preserves private clinical/provenance fields and returns only scoped profiles', async () => patientProfileFixture(81, async ({ api, request, read, save, patientId, uid }) => {
+  await sql.query("UPDATE clinic_patients SET email='synthetic@example.test',legacy_created_by_uid='private-actor',blood_group='AB+' WHERE id=$1", [patientId]);
+  await sql.query("INSERT INTO clinic_patient_reported_profiles(patient_id,health_notes) VALUES($1,'Private synthetic health')", [patientId]);
+  await save({ dateOfBirth: '2000-02-29', addressLine1: 'Synthetic address' });
+  const result = await read();
+  assert.equal(result.profile.displayName, 'Synthetic Patient'); assert.equal(result.profile.patientId, patientId);
+  for (const key of ['email', 'healthNotes', 'bloodGroup', 'legacyCreatedByUid']) assert.equal(Object.hasOwn(result.profile, key), false);
+  assert.deepEqual((await api.list(request({}))).patients, [{ patientId, uhid: 'TEST-LINK-81', displayName: 'Synthetic Patient', relationship: 'self' }]);
+  assert.deepEqual((await sql.query('SELECT email,legacy_created_by_uid,blood_group FROM clinic_patients WHERE id=$1', [patientId])).rows[0], { email: 'synthetic@example.test', legacy_created_by_uid: 'private-actor', blood_group: 'AB+' });
+  assert.equal((await sql.query('SELECT health_notes FROM clinic_patient_reported_profiles WHERE patient_id=$1', [patientId])).rows[0].health_notes, 'Private synthetic health');
+  const audits = (await sql.query("SELECT resource_id FROM clinic_audit_logs WHERE actor_uid=$1 AND action='patient_demographics_saved'", [uid])).rows;
+  assert.equal(audits.length, 1); assert.equal(audits[0].resource_id.replaceAll('-', ''), patientId.replaceAll('-', ''));
+  assert.equal(JSON.stringify(audits).includes('Synthetic Patient'), false);
+}));
+
+test('SQL profile save rejects cross-patient access and rechecks a revoked link inside its transaction', async () => patientProfileFixture(82, async ({ api, request, store, save, read, patientId, uid, revoke }) => {
+  await assert.rejects(api.get(request({ patientId: '40000000-0000-4000-8000-000000000001' })), error => error.code === 'permission-denied');
+  const before = await read(); const commit = store.save;
+  store.save = async data => { await revoke(); return commit(data); };
+  await assert.rejects(save({}, before), error => error.code === 'permission-denied');
+  assert.equal((await sql.query('SELECT display_name FROM clinic_patients WHERE id=$1', [patientId])).rows[0].display_name, 'Synthetic patient');
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_operation_receipts WHERE actor_uid=$1', [uid])).rows[0].n, 0);
+}));
+
+test('SQL profile optimistic save allows one concurrent editor and reconciles lost responses without duplicate audit', async () => patientProfileFixture(83, async ({ store, read, save, uid }) => {
+  const before = await read();
+  const outcomes = await Promise.allSettled([save({ city: 'Synthetic A' }, before), save({ city: 'Synthetic B' }, before)]);
+  assert.equal(outcomes.filter(row => row.status === 'fulfilled').length, 1);
+  assert.equal(outcomes.find(row => row.status === 'rejected').reason.code, 'aborted');
+  const current = await read(); const requestId = randomUUID(); const commit = store.save;
+  store.save = async data => { await commit(data); throw Error('Synthetic lost acknowledgement'); };
+  assert.deepEqual(await save({ city: 'Synthetic C' }, current, requestId), { saved: true });
+  assert.deepEqual(await save({ city: 'Synthetic C' }, current, requestId), { saved: true });
+  await assert.rejects(save({ city: 'Different payload' }, current, requestId), error => error.code === 'already-exists');
+  assert.equal((await sql.query("SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1 AND action='patient_demographics_saved'", [uid])).rows[0].n, 2);
+}));
+
+test('SQL profile writes roll back on late failure, account deactivation or patient archive', async () => patientProfileFixture(84, async ({ store, save, read, patientId, uid, api, request }) => {
+  const current = await read(); const commit = store.save;
+  store.save = data => commit({ ...data, expectedUpdatedAt: '2000-01-01T00:00:00Z' });
+  await assert.rejects(save({}, current));
+  assert.deepEqual(await read(), current);
+  store.save = async data => { await sql.query('UPDATE clinic_users SET active=false WHERE id=$1', [uid]); return commit(data); };
+  await assert.rejects(save({}, current));
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_operation_receipts WHERE actor_uid=$1', [uid])).rows[0].n, 0);
+  await sql.query('UPDATE clinic_users SET active=true WHERE id=$1', [uid]);
+  store.save = commit;
+  await sql.query('UPDATE clinic_patients SET archived_at=now() WHERE id=$1', [patientId]);
+  await assert.rejects(save({}, current), error => error.code === 'permission-denied');
+  assert.deepEqual(await api.list(request({})), { patients: [] });
+}));
+
+test('SQL profile committed retries are denied after live Auth demotion or link revocation', async () => patientProfileFixture(85, async ({ read, save, auth, uid, revoke }) => {
+  const current = await read(); const requestId = randomUUID();
+  await save({}, current, requestId);
+  await auth.setCustomUserClaims(uid, { role: 'manager' });
+  await assert.rejects(save({}, current, requestId), error => error.code === 'permission-denied');
+  await auth.setCustomUserClaims(uid, {});
+  await revoke();
+  await assert.rejects(save({}, current, requestId), error => error.code === 'permission-denied');
+}));
+
+test('SQL guardian demographic access requires an accepted explicit link; an account alone grants nothing', async () => patientProfileFixture(86, async ({ patientId, uid, read, save, revoke, api, request }) => {
+  await sql.query("UPDATE clinic_patient_links SET relationship='guardian' WHERE patient_id=$1 AND user_id=$2", [patientId, uid]);
+  assert.equal((await read()).profile.relationship, 'guardian');
+  await save({ emergencyContactName: 'Synthetic guardian' });
+  assert.equal((await read()).profile.emergencyContactName, 'Synthetic guardian');
+  await revoke();
+  assert.deepEqual(await api.list(request({})), { patients: [] });
+  await assert.rejects(read(), error => error.code === 'permission-denied');
+}));
+
+test('patient demographic IAM operations deny anonymous and every browser role', async () => {
+  const data = { actorUid: 'spoof', patientId: randomUUID(), requestId: randomUUID(), operation: 'spoof', expectedUpdatedAt: '2026-10-20T00:00:00Z', displayName: 'Synthetic', phone: '+919876543210', title: null, dateOfBirth: null, gender: null, maritalStatus: null, addressLine1: null, city: null, state: null, postalCode: null, emergencyContactName: null, emergencyContactPhone: null };
+  for (const impersonate of [{ unauthenticated: true }, ...['patient', 'manager', 'doctor', 'admin'].map(role => ({ authClaims: { sub: `profile-${role}`, role } }))]) {
+    await assert.rejects(admin.executeQuery('ListLinkedPatientProfiles', { actorUid: data.actorUid }, { impersonate }), accessDenied);
+    await assert.rejects(admin.executeQuery('ReadLinkedPatientProfile', { actorUid: data.actorUid, patientId: data.patientId }, { impersonate }), accessDenied);
+    await assert.rejects(admin.executeQuery('GetPatientProfileReceipt', { actorUid: data.actorUid, requestId: data.requestId }, { impersonate }), accessDenied);
+    await assert.rejects(admin.executeMutation('SaveLinkedPatientProfile', data, { impersonate }), accessDenied);
+  }
+});
+
+async function bookingSettingsFixture(suffix, run) {
+  const { getAuth } = functionsRequire('firebase-admin/auth');
+  const { createBookingSettings, sqlBookingSettingsStore, selectVisitType } = require('../../functions/lib/bookingSettings');
+  const auth = getAuth(admin.app); const uid = `sql-booking-settings-${suffix}`;
+  await auth.createUser({ uid }); await auth.setCustomUserClaims(uid, { role: 'admin' });
+  const store = sqlBookingSettingsStore(admin); const api = createBookingSettings({ auth, store });
+  const request = data => ({ auth: { uid, token: { role: 'admin', auth_time: Math.floor(Date.now() / 1000) + 1 } }, data });
+  const added = [];
+  const original = (await sql.query("SELECT legacy_id,legacy_sort_order,name,duration_minutes,consultation_mode,active,fee_paise FROM clinic_services WHERE code='consultation'")).rows[0];
+  await sql.query("INSERT INTO clinic_settings(id,booking_window_days,lead_minutes,slot_minutes,interval_minutes,buffer_before_minutes,buffer_after_minutes,cancel_cutoff_minutes,auto_confirm,updated_at) VALUES('primary',14,30,20,20,0,0,120,false,now())");
+  await sql.query("UPDATE clinic_services SET legacy_id='consultation',legacy_sort_order=0,updated_at=now() WHERE code='consultation'");
+  const read = () => api.get(request({}));
+  const settings = async (patch, snapshot, requestId = randomUUID()) => {
+    const current = snapshot || await read();
+    return api.saveSettings(request({ requestId, expectedUpdatedAt: current.updatedAt, settings: { ...current.settings, ...patch } }));
+  };
+  const format = async (record, snapshot, requestId = randomUUID()) => {
+    const current = snapshot || await read();
+    if (!current.visitTypes.some(row => row.id === record.id)) added.push(requestId);
+    return api.saveService(request({ requestId, expectedUpdatedAt: current.updatedAt, record }));
+  };
+  try { await run({ api, store, auth, uid, request, read, settings, format, selectVisitType }); }
+  finally {
+    await sql.query('ROLLBACK');
+    for (const id of added) await sql.query('DELETE FROM clinic_services WHERE id=$1', [id]);
+    await sql.query("UPDATE clinic_services SET legacy_id=$1,legacy_sort_order=$2,name=$3,duration_minutes=$4,consultation_mode=$5,active=$6,fee_paise=$7,updated_at=now() WHERE code='consultation'", [original.legacy_id, original.legacy_sort_order, original.name, original.duration_minutes, original.consultation_mode, original.active, original.fee_paise]);
+    await sql.query("DELETE FROM clinic_settings WHERE id='primary'");
+    await sql.query('DELETE FROM clinic_operation_receipts WHERE actor_uid=$1', [uid]);
+    await sql.query('DELETE FROM clinic_audit_logs WHERE actor_uid=$1', [uid]);
+    await auth.deleteUser(uid);
+  }
+}
+
+test('booking settings persist exact-minute policy for runtime cancellation/availability with one audit and receipt', async () => bookingSettingsFixture('policy', async ({ api, read, settings, uid }) => {
+  await settings({ cancelCutoffMinutes: 45, bookingWindowDays: 30, intervalMinutes: 15, leadMinutes: 60, bufferBeforeMinutes: 5, bufferAfterMinutes: 10, autoConfirm: true });
+  const runtime = await api.runtime();
+  assert.equal(runtime.patientCancellationCutoffHours, 0.75); assert.equal(runtime.cancelCutoffMinutes, 45);
+  assert.equal(runtime.bookingWindowDays, 30); assert.equal(runtime.autoConfirm, true);
+  assert.equal((await read()).settings.intervalMinutes, 15);
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1', [uid])).rows[0].n, 1);
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_operation_receipts WHERE actor_uid=$1', [uid])).rows[0].n, 1);
+}));
+
+test('booking formats preserve legacy IDs/fees, create no doctor offerings, and never resurrect hidden consultation', async () => bookingSettingsFixture('formats', async ({ api, read, format, selectVisitType }) => {
+  const offeringCount = (await sql.query('SELECT count(*)::int n FROM clinic_doctor_services')).rows[0].n;
+  await sql.query("UPDATE clinic_services SET fee_paise=12345 WHERE code='consultation'");
+  const initial = await read(); const consultation = initial.visitTypes[0];
+  await format({ id: 'synthetic-video', label: 'Synthetic video consultation', minutes: 30, mode: 'video', active: true });
+  await format({ ...consultation, minutes: 25, active: false });
+  assert.equal((await sql.query("SELECT fee_paise FROM clinic_services WHERE code='consultation'")).rows[0].fee_paise, 12345);
+  const runtime = await api.runtime();
+  assert.throws(() => selectVisitType(runtime, 'consultation'));
+  assert.throws(() => selectVisitType(runtime));
+  assert.equal(selectVisitType(runtime, 'synthetic-video').minutes, 30);
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_doctor_services')).rows[0].n, offeringCount);
+  await assert.rejects(format({ ...consultation, mode: 'video', active: true }), error => error.code === 'failed-precondition');
+  await assert.rejects(format({ ...runtime.visitTypes.find(row => row.id === 'synthetic-video'), active: false }), error => error.code === 'failed-precondition');
+}));
+
+test('booking settings and format edits share one optimistic revision and concurrent hide cannot remove all active formats', async () => bookingSettingsFixture('race', async ({ read, settings, format }) => {
+  await format({ id: 'synthetic-video', label: 'Synthetic video', minutes: 30, mode: 'video', active: true });
+  let current = await read();
+  const outcomes = await Promise.allSettled([settings({ leadMinutes: 50 }, current), format({ ...current.visitTypes[0], minutes: 35 }, current)]);
+  assert.equal(outcomes.filter(row => row.status === 'fulfilled').length, 1);
+  assert.equal(outcomes.find(row => row.status === 'rejected').reason.code, 'aborted');
+  current = await read();
+  const hidden = await Promise.allSettled(current.visitTypes.map(row => format({ ...row, active: false }, current)));
+  assert.equal(hidden.filter(row => row.status === 'fulfilled').length, 1);
+  assert.ok((await read()).visitTypes.some(row => row.active));
+}));
+
+test('booking service late failure rolls back singleton revision and leaves service/audit/receipt unchanged', async () => bookingSettingsFixture('rollback', async ({ store, read, format, uid }) => {
+  const before = await read(); const save = store.saveService;
+  store.saveService = data => save({ ...data, id: randomUUID() });
+  await assert.rejects(format({ ...before.visitTypes[0], label: 'Synthetic Must Roll Back' }, before));
+  assert.deepEqual(await read(), before);
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1', [uid])).rows[0].n, 0);
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_operation_receipts WHERE actor_uid=$1', [uid])).rows[0].n, 0);
+}));
+
+test('booking policy lost acknowledgement replays once and live demotion rejects even a committed retry', async () => bookingSettingsFixture('retry', async ({ auth, store, settings, read, uid }) => {
+  const before = await read(); const requestId = randomUUID(); const save = store.saveSettings;
+  store.saveSettings = async data => { await save(data); throw Error('Synthetic lost response'); };
+  assert.equal((await settings({ leadMinutes: 60 }, before, requestId)).saved, true);
+  assert.equal((await settings({ leadMinutes: 60 }, before, requestId)).saved, true);
+  await assert.rejects(settings({ leadMinutes: 70 }, before, requestId), error => error.code === 'already-exists');
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1', [uid])).rows[0].n, 1);
+  await auth.setCustomUserClaims(uid, { role: 'manager' });
+  await assert.rejects(settings({ leadMinutes: 60 }, before, requestId), error => error.code === 'permission-denied');
+}));
+
+test('booking settings IAM operations reject every browser role and anonymous caller', async () => {
+  const common = { actorUid: 'spoof', requestId: randomUUID(), operation: 'spoof', expectedUpdatedAt: '2026-10-20T00:00:00Z' };
+  const settings = { ...common, bookingWindowDays: 14, leadMinutes: 30, intervalMinutes: 20, bufferBeforeMinutes: 0, bufferAfterMinutes: 0, cancelCutoffMinutes: 120, autoConfirm: false };
+  const service = { ...common, id: randomUUID(), legacyId: 'synthetic-video', name: 'Synthetic Video', durationMinutes: 30, consultationMode: 'video', active: true };
+  for (const impersonate of [{ unauthenticated: true }, ...['patient', 'manager', 'doctor', 'admin'].map(role => ({ authClaims: { sub: `settings-${role}`, role } }))]) {
+    await assert.rejects(admin.executeQuery('ReadBookingSettings', undefined, { impersonate }), accessDenied);
+    await assert.rejects(admin.executeQuery('GetBookingSettingsReceipt', { actorUid: common.actorUid, requestId: common.requestId }, { impersonate }), accessDenied);
+    await assert.rejects(admin.executeMutation('SaveBookingSettings', settings, { impersonate }), accessDenied);
+    await assert.rejects(admin.executeMutation('CreateBookingService', { ...service, sortOrder: 1 }, { impersonate }), accessDenied);
+    await assert.rejects(admin.executeMutation('UpdateBookingService', { ...service, expectedServiceUpdatedAt: common.expectedUpdatedAt }, { impersonate }), accessDenied);
+  }
+});
+
+async function catalogueFixture(suffix, run) {
+  const { getAuth } = functionsRequire('firebase-admin/auth');
+  const { createSqlCatalogue, sqlCatalogueStore } = require('../../functions/lib/sqlCatalogue');
+  const auth = getAuth(admin.app); const uid = `sql-catalogue-admin-${suffix}`;
+  await auth.createUser({ uid }); await auth.setCustomUserClaims(uid, { role: 'admin' });
+  const store = sqlCatalogueStore(admin); const service = createSqlCatalogue({ auth, store });
+  const request = data => ({ auth: { uid, token: { role: 'admin', auth_time: Math.floor(Date.now() / 1000) + 1 } }, data });
+  const branchId = randomUUID(); const departmentId = randomUUID(); const doctorId = randomUUID();
+  const branchAlias = `synthetic-clinic-${suffix}`; const departmentAlias = `synthetic-gastro-${suffix}`; const doctorAlias = `Synthetic_Doctor_${suffix}`;
+  const create = async (action, record, requestId = randomUUID()) => service.save(request({ action, record, requestId, expectedUpdatedAt: null }));
+  const edit = async (action, row, patch = {}, requestId = randomUUID()) => {
+    const { updatedAt, timezone, ...record } = row;
+    return service.save(request({ action, record: { ...record, ...patch }, requestId, expectedUpdatedAt: updatedAt }));
+  };
+  try {
+    await create('branch', { id: branchAlias, name: 'Synthetic Clinic', code: `SYN-${suffix}`, address: 'Synthetic address', active: true }, branchId);
+    await create('department', { id: departmentAlias, branchId: branchAlias, name: 'Synthetic Gastro', code: `SYN-G-${suffix}`, description: '', sortOrder: 0, active: true, publicBookingEnabled: true }, departmentId);
+    await create('doctor', { id: doctorAlias, branchId: branchAlias, departmentIds: [departmentAlias], name: 'Synthetic Doctor', qualification: '', registrationNumber: `SYN-REG-${suffix}`, active: true, bookingEnabled: true }, doctorId);
+    await run({ auth, uid, store, service, request, create, edit, branchId, departmentId, doctorId, branchAlias, departmentAlias, doctorAlias });
+  } finally {
+    await sql.query('ROLLBACK');
+    await sql.query('DELETE FROM clinic_doctor_departments WHERE doctor_id=$1', [doctorId]);
+    await sql.query('DELETE FROM clinic_doctors WHERE id=$1', [doctorId]);
+    await sql.query('DELETE FROM clinic_departments WHERE id=$1', [departmentId]);
+    await sql.query('DELETE FROM clinic_branches WHERE id=$1', [branchId]);
+    await sql.query('DELETE FROM clinic_operation_receipts WHERE actor_uid=$1', [uid]);
+    await sql.query('DELETE FROM clinic_audit_logs WHERE actor_uid=$1', [uid]);
+    await auth.deleteUser(uid);
+  }
+}
+
+test('SQL catalogue creates/edits all master types, preserves legacy booking IDs, and hides disabled parents', async () => catalogueFixture('crud', async ({ service, request, edit, branchAlias, departmentAlias, doctorAlias, uid }) => {
+  const catalogue = await service.get(request({}));
+  const branch = catalogue.branches.find(row => row.id === branchAlias);
+  const department = catalogue.departments.find(row => row.id === departmentAlias);
+  const doctor = catalogue.doctors.find(row => row.id === doctorAlias);
+  assert.deepEqual(doctor.departmentIds, [departmentAlias]); assert.equal(doctor.branchId, branchAlias);
+  await service.validateSelection({ branchId: branchAlias, departmentId: departmentAlias, doctorId: doctorAlias });
+  assert.equal((await service.availableDoctor(doctorAlias)).id, doctorAlias);
+  await edit('department', department, { description: 'Synthetic update' });
+  await edit('doctor', doctor, { qualification: 'Synthetic qualification' });
+  await edit('branch', branch, { active: false });
+  const publicRows = await service.public();
+  assert.ok(!publicRows.branches.some(row => row.id === branchAlias));
+  assert.ok(!publicRows.departments.some(row => row.id === departmentAlias));
+  assert.ok(!publicRows.doctors.some(row => row.id === doctorAlias));
+  await assert.rejects(service.availableDoctor(doctorAlias), error => error.code === 'not-found');
+  await assert.rejects(service.validateSelection({ branchId: branchAlias, departmentId: departmentAlias, doctorId: doctorAlias }), error => error.code === 'failed-precondition');
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1', [uid])).rows[0].n, 6);
+}));
+
+test('SQL catalogue concurrent updates commit one winner per master and unchanged retries never duplicate audits', async () => catalogueFixture('race', async ({ service, request, edit, branchAlias, departmentAlias, doctorAlias, uid }) => {
+  const catalogue = await service.get(request({}));
+  for (const [action, group, alias] of [['branch', 'branches', branchAlias], ['department', 'departments', departmentAlias], ['doctor', 'doctors', doctorAlias]]) {
+    const current = catalogue[group].find(row => row.id === alias);
+    const requestId = randomUUID(); const results = await Promise.allSettled([edit(action, current, { name: 'Synthetic Winner A' }, requestId), edit(action, current, { name: 'Synthetic Winner B' })]);
+    assert.equal(results.filter(row => row.status === 'fulfilled').length, 1);
+    assert.equal(results.find(row => row.status === 'rejected').reason.code, 'aborted');
+    if (results[0].status === 'fulfilled') assert.equal((await edit(action, current, { name: 'Synthetic Winner A' }, requestId)).saved, true);
+  }
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1', [uid])).rows[0].n, 6);
+}));
+
+test('SQL catalogue doctor membership failure rolls back the profile and original joins without audit/receipt', async () => catalogueFixture('rollback', async ({ store, service, request, edit, doctorAlias, doctorId, uid }) => {
+  const row = (await service.get(request({}))).doctors.find(row => row.id === doctorAlias);
+  const before = (await sql.query('SELECT * FROM clinic_doctor_departments WHERE doctor_id=$1', [doctorId])).rows;
+  const write = store.save;
+  // Inject a late server adapter fault: the second membership evaluates beyond the validated list.
+  store.save = data => write({ ...data, member1: true });
+  await assert.rejects(edit('doctor', row, { name: 'Synthetic Should Roll Back' }), error => error.code === 'unavailable');
+  assert.equal((await sql.query('SELECT name FROM clinic_doctors WHERE id=$1', [doctorId])).rows[0].name, row.name);
+  assert.deepEqual((await sql.query('SELECT * FROM clinic_doctor_departments WHERE doctor_id=$1', [doctorId])).rows, before);
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_operation_receipts WHERE actor_uid=$1', [uid])).rows[0].n, 3);
+}));
+
+test('SQL catalogue lost commit acknowledgement replays and demoted callers lose access immediately', async () => catalogueFixture('replay', async ({ auth, store, service, request, edit, branchAlias, uid }) => {
+  const branch = (await service.get(request({}))).branches.find(row => row.id === branchAlias);
+  const write = store.save; const requestId = randomUUID();
+  store.save = async data => { await write(data); throw Error('Synthetic lost response'); };
+  assert.equal((await edit('branch', branch, { name: 'Synthetic Saved Once' }, requestId)).saved, true);
+  assert.equal((await edit('branch', branch, { name: 'Synthetic Saved Once' }, requestId)).saved, true);
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1', [uid])).rows[0].n, 4);
+  await auth.setCustomUserClaims(uid, { role: 'manager' });
+  await assert.rejects(service.get(request({})), error => error.code === 'permission-denied');
+  await assert.rejects(edit('branch', branch, { name: 'Synthetic Saved Once' }, requestId), error => error.code === 'permission-denied');
+}));
+
+test('SQL catalogue preserves ordered twelve-department membership and removes deselected joins atomically', async () => catalogueFixture('members', async ({ service, request, edit, branchId, doctorId, doctorAlias, departmentAlias }) => {
+  const extras = Array.from({ length: 11 }, (_, i) => ({ id: randomUUID(), alias: `synthetic-member-${i}` }));
+  try {
+    for (const [i, row] of extras.entries()) await sql.query('INSERT INTO clinic_departments(id,legacy_id,branch_id,code,name,active,public_booking_enabled,sort_order,updated_at) VALUES($1,$2,$3,$4,$5,true,true,$6,now())', [row.id, row.alias, branchId, `SYN-MEMBER-${i}`, 'Synthetic Department', i]);
+    const doctor = (await service.get(request({}))).doctors.find(row => row.id === doctorAlias);
+    const aliases = [departmentAlias, ...extras.map(row => row.alias).reverse()];
+    await edit('doctor', doctor, { departmentIds: aliases });
+    const updated = (await service.get(request({}))).doctors.find(row => row.id === doctorAlias);
+    assert.deepEqual(updated.departmentIds, aliases);
+    assert.deepEqual((await sql.query('SELECT sort_order FROM clinic_doctor_departments WHERE doctor_id=$1 ORDER BY sort_order', [doctorId])).rows.map(row => row.sort_order), Array.from({ length: 12 }, (_, i) => i));
+    await edit('doctor', updated, { departmentIds: [departmentAlias] });
+    assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_doctor_departments WHERE doctor_id=$1', [doctorId])).rows[0].n, 1);
+  } finally {
+    await sql.query('ROLLBACK');
+    await sql.query('DELETE FROM clinic_doctor_departments WHERE doctor_id=$1', [doctorId]);
+    for (const row of extras) await sql.query('DELETE FROM clinic_departments WHERE id=$1', [row.id]);
+  }
+}));
+
+test('SQL catalogue private reads/receipts and all master mutations deny anonymous and every browser role', async () => {
+  const vars = { actorUid: 'spoof', requestId: randomUUID(), operation: 'spoof', id: randomUUID(), legacyId: 'spoof', name: 'Spoof', active: true, code: 'SPOOF', address: 'Spoof', branchId: '00000000-0000-4000-8000-000000000001', registrationNumber: 'SPOOF', qualification: '', bookingEnabled: true, publicBookingEnabled: true, description: '', sortOrder: 0, departmentIds: [], expectedUpdatedAt: '2026-10-20T00:00:00Z', ...Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`member${i}`, false])) };
+  for (const impersonate of [{ unauthenticated: true }, ...['patient', 'manager', 'doctor', 'admin'].map(role => ({ authClaims: { sub: `catalogue-${role}`, role } }))]) {
+    await assert.rejects(admin.executeQuery('ReadSqlCatalogue', undefined, { impersonate }), accessDenied);
+    await assert.rejects(admin.executeQuery('GetCatalogueReceipt', { actorUid: vars.actorUid, requestId: vars.requestId }, { impersonate }), accessDenied);
+    for (const kind of ['Branch', 'Department', 'Doctor']) for (const mode of ['Create', 'Update']) {
+      const keys = ['actorUid', 'requestId', 'operation', 'id', 'legacyId', 'name', 'active', ...(mode === 'Update' ? ['expectedUpdatedAt'] : []), ...(kind === 'Branch' ? ['code', 'address'] : kind === 'Department' ? ['branchId', 'code', 'description', 'sortOrder', 'publicBookingEnabled'] : ['branchId', 'qualification', 'registrationNumber', 'bookingEnabled', 'departmentIds', ...Array.from({ length: 12 }, (_, i) => `member${i}`)])];
+      await assert.rejects(admin.executeMutation(`${mode}Catalogue${kind}`, Object.fromEntries(keys.map(key => [key, vars[key]])), { impersonate }), accessDenied);
+    }
+  }
+});
+
+async function contactFixture(suffix, run) {
+  const { getAuth } = functionsRequire('firebase-admin/auth');
+  const { createClinicContact, sqlClinicContactStore } = require('../../functions/lib/clinicContact');
+  const auth = getAuth(admin.app); const uid = `sql-contact-admin-${suffix}`;
+  await auth.createUser({ uid }); await auth.setCustomUserClaims(uid, { role: 'admin' });
+  const store = sqlClinicContactStore(admin);
+  const service = createClinicContact({ auth, store });
+  const request = data => ({ auth: { uid, token: { role: 'admin', auth_time: Math.floor(Date.now() / 1000) + 1 } }, data });
+  const before = (await service.get(request({}))).profile;
+  const input = { requestId: randomUUID(), expectedUpdatedAt: before.updatedAt, profile: { name: 'Synthetic Contact Clinic', phone: '+918988207797', email: 'synthetic@example.test', address: 'Synthetic clinic address' } };
+  try { await run({ auth, uid, store, service, request, before, input }); }
+  finally {
+    await sql.query('ROLLBACK');
+    await sql.query("UPDATE clinic_profiles SET name=$1,phone=$2,email=$3,address=$4,timezone=$5,updated_at=now() WHERE id='sood-clinic'", [before.name, before.phone, before.email, before.address, before.timezone]);
+    await sql.query('DELETE FROM clinic_operation_receipts WHERE actor_uid=$1', [uid]);
+    await sql.query('DELETE FROM clinic_audit_logs WHERE actor_uid=$1', [uid]);
+    await auth.deleteUser(uid);
+  }
+}
+
+test('clinic contact editor saves through live Auth and SQL, publishes public projection, and replays without duplicate audit', async () => contactFixture('save', async ({ service, request, input, uid, auth }) => {
+  assert.equal((await service.save(request(input))).saved, true);
+  assert.equal((await service.save(request(input))).saved, true);
+  const publicContact = (await clinic.executeQuery('GetPublicClinicContact', undefined, { impersonate: { unauthenticated: true } })).data.clinicProfile;
+  assert.deepEqual(publicContact, { ...input.profile, timezone: 'Asia/Kolkata' });
+  assert.equal((await sql.query("SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1 AND action='clinic_contact_saved'", [uid])).rows[0].n, 1);
+  const event = (await sql.query('SELECT actor_role,resource_type,resource_id FROM clinic_audit_logs WHERE actor_uid=$1', [uid])).rows[0];
+  assert.deepEqual(event, { actor_role: 'admin', resource_type: 'clinic_profile', resource_id: 'sood-clinic' });
+  await assert.rejects(service.save(request({ ...input, profile: { ...input.profile, name: 'Different payload' } })), error => error.code === 'already-exists');
+  await auth.setCustomUserClaims(uid, { role: 'manager' });
+  await assert.rejects(service.save(request(input)), error => error.code === 'permission-denied');
+}));
+
+test('clinic contact competing versions allow one winner and stale requests cannot leave receipts or audits', async () => contactFixture('race', async ({ service, request, input, uid }) => {
+  const second = { ...input, requestId: randomUUID(), profile: { ...input.profile, name: 'Synthetic competing clinic' } };
+  const outcomes = await Promise.allSettled([service.save(request(input)), service.save(request(second))]);
+  assert.equal(outcomes.filter(item => item.status === 'fulfilled').length, 1);
+  assert.equal(outcomes.find(item => item.status === 'rejected').reason.code, 'aborted');
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1', [uid])).rows[0].n, 1);
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_operation_receipts WHERE actor_uid=$1', [uid])).rows[0].n, 1);
+  await assert.rejects(service.save(request({ ...input, requestId: randomUUID() })), error => error.code === 'aborted');
+}));
+
+test('clinic contact lost commit response is reconciled with the scoped receipt, not a second write', async () => contactFixture('lost', async ({ store, service, request, input, uid }) => {
+  const save = store.save;
+  store.save = async data => { await save(data); throw Error('Synthetic transport failure after commit'); };
+  assert.equal((await service.save(request(input))).saved, true);
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_operation_receipts WHERE actor_uid=$1', [uid])).rows[0].n, 1);
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1', [uid])).rows[0].n, 1);
+}));
+
+test('clinic contact SQL operations remain inaccessible to all browser roles, including admin claims', async () => {
+  const variables = { requestId: randomUUID(), actorUid: 'spoofed-admin', operation: 'spoof', expectedUpdatedAt: '2026-10-20T00:00:00Z', name: 'Spoofed clinic', phone: '+918988207797', email: 'spoof@example.test', address: 'Spoof', timezone: 'Asia/Kolkata' };
+  for (const impersonate of [{ unauthenticated: true }, ...['patient', 'manager', 'doctor', 'admin'].map(role => ({ authClaims: { sub: `contact-${role}`, role } }))]) {
+    await assert.rejects(admin.executeQuery('GetAdminClinicContact', undefined, { impersonate }), accessDenied);
+    await assert.rejects(admin.executeQuery('GetClinicContactReceipt', { actorUid: variables.actorUid, requestId: variables.requestId }, { impersonate }), accessDenied);
+    await assert.rejects(admin.executeMutation('SaveClinicContact', variables, { impersonate }), accessDenied);
+  }
+});
+
 async function withRehearsalBranch(run) {
   const beforeAt = '2026-10-19T00:00:00.000000Z';
   const input = { requestId: randomUUID(), action: 'apply', expectedName: 'Synthetic Before', expectedAt: beforeAt, name: 'Synthetic After', sourceInstant: '2026-10-20T00:00:00.123456789Z' };
@@ -222,7 +808,9 @@ test('IAM-only query and seed deny anonymous, patient and admin-claim callers', 
 test('private clinical and patient collections have no exposed connector operation', async () => {
   await assert.rejects(clinic.executeQuery('ListPatients', undefined, { impersonate: { authClaims: { sub: 'sql-test-manager', role: 'manager' } } }), /not found/i);
   const result = await sql.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'clinic_%'");
-  assert.equal(result.rows.length, 33);
+  // 33 base tables plus the six Phase 6 scheduler tables: appointment units, calendar blocks,
+  // waitlist entries, calendar feeds, day token counters and appointment intake.
+  assert.equal(result.rows.length, 39);
 });
 
 test('exact source instants survive PostgreSQL round-trip alongside native values and remain private', async () => {
@@ -779,7 +1367,7 @@ test('real Auth staff provisioning, doctor assignment and suspension persist onl
   assert.ok(events.some((row) => row.resourceId === created.uid && row.action === 'staff_suspended'));
 });
 
-async function linkingFixture(suffix) {
+async function linkingFixture(suffix, staffUid = 'sql-lifecycle-administrator') {
   const { getAuth } = functionsRequire('firebase-admin/auth');
   const { createPatientLinking, sqlPatientLinkStore } = require('../../functions/lib/patientLinking');
   const auth = getAuth(admin.app);
@@ -789,7 +1377,7 @@ async function linkingFixture(suffix) {
   await sql.query('INSERT INTO clinic_users (id, display_name, active, created_at, updated_at) VALUES ($1, $2, true, now(), now())', [uid, 'Synthetic account']);
   await sql.query('INSERT INTO clinic_patients (id, uhid, display_name, phone, created_at, updated_at) VALUES ($1, $2, $3, $4, now(), now())', [patientId, `TEST-LINK-${suffix}`, 'Synthetic patient', '0000000000']);
   const service = createPatientLinking({ auth, store: sqlPatientLinkStore(admin) });
-  const staff = (data) => ({ auth: { uid: 'sql-lifecycle-administrator', token: { role: 'admin', auth_time: Math.floor(Date.now() / 1000) } }, data });
+  const staff = (data) => ({ auth: { uid: staffUid, token: { role: 'admin', auth_time: Math.floor(Date.now() / 1000) } }, data });
   const accept = (code, targetUid = uid) => service.accept({ auth: { uid: targetUid, token: { email_verified: true, auth_time: Math.floor(Date.now() / 1000) } }, data: { code } });
   const issue = (relationship = 'self', evidence = 'in_person_identity') => service.issue(staff({ patientId, targetUid: uid, relationship, evidence }));
   const revoke = () => service.revoke(staff({ patientId, targetUid: uid }));
@@ -913,3 +1501,293 @@ test('normalized catalog columns retain source fields without exposing provenanc
     await sql.query('UPDATE clinic_doctor_departments SET sort_order=0');
   }
 });
+
+async function staffRegistryFixture(suffix, run) {
+  const { getAuth } = functionsRequire('firebase-admin/auth');
+  const auth = getAuth(admin.app);
+  const uid = `sql-staff-registry-${suffix}`;
+  await auth.createUser({ uid, emailVerified: true });
+  await auth.setCustomUserClaims(uid, { role: 'admin' });
+  const { createSqlPatientProfiles, sqlPatientProfileStore } = require('../../functions/lib/sqlPatientProfiles');
+  const store = sqlPatientProfileStore(admin);
+  const api = createSqlPatientProfiles({ auth, store });
+  const patientId = `70000000-0000-4000-8000-${String(suffix).padStart(12, '0')}`;
+  const uhid = `SYN-REG-${suffix}`;
+  const patientPhone = '+919876500000';
+  await sql.query('INSERT INTO clinic_patients(id,uhid,display_name,phone,created_at,updated_at) VALUES($1,$2,$3,$4,now(),now())', [patientId, uhid, 'Synthetic registry patient', patientPhone]);
+  const request = (data, role = 'admin') => ({ auth: { uid, token: { role, auth_time: Math.floor(Date.now() / 1000) + 1 } }, data });
+  const search = (input, role) => api.searchStaff(request(input, role));
+  const readStaff = (role) => api.getStaff(request({ patientId }, role));
+  const saveStaff = async (patch = {}, snapshot, requestId = randomUUID(), role) => {
+    const current = snapshot || await readStaff(role);
+    return api.saveStaff(request({ patientId, requestId, expectedUpdatedAt: current.profile.updatedAt, profile: { displayName: 'Synthetic Registry Edit', phone: '+919876543210', title: 'Mr.', gender: 'Male', maritalStatus: 'Single', ...patch } }, role));
+  };
+  try { await run({ auth, uid, store, api, request, search, readStaff, saveStaff, patientId, uhid, patientPhone }); }
+  finally {
+    await sql.query('ROLLBACK');
+    await sql.query('DELETE FROM clinic_patient_reported_profiles WHERE patient_id=$1', [patientId]);
+    await sql.query('DELETE FROM clinic_patient_links WHERE patient_id=$1', [patientId]);
+    await sql.query('DELETE FROM clinic_patients WHERE id=$1', [patientId]);
+    await sql.query('DELETE FROM clinic_operation_receipts WHERE actor_uid=$1', [uid]);
+    await sql.query('DELETE FROM clinic_audit_logs WHERE actor_uid=$1', [uid]);
+    await auth.deleteUser(uid);
+  }
+}
+
+test('SQL staff registry search returns exact bounded matches with ID-only audits and term-free access evidence', async () => staffRegistryFixture(71, async ({ search, readStaff, saveStaff, patientId, uhid, patientPhone, uid }) => {
+  const byUhid = await search({ uhid: `  ${uhid}  ` });
+  assert.deepEqual(byUhid.patients, [{ patientId, uhid, displayName: 'Synthetic registry patient', phone: patientPhone }]);
+  const byPhone = await search({ phone: patientPhone.slice(3) });
+  assert.deepEqual(byPhone.patients.map(row => row.patientId), [patientId]);
+  assert.deepEqual((await search({ uhid: uhid.slice(0, -1) })).patients, []);
+  assert.deepEqual((await search({ phone: '+919876500001' })).patients, []);
+  for (const input of [{ displayName: 'Synthetic' }, { email: 'private@example.test' }, { uhid: 'SYN-*' }]) {
+    await assert.rejects(search(input), error => error.code === 'invalid-argument');
+  }
+  const profile = (await readStaff()).profile;
+  assert.equal(Object.hasOwn(profile, 'relationship'), false);
+  for (const field of ['email', 'healthNotes', 'bloodGroup', 'legacyCreatedByUid', 'archivedAt']) assert.equal(Object.hasOwn(profile, field), false);
+  await saveStaff({ city: 'Synthetic city' });
+  const audits = (await sql.query('SELECT actor_role, action, resource_type, resource_id FROM clinic_audit_logs WHERE actor_uid=$1 ORDER BY action', [uid])).rows;
+  assert.equal(audits.filter(row => row.action === 'patient_registry_searched').length, 4);
+  // Every ReadStaffPatientDemographics execution is audited: the explicit read, the save helper's
+  // snapshot read and the versioned save's in-transaction access recheck.
+  assert.equal(audits.filter(row => row.action === 'patient_demographics_viewed').length, 3);
+  assert.equal(audits.filter(row => row.action === 'staff_patient_demographics_saved').length, 1);
+  // UUID-typed variables are stored in PostgreSQL's canonical hyphenless form.
+  for (const row of audits.filter(row => row.action !== 'staff_patient_demographics_saved')) assert.equal(row.resource_id, row.action === 'patient_registry_searched' ? 'registry' : patientId.replaceAll('-', ''));
+  for (const row of audits.filter(row => row.action === 'staff_patient_demographics_saved')) assert.deepEqual([row.actor_role, row.resource_id], ['admin', patientId.replaceAll('-', '')]);
+  assert.equal(JSON.stringify(audits).includes(uhid), false);
+  assert.equal(JSON.stringify(audits).includes(patientPhone), false);
+  assert.equal(JSON.stringify(audits).includes('Synthetic'), false);
+}));
+
+test('SQL staff search bounds the 21-row sentinel, excludes archived patients and fails closed on malformed rows', async () => staffRegistryFixture(72, async ({ search, readStaff, patientId, uhid }) => {
+  const boundPhone = '+919876500099';
+  try {
+    await sql.query("INSERT INTO clinic_patients(id,uhid,display_name,phone,created_at,updated_at) SELECT gen_random_uuid(),'SYN-REG-BOUND-'||n,'Synthetic bound '||n,$1,now(),now() FROM generate_series(1,21) n", [boundPhone]);
+    await assert.rejects(search({ phone: boundPhone }), error => error.code === 'failed-precondition');
+    await sql.query("UPDATE clinic_patients SET archived_at=now() WHERE uhid='SYN-REG-BOUND-21'");
+    const bounded = await search({ phone: boundPhone });
+    assert.equal(bounded.patients.length, 20);
+    assert.equal(bounded.patients.some(row => row.uhid === 'SYN-REG-BOUND-21'), false);
+    await sql.query('UPDATE clinic_patients SET archived_at=now() WHERE id=$1', [patientId]);
+    assert.deepEqual((await search({ uhid })).patients, []);
+    await assert.rejects(readStaff(), error => error.code === 'not-found');
+    await sql.query('UPDATE clinic_patients SET archived_at=null WHERE id=$1', [patientId]);
+    await sql.query("UPDATE clinic_patients SET display_name=' ' WHERE uhid='SYN-REG-BOUND-1'");
+    await assert.rejects(search({ phone: boundPhone }), error => error.code === 'failed-precondition');
+  } finally { await sql.query("DELETE FROM clinic_patients WHERE uhid LIKE 'SYN-REG-BOUND-%'"); }
+}));
+
+test('SQL staff demographic saves preserve health/blood/UHID/Auth/link state and race one CAS winner per revision', async () => staffRegistryFixture(73, async ({ auth, api, store, saveStaff, readStaff, patientId, uid }) => {
+  await sql.query("UPDATE clinic_patients SET email='private@example.test',legacy_created_by_uid='private-actor',blood_group='AB+' WHERE id=$1", [patientId]);
+  await sql.query("INSERT INTO clinic_patient_reported_profiles(patient_id,health_notes) VALUES($1,'Private synthetic health')", [patientId]);
+  const linked = 'sql-staff-registry-link-73';
+  try {
+    const patientUid = 'sql-staff-registry-patient-73';
+    await sql.query("INSERT INTO clinic_users (id, display_name, active, created_at, updated_at) VALUES ($1, 'Synthetic linked account', true, now(), now())", [linked]);
+    await sql.query("INSERT INTO clinic_patient_links(patient_id,user_id,relationship,verified_at,verified_by,created_at) VALUES($1,$2,'self',now(),'synthetic-verification',now())", [patientId, linked]);
+    await auth.createUser({ uid: patientUid, emailVerified: true });
+    await sql.query("INSERT INTO clinic_users (id, display_name, active, created_at, updated_at) VALUES ($1, 'Synthetic patient account', true, now(), now())", [patientUid]);
+    await sql.query("INSERT INTO clinic_patient_links(patient_id,user_id,relationship,verified_at,verified_by,created_at) VALUES($1,$2,'self',now(),'synthetic-verification',now())", [patientId, patientUid]);
+    const patientRequest = data => ({ auth: { uid: patientUid, token: { email_verified: true, auth_time: Math.floor(Date.now() / 1000) } }, data });
+    const before = await readStaff();
+    await saveStaff({ city: 'Synthetic city' });
+    assert.deepEqual((await sql.query('SELECT email,legacy_created_by_uid,blood_group,city FROM clinic_patients WHERE id=$1', [patientId])).rows[0], { email: 'private@example.test', legacy_created_by_uid: 'private-actor', blood_group: 'AB+', city: 'Synthetic city' });
+    assert.equal((await sql.query('SELECT health_notes FROM clinic_patient_reported_profiles WHERE patient_id=$1', [patientId])).rows[0].health_notes, 'Private synthetic health');
+    assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_patient_links WHERE patient_id=$1 AND user_id=$2', [patientId, linked])).rows[0].n, 1);
+    assert.equal((await sql.query("SELECT count(*)::int n FROM clinic_operation_receipts WHERE actor_uid=$1", [uid])).rows[0].n, 1);
+    const commit = store.saveStaff;
+    store.saveStaff = async data => { await sql.query('UPDATE clinic_patients SET updated_at=now() WHERE id=$1', [patientId]); return commit(data); };
+    await assert.rejects(saveStaff({ city: 'Synthetic racing city' }, before), error => error.code === 'aborted');
+    store.saveStaff = commit;
+    assert.equal((await sql.query('SELECT city FROM clinic_patients WHERE id=$1', [patientId])).rows[0].city, 'Synthetic city');
+    assert.equal((await sql.query("SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1 AND action='staff_patient_demographics_saved'", [uid])).rows[0].n, 1);
+    const current = await readStaff();
+    const outcomes = await Promise.allSettled([
+      saveStaff({ city: 'Synthetic staff city' }, current),
+      api.save(patientRequest({ patientId, requestId: randomUUID(), expectedUpdatedAt: current.profile.updatedAt, profile: { displayName: 'Synthetic concurrent edit', phone: '+919876543210' } })),
+    ]);
+    assert.equal(outcomes.filter(row => row.status === 'fulfilled').length, 1);
+    assert.equal(outcomes.find(row => row.status === 'rejected').reason.code, 'aborted');
+    assert.equal((await sql.query("SELECT count(*)::int n FROM clinic_operation_receipts WHERE actor_uid=$1", [uid])).rows[0].n, 2);
+    assert.equal((await sql.query('SELECT blood_group FROM clinic_patients WHERE id=$1', [patientId])).rows[0].blood_group, 'AB+');
+  } finally {
+    await sql.query('DELETE FROM clinic_patient_links WHERE user_id=ANY($1::text[])', [[linked, 'sql-staff-registry-patient-73']]);
+    await sql.query('DELETE FROM clinic_users WHERE id=ANY($1::text[])', [[linked, 'sql-staff-registry-patient-73']]);
+    await sql.query("DELETE FROM clinic_operation_receipts WHERE actor_uid='sql-staff-registry-patient-73'");
+    await sql.query("DELETE FROM clinic_audit_logs WHERE actor_uid='sql-staff-registry-patient-73'");
+    await auth.deleteUser('sql-staff-registry-patient-73');
+  }
+}));
+
+test('SQL staff saves reconcile lost acknowledgements once, reject reused request IDs and keep unknown outcomes uncertain', async () => staffRegistryFixture(74, async ({ store, saveStaff, readStaff, uid }) => {
+  const current = await readStaff();
+  const requestId = randomUUID();
+  const commit = store.saveStaff;
+  store.saveStaff = async data => { await commit(data); throw Error('Synthetic lost staff acknowledgement'); };
+  assert.deepEqual(await saveStaff({ city: 'Synthetic lost city' }, current, requestId), { saved: true });
+  assert.deepEqual(await saveStaff({ city: 'Synthetic lost city' }, current, requestId), { saved: true });
+  await assert.rejects(saveStaff({ city: 'Synthetic different city' }, current, requestId), error => error.code === 'already-exists');
+  assert.equal((await sql.query("SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1 AND action='staff_patient_demographics_saved'", [uid])).rows[0].n, 1);
+  store.saveStaff = async () => { throw Error('Synthetic unknown staff outcome'); };
+  const before = await readStaff();
+  await assert.rejects(saveStaff({ city: 'Synthetic unknown city' }, before), error => error.code === 'unavailable');
+  assert.deepEqual(await readStaff(), before);
+  assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_operation_receipts WHERE actor_uid=$1', [uid])).rows[0].n, 1);
+  store.saveStaff = commit;
+}));
+
+test('SQL staff registry fails closed for token/claim mismatch, forced password, doctor claims and disabled accounts', async () => staffRegistryFixture(75, async ({ auth, uid, api, request, search, patientId, uhid }) => {
+  await auth.setCustomUserClaims(uid, { role: 'manager' });
+  assert.equal((await search({ uhid }, 'manager')).patients.length, 1);
+  await assert.rejects(search({ uhid }, 'admin'), error => error.code === 'permission-denied');
+  await assert.rejects(api.getStaff(request({ patientId })), error => error.code === 'permission-denied');
+  await assert.rejects(api.saveStaff(request({ patientId, requestId: randomUUID(), expectedUpdatedAt: '2026-10-20T00:00:00.000000Z', profile: { displayName: 'Synthetic', phone: '+919876543210' } }, 'admin')), error => error.code === 'permission-denied');
+  await auth.setCustomUserClaims(uid, { role: 'manager', forcePasswordChange: true });
+  await assert.rejects(search({ uhid }, 'manager'), error => error.code === 'permission-denied');
+  await assert.rejects(api.getStaff(request({ patientId }, 'manager')), error => error.code === 'permission-denied');
+  await auth.setCustomUserClaims(uid, { role: 'doctor', doctorId: 'SYN-DOC-75' });
+  await assert.rejects(search({ uhid }, 'doctor'), error => error.code === 'permission-denied');
+  await assert.rejects(api.getStaff(request({ patientId }, 'doctor')), error => error.code === 'permission-denied');
+  await auth.setCustomUserClaims(uid, { role: 'manager' });
+  // The emulator never reports tokensValidAfterTime, so the live token-cutoff branch stays unit-covered only.
+  await auth.updateUser(uid, { disabled: true });
+  await assert.rejects(search({ uhid }, 'manager'), error => error.code === 'permission-denied');
+  await assert.rejects(api.getStaff(request({ patientId }, 'manager')), error => error.code === 'permission-denied');
+  await auth.updateUser(uid, { disabled: false });
+  assert.equal((await search({ uhid }, 'manager')).patients.length, 1);
+}));
+
+test('staff registry IAM mutations deny anonymous and every browser role, including spoofed admin actors', async () => {
+  const auditsBefore = (await sql.query("SELECT count(*)::int n FROM clinic_audit_logs WHERE action IN ('patient_registry_searched','patient_demographics_viewed','staff_patient_demographics_saved')")).rows[0].n;
+  const patientId = randomUUID();
+  const common = { actorUid: 'spoof', actorRole: 'admin' };
+  const save = { ...common, patientId, requestId: randomUUID(), operation: 'spoof', expectedUpdatedAt: '2026-10-20T00:00:00Z', displayName: 'Synthetic', phone: '+919876543210', title: null, dateOfBirth: null, gender: null, maritalStatus: null, addressLine1: null, city: null, state: null, postalCode: null, emergencyContactName: null, emergencyContactPhone: null };
+  for (const impersonate of [{ unauthenticated: true }, ...['patient', 'manager', 'doctor', 'admin'].map(role => ({ authClaims: { sub: `staff-registry-${role}`, role } }))]) {
+    await assert.rejects(admin.executeMutation('SearchStaffPatientsByUhid', { ...common, uhid: 'SYN-999999' }, { impersonate }), accessDenied);
+    await assert.rejects(admin.executeMutation('SearchStaffPatientsByPhone', { ...common, phone: '+919876543210' }, { impersonate }), accessDenied);
+    await assert.rejects(admin.executeMutation('ReadStaffPatientDemographics', { ...common, patientId }, { impersonate }), accessDenied);
+    await assert.rejects(admin.executeMutation('SaveStaffPatientDemographics', save, { impersonate }), accessDenied);
+  }
+  assert.equal((await sql.query("SELECT count(*)::int n FROM clinic_audit_logs WHERE action IN ('patient_registry_searched','patient_demographics_viewed','staff_patient_demographics_saved')")).rows[0].n, auditsBefore);
+});
+
+test('SQL staff registry late audit failure returns no data and leaves no receipts or partial evidence', async () => staffRegistryFixture(77, async ({ search, readStaff, saveStaff, patientId, uid }) => {
+  const versionBefore = (await sql.query('SELECT updated_at FROM clinic_patients WHERE id=$1', [patientId])).rows[0].updated_at;
+  // Exact synthetic actor and actions only; remove the local fault-injection constraint in finally.
+  await sql.query(`ALTER TABLE clinic_audit_logs ADD CONSTRAINT synthetic_staff_audit_failure CHECK (NOT(actor_uid='${uid}' AND action IN ('patient_registry_searched','patient_demographics_viewed','staff_patient_demographics_saved')))`);
+  try {
+    await assert.rejects(search({ uhid: 'SYN-REG-77' }), error => error.code === 'unavailable');
+    await assert.rejects(readStaff(), error => error.code === 'unavailable');
+    await assert.rejects(saveStaff({ city: 'Synthetic late audit' }), error => error.code === 'unavailable');
+    assert.deepEqual((await sql.query('SELECT updated_at FROM clinic_patients WHERE id=$1', [patientId])).rows[0].updated_at, versionBefore);
+    assert.equal((await sql.query('SELECT city FROM clinic_patients WHERE id=$1', [patientId])).rows[0].city, null);
+    assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_operation_receipts WHERE actor_uid=$1', [uid])).rows[0].n, 0);
+    assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1', [uid])).rows[0].n, 0);
+  } finally {
+    await sql.query('ROLLBACK');
+    await sql.query('ALTER TABLE clinic_audit_logs DROP CONSTRAINT synthetic_staff_audit_failure');
+  }
+}));
+
+async function linkAttemptFixture(suffix, run) {
+  const { getAuth } = functionsRequire('firebase-admin/auth');
+  const auth = getAuth(admin.app);
+  const uid = `sql-link-attempts-${suffix}`;
+  await auth.createUser({ uid, emailVerified: true });
+  await sql.query('INSERT INTO clinic_users (id, display_name, active, created_at, updated_at) VALUES ($1, $2, true, now(), now())', [uid, 'Synthetic account']);
+  const { sqlPatientLinkAttemptGuard } = require('../../functions/lib/sqlPatientLinkAttempts');
+  try { await run({ auth, uid, attempt: sqlPatientLinkAttemptGuard(admin), guard: () => sqlPatientLinkAttemptGuard(admin) }); }
+  finally {
+    await sql.query('ROLLBACK');
+    await sql.query('DELETE FROM clinic_audit_logs WHERE actor_uid=$1', [uid]);
+    await sql.query('DELETE FROM clinic_users WHERE id=$1', [uid]);
+    await auth.deleteUser(uid);
+  }
+}
+
+test('SQL link attempts debit five per rolling ten-minute window and keep UID-only evidence', async () => linkAttemptFixture(80, async ({ uid, attempt }) => {
+  for (let n = 0; n < 5; n++) assert.equal(await attempt({ actorUid: uid, appId: 'synthetic-app' }), true);
+  await sql.query("UPDATE clinic_audit_logs SET occurred_at=now()-interval '11 minutes' WHERE actor_uid=$1 AND action='patient_link_attempt'", [uid]);
+  assert.equal(await attempt({ actorUid: uid, appId: 'synthetic-app' }), true);
+  assert.equal((await sql.query("SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1 AND action='patient_link_attempt' AND occurred_at > now()-interval '10 minutes'", [uid])).rows[0].n, 1);
+  for (let n = 0; n < 4; n++) assert.equal(await attempt({ actorUid: uid, appId: 'synthetic-app' }), true);
+  assert.equal(await attempt({ actorUid: uid, appId: 'synthetic-app' }), false);
+  assert.equal((await sql.query("SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1 AND action='patient_link_attempt'", [uid])).rows[0].n, 10);
+  const stored = JSON.stringify((await sql.query("SELECT * FROM clinic_audit_logs WHERE actor_uid=$1 AND action='patient_link_attempt'", [uid])).rows);
+  assert.equal(stored.includes('synthetic-app'), false);
+  assert.equal(stored.includes('patient_link_attempt"'), true);
+}));
+
+test('concurrent link attempts across guard instances commit at most five debits', async () => linkAttemptFixture(81, async ({ uid, guard }) => {
+  const results = await Promise.allSettled(Array.from({ length: 8 }, () => guard()({ actorUid: uid, appId: 'synthetic-app' })));
+  const admitted = results.filter(row => row.status === 'fulfilled' && row.value === true).length;
+  assert.ok(admitted <= 5 && admitted >= 1);
+  for (const row of results) if (row.status === 'rejected') assert.equal(row.reason.code, 'unavailable');
+  assert.equal((await sql.query("SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1 AND action='patient_link_attempt'", [uid])).rows[0].n, admitted);
+}));
+
+test('link attempts fail closed for inactive or unknown accounts and isolate per account', async () => linkAttemptFixture(82, async ({ uid, attempt }) => {
+  const stranger = 'sql-link-attempts-82-stranger';
+  await sql.query('INSERT INTO clinic_users (id, display_name, active, created_at, updated_at) VALUES ($1, $2, true, now(), now())', [stranger, 'Synthetic stranger']);
+  try {
+    await sql.query('UPDATE clinic_users SET active=false WHERE id=$1', [uid]);
+    await assert.rejects(attempt({ actorUid: uid, appId: 'synthetic-app' }), error => error.code === 'unavailable');
+    await sql.query('UPDATE clinic_users SET active=true WHERE id=$1', [uid]);
+    await assert.rejects(attempt({ actorUid: 'sql-link-attempts-unknown', appId: 'synthetic-app' }), error => error.code === 'unavailable');
+    for (let n = 0; n < 5; n++) assert.equal(await attempt({ actorUid: uid, appId: 'synthetic-app' }), true);
+    assert.equal(await attempt({ actorUid: uid, appId: 'synthetic-app' }), false);
+    for (let n = 0; n < 5; n++) assert.equal(await attempt({ actorUid: stranger, appId: 'synthetic-app' }), true);
+    assert.equal((await sql.query("SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1 AND action='patient_link_attempt'", [uid])).rows[0].n, 5);
+  } finally {
+    await sql.query('DELETE FROM clinic_audit_logs WHERE actor_uid=$1', [stranger]);
+    await sql.query('DELETE FROM clinic_users WHERE id=$1', [stranger]);
+  }
+}));
+
+test('link-attempt IAM mutation denies anonymous and every browser role', async () => {
+  const before = (await sql.query("SELECT count(*)::int n FROM clinic_audit_logs WHERE action='patient_link_attempt'")).rows[0].n;
+  for (const impersonate of [{ unauthenticated: true }, ...['patient', 'manager', 'doctor', 'admin'].map(role => ({ authClaims: { sub: `link-attempt-${role}`, role } }))]) {
+    await assert.rejects(admin.executeMutation('ConsumePatientLinkAttempt', { actorUid: 'spoof' }, { impersonate }), accessDenied);
+  }
+  assert.equal((await sql.query("SELECT count(*)::int n FROM clinic_audit_logs WHERE action='patient_link_attempt'")).rows[0].n, before);
+});
+
+test('staged patient backend debits the attempt before one-time code verification', async () => linkAttemptFixture(83, async ({ auth, uid }) => {
+  const { getAuth } = functionsRequire('firebase-admin/auth');
+  const staffAuth = getAuth(admin.app);
+  const staffUid = 'sql-link-attempts-83-staff';
+  const patientId = '80000000-0000-4000-8000-000000000083';
+  await staffAuth.createUser({ uid: staffUid });
+  await staffAuth.setCustomUserClaims(staffUid, { role: 'admin' });
+  await sql.query('INSERT INTO clinic_patients(id,uhid,display_name,phone,created_at,updated_at) VALUES($1,$2,$3,$4,now(),now())', [patientId, 'SYN-ATT-83', 'Synthetic attempt patient', '+919876500000']);
+  const { createPatientLinking, sqlPatientLinkStore } = require('../../functions/lib/patientLinking');
+  const { createSqlPatientBackend } = require('../../functions/lib/sqlPatientBackend');
+  const linking = createPatientLinking({ auth: staffAuth, store: sqlPatientLinkStore(admin) });
+  const backend = createSqlPatientBackend({ auth, dc: admin });
+  const staff = data => ({ auth: { uid: staffUid, token: { role: 'admin', auth_time: Math.floor(Date.now() / 1000) + 1 } }, data });
+  const request = (data, patch = {}) => ({ auth: { uid, token: { email_verified: true, auth_time: Math.floor(Date.now() / 1000) + 1 } }, data, app: { appId: 'synthetic-app' }, ...patch });
+  const debits = () => sql.query("SELECT count(*)::int n FROM clinic_audit_logs WHERE actor_uid=$1 AND action='patient_link_attempt'", [uid]);
+  try {
+    const { code } = await linking.issue(staff({ patientId, targetUid: uid, relationship: 'self', evidence: 'in_person_identity' }));
+    await assert.rejects(backend.acceptSqlPatientLink(request({ code: 'Z'.repeat(43) })));
+    assert.equal((await debits()).rows[0].n, 1);
+    assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_patient_links WHERE patient_id=$1 AND user_id=$2', [patientId, uid])).rows[0].n, 0);
+    assert.deepEqual(await backend.acceptSqlPatientLink(request({ code })), { linked: true });
+    assert.equal((await debits()).rows[0].n, 2);
+    assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_patient_links WHERE patient_id=$1 AND user_id=$2', [patientId, uid])).rows[0].n, 1);
+    await assert.rejects(backend.acceptSqlPatientLink(request({ code }, { app: undefined })), error => error.code === 'failed-precondition');
+    await assert.rejects(backend.acceptSqlPatientLink({ ...request({ code }), auth: { uid, token: { auth_time: 1 } } }), error => error.code === 'permission-denied');
+    assert.equal((await debits()).rows[0].n, 2);
+  } finally {
+    await sql.query('DELETE FROM clinic_patient_link_invitations WHERE user_id=$1', [uid]);
+    await sql.query('DELETE FROM clinic_patient_links WHERE user_id=$1', [uid]);
+    await sql.query('DELETE FROM clinic_patients WHERE id=$1', [patientId]);
+    await sql.query('DELETE FROM clinic_operation_receipts WHERE actor_uid=$1', [uid]);
+    await sql.query("DELETE FROM clinic_audit_logs WHERE actor_uid=$1", [staffUid]);
+    await sql.query('DELETE FROM clinic_users WHERE id=$1', [staffUid]);
+    await staffAuth.deleteUser(staffUid);
+  }
+}));

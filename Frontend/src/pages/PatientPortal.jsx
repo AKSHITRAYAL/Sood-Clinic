@@ -8,8 +8,9 @@ import PatientAvatar from '../components/PatientAvatar';
 import SoodClinicMark from '../components/SoodClinicMark';
 import { auth, firestore, functions } from '../lib/firebase';
 import { toDate } from '../lib/time';
+import { canPatientChangeAppointment } from '../lib/appointmentState';
 import { cancelPatientAppointment } from '../services/appointmentService';
-import { getBookingCatalog } from '../services/bookingCatalogService';
+import { getBookingCatalog, readBookingPolicy } from '../services/bookingCatalogService';
 import { hasStrongPassword, passwordPolicyMessage } from '../lib/passwordPolicy';
 import PasswordRequirements from '../components/PasswordRequirements';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -39,6 +40,7 @@ const PatientPortal = ({ view }) => {
   const [appointments, setAppointments] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [doctorNames, setDoctorNames] = useState({});
+  const [cancelCutoffMinutes, setCancelCutoffMinutes] = useState(null);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -52,8 +54,9 @@ const PatientPortal = ({ view }) => {
     getBookingCatalog().then((catalog) => {
       if (!active) return;
       setDoctorNames(Object.fromEntries((catalog.doctors || []).map((doctor) => [doctor.id, doctor.name])));
+      setCancelCutoffMinutes(readBookingPolicy(catalog).cancelCutoffMinutes);
     }).catch(() => {
-      // Appointment records remain readable even if the public catalogue is briefly unavailable.
+      if (active) setNotice('Online appointment changes are temporarily unavailable. Your appointments remain visible.');
     });
     return () => { active = false; };
   }, []);
@@ -123,7 +126,7 @@ const PatientPortal = ({ view }) => {
     <fieldset><legend>Emergency contact</legend><div className="patient-form__grid"><label>Contact name<input value={form.emergencyContactName} onChange={(event) => setForm({ ...form, emergencyContactName: event.target.value })} /></label><label>Contact phone<input value={form.emergencyContactPhone} onChange={(event) => setForm({ ...form, emergencyContactPhone: event.target.value })} inputMode="tel" /></label></div></fieldset><button type="submit">Save personal details</button>
   </form>;
   const healthForm = <form className="patient-form" onSubmit={saveProfile}><header><p className="section-kicker">Health profile</p><h2>Information you choose to share</h2><span>This is self-reported information, not a clinical diagnosis. Clinic staff may use it to prepare for your visit.</span></header><div className="patient-form__stack"><label>Allergies<textarea value={form.allergies} onChange={(event) => setForm({ ...form, allergies: event.target.value })} placeholder="For example, food, medicine, or other allergies" /></label><label>Current medications<textarea value={form.currentMedications} onChange={(event) => setForm({ ...form, currentMedications: event.target.value })} placeholder="Include medication name and dose if known" /></label><label>Notes for your care team<textarea value={form.healthNotes} onChange={(event) => setForm({ ...form, healthNotes: event.target.value })} placeholder="Anything you would like the clinic to know before your visit" /></label></div><button type="submit">Save health profile</button></form>;
-  const list = (items) => items.length ? <div className="patient-visit-list">{items.map((item) => { const date = toDate(item.startsAt); const canChange = isUpcoming(item) && date && date.getTime() > Date.now() + 2 * 60 * 60 * 1000; return <article key={item.id}><div className="patient-visit-list__date"><strong>{date ? date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—'}</strong><span>{date ? date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }) : 'Time unavailable'}</span></div><div><strong>Consultation with {doctorName(item)}</strong><span>{item.reason || 'Clinic consultation'}</span></div><span className={`appointment-status appointment-status--${item.status}`}>{item.status}</span>{canChange && <div className="patient-appointment-actions"><Link to={`/patient/appointments/${item.id}/reschedule`}>Reschedule</Link><button type="button" className="patient-appointment-cancel" onClick={() => requestAppointmentCancellation(item)}>Cancel</button></div>}{item.status === 'completed' && <Link className="patient-feedback-link" to={`/experience?appointment=${item.id}`}>Share feedback</Link>}</article>; })}</div> : <div className="patient-empty-state"><strong>No appointments yet</strong><span>When you book a visit, it will appear here.</span><Link to="/book">Book appointment</Link></div>;
+  const list = (items) => items.length ? <div className="patient-visit-list">{items.map((item) => { const date = toDate(item.startsAt); const canChange = canPatientChangeAppointment(item, cancelCutoffMinutes); return <article key={item.id}><div className="patient-visit-list__date"><strong>{date ? date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—'}</strong><span>{date ? date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }) : 'Time unavailable'}</span></div><div><strong>Consultation with {doctorName(item)}</strong><span>{item.reason || 'Clinic consultation'}</span></div><span className={`appointment-status appointment-status--${item.status}`}>{item.status}</span>{canChange && <div className="patient-appointment-actions"><Link to={`/patient/appointments/${item.id}/reschedule`}>Reschedule</Link><button type="button" className="patient-appointment-cancel" onClick={() => requestAppointmentCancellation(item)}>Cancel</button></div>}{item.status === 'completed' && <Link className="patient-feedback-link" to={`/experience?appointment=${item.id}`}>Share feedback</Link>}</article>; })}</div> : <div className="patient-empty-state"><strong>No appointments yet</strong><span>When you book a visit, it will appear here.</span><Link to="/book">Book appointment</Link></div>;
 
   let content;
   if (view === 'video') {

@@ -27,3 +27,11 @@ test('failed and malformed contact responses allow a clean retry without fallbac
   await expect(getClinicContact()).resolves.toEqual(profile);
   expect(mocks.query).toHaveBeenCalledTimes(3);
 });
+
+test('confirmed administrator updates can invalidate the public contact cache', async () => {
+  mocks.query.mockResolvedValueOnce({ data: { clinicProfile: profile } }).mockResolvedValueOnce({ data: { clinicProfile: { ...profile, name: 'Updated clinic' } } });
+  const { getClinicContact, clearClinicContactCache } = await import('./clinicProfileService');
+  await getClinicContact(); clearClinicContactCache();
+  await expect(getClinicContact()).resolves.toMatchObject({ name: 'Updated clinic' });
+  expect(mocks.query).toHaveBeenCalledTimes(2);
+});

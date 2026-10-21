@@ -1,0 +1,24 @@
+# IAM only. The callable verifies the current administrator in Firebase Auth.
+query GetAdminClinicContact @auth(level: NO_ACCESS) {
+  clinicProfile(key: {id: "sood-clinic"}) { name phone email address timezone updatedAt }
+}
+
+query GetClinicContactReceipt($actorUid: String!, $requestId: UUID!) @auth(level: NO_ACCESS) {
+  operationReceipt(key: {actorUid: $actorUid, requestId: $requestId}) { operation }
+}
+
+mutation SaveClinicContact(
+  $actorUid: String!, $requestId: UUID!, $operation: String!, $expectedUpdatedAt: Timestamp!,
+  $name: String!, $phone: String!, $email: String!, $address: String!, $timezone: String!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: $actorUid, requestId: $requestId})
+      @check(expr: "this == null", message: "CONTACT_REQUEST_APPLIED") { operation }
+  }
+  clinicProfile_updateMany(
+    where: {id: {eq: "sood-clinic"}, updatedAt: {eq: $expectedUpdatedAt}},
+    data: {name: $name, phone: $phone, email: $email, address: $address, timezone: $timezone, updatedAt_expr: "request.time"}
+  ) @check(expr: "this == 1", message: "CONTACT_VERSION_CHANGED")
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: "admin", action: "clinic_contact_saved", resourceType: "clinic_profile", resourceId: "sood-clinic"})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}

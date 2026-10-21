@@ -1,0 +1,53 @@
+# IAM only; current admin / assigned doctor is checked by sqlWeeklyHours.js.
+query ReadDoctorWeeklyHours($actorUid: String!, $doctorId: String!) @auth(level: NO_ACCESS) {
+  user(key: {id: $actorUid}) { active }
+  doctors(where: {legacyId: {eq: $doctorId}}, limit: 2) {
+    id legacyId name active
+    branch { timezone }
+    state: doctorScheduleState_on_doctor { authority updatedAt }
+    sessions: doctorSchedules_on_doctor(limit: 15, orderBy: [{weekday: ASC}, {startMinute: ASC}, {id: ASC}]) {
+      weekday startMinute endMinute
+    }
+  }
+}
+query ReadDoctorWeeklyHoursReceipt($actorUid: String!, $requestId: UUID!) @auth(level: NO_ACCESS) {
+  operationReceipt(key: {actorUid: $actorUid, requestId: $requestId}) { operation }
+}
+mutation SaveDoctorWeeklyHours(
+  $actorUid: String!, $actorRole: String!, $doctorId: UUID!, $doctorLegacyId: String!,
+  $expectedUpdatedAt: Timestamp!, $requestId: UUID!, $operation: String!,
+  $weekdays: [Int!]!, $starts: [Int!]!, $ends: [Int!]!,
+  $row0: Boolean!, $row1: Boolean!, $row2: Boolean!, $row3: Boolean!, $row4: Boolean!, $row5: Boolean!, $row6: Boolean!,
+  $row7: Boolean!, $row8: Boolean!, $row9: Boolean!, $row10: Boolean!, $row11: Boolean!, $row12: Boolean!, $row13: Boolean!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: $actorUid, requestId: $requestId}) @check(expr: "this == null", message: "WEEKLY_HOURS_REQUEST_APPLIED") { operation }
+  }
+  user_updateMany(where: {id: {eq: $actorUid}, active: {eq: true}}, data: {active: true})
+    @check(expr: "this == 1", message: "WEEKLY_HOURS_ACCOUNT_UNAVAILABLE")
+  doctor_updateMany(where: {id: {eq: $doctorId}, legacyId: {eq: $doctorLegacyId}, active: {eq: true}}, data: {active: true})
+    @check(expr: "this == 1", message: "WEEKLY_HOURS_DOCTOR_UNAVAILABLE")
+  doctorScheduleState_updateMany(
+    where: {doctorId: {eq: $doctorId}, authority: {eq: "doctor_schedule"}, updatedAt: {eq: $expectedUpdatedAt}},
+    data: {updatedAt_expr: "request.time"}
+  ) @check(expr: "this == 1", message: "WEEKLY_HOURS_VERSION_CHANGED")
+  doctorSchedule_deleteMany(where: {doctorId: {eq: $doctorId}})
+  # shortcut: generated admin SDKs do not support _Data variables. Keep the
+  # legacy fourteen-session bound explicit until typed bulk SDKs are supported.
+  s0: doctorSchedule_insert(data: {doctorId: $doctorId, weekday_expr: "vars.weekdays[0]", startMinute_expr: "vars.starts[0]", endMinute_expr: "vars.ends[0]", sourceOrder: 0}) @include(if: $row0)
+  s1: doctorSchedule_insert(data: {doctorId: $doctorId, weekday_expr: "vars.weekdays[1]", startMinute_expr: "vars.starts[1]", endMinute_expr: "vars.ends[1]", sourceOrder: 1}) @include(if: $row1)
+  s2: doctorSchedule_insert(data: {doctorId: $doctorId, weekday_expr: "vars.weekdays[2]", startMinute_expr: "vars.starts[2]", endMinute_expr: "vars.ends[2]", sourceOrder: 2}) @include(if: $row2)
+  s3: doctorSchedule_insert(data: {doctorId: $doctorId, weekday_expr: "vars.weekdays[3]", startMinute_expr: "vars.starts[3]", endMinute_expr: "vars.ends[3]", sourceOrder: 3}) @include(if: $row3)
+  s4: doctorSchedule_insert(data: {doctorId: $doctorId, weekday_expr: "vars.weekdays[4]", startMinute_expr: "vars.starts[4]", endMinute_expr: "vars.ends[4]", sourceOrder: 4}) @include(if: $row4)
+  s5: doctorSchedule_insert(data: {doctorId: $doctorId, weekday_expr: "vars.weekdays[5]", startMinute_expr: "vars.starts[5]", endMinute_expr: "vars.ends[5]", sourceOrder: 5}) @include(if: $row5)
+  s6: doctorSchedule_insert(data: {doctorId: $doctorId, weekday_expr: "vars.weekdays[6]", startMinute_expr: "vars.starts[6]", endMinute_expr: "vars.ends[6]", sourceOrder: 6}) @include(if: $row6)
+  s7: doctorSchedule_insert(data: {doctorId: $doctorId, weekday_expr: "vars.weekdays[7]", startMinute_expr: "vars.starts[7]", endMinute_expr: "vars.ends[7]", sourceOrder: 7}) @include(if: $row7)
+  s8: doctorSchedule_insert(data: {doctorId: $doctorId, weekday_expr: "vars.weekdays[8]", startMinute_expr: "vars.starts[8]", endMinute_expr: "vars.ends[8]", sourceOrder: 8}) @include(if: $row8)
+  s9: doctorSchedule_insert(data: {doctorId: $doctorId, weekday_expr: "vars.weekdays[9]", startMinute_expr: "vars.starts[9]", endMinute_expr: "vars.ends[9]", sourceOrder: 9}) @include(if: $row9)
+  s10: doctorSchedule_insert(data: {doctorId: $doctorId, weekday_expr: "vars.weekdays[10]", startMinute_expr: "vars.starts[10]", endMinute_expr: "vars.ends[10]", sourceOrder: 10}) @include(if: $row10)
+  s11: doctorSchedule_insert(data: {doctorId: $doctorId, weekday_expr: "vars.weekdays[11]", startMinute_expr: "vars.starts[11]", endMinute_expr: "vars.ends[11]", sourceOrder: 11}) @include(if: $row11)
+  s12: doctorSchedule_insert(data: {doctorId: $doctorId, weekday_expr: "vars.weekdays[12]", startMinute_expr: "vars.starts[12]", endMinute_expr: "vars.ends[12]", sourceOrder: 12}) @include(if: $row12)
+  s13: doctorSchedule_insert(data: {doctorId: $doctorId, weekday_expr: "vars.weekdays[13]", startMinute_expr: "vars.starts[13]", endMinute_expr: "vars.ends[13]", sourceOrder: 13}) @include(if: $row13)
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: "doctor_weekly_hours_saved", resourceType: "doctor_schedule", resourceId: $doctorLegacyId})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}

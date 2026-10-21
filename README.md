@@ -11,10 +11,12 @@ Firebase-backed appointment and clinic operations application for Sood Clinic, P
 
 ## Continuation guides
 
-- [Architecture](docs/ARCHITECTURE.md) explains the routes, Firebase data model, roles, and deployment model.
-- [Current status](docs/STATUS.md) records what is live, what is demo-only, and the known deployment limitation.
-- [Runbook](docs/RUNBOOK.md) contains local development, Firebase, role-assignment, and Git commands.
-- [Recommended next steps](docs/NEXT-STEPS.md) is the ordered continuation plan.
+- [AGENTS.md](AGENTS.md) is the entry point for AI coding agents: golden rules, work protocol, and the doc map.
+- [`files/`](files/) is the current documentation set: `01` current state, `02` audit findings, `03` target architecture,
+  `04` backlog, `05` security/privacy, `06` UI/UX handoff, `07` open decisions, `08` dev workflow/testing.
+- [`SQL/`](SQL/) covers the in-progress SQL backend: `PLAN.md`, `PROGRESS.md`, phase logs, and the
+  `TEST-QUEUE.md`/`TEST-RESULTS.md` test handoff. Start from `SQL/HANDOVER.md`.
+- Local development, Firebase, role-assignment, and Git commands live in `AGENTS.md` §3 and `files/08-dev-workflow-testing.md`.
 
 ## Local development
 

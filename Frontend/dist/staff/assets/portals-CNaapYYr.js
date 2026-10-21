@@ -1,0 +1,1 @@
+var e=(e=`/`)=>new URL(e,`https://sood-clinic.web.app`).toString();export{e as t};

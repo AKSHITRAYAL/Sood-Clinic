@@ -38,6 +38,20 @@ extend type Query {
     first: AppointmentEvent_FirstRow
   ): AppointmentEvent @fdc_generated(from: "AppointmentEvent", purpose: QUERY_SINGLE)
   """
+  ✨ Look up a single `AppointmentIntake` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  appointmentIntake(
+    """
+    The key used to identify the object.
+    """
+    key: AppointmentIntake_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: AppointmentIntake_FirstRow
+  ): AppointmentIntake @fdc_generated(from: "AppointmentIntake", purpose: QUERY_SINGLE)
+  """
   ✨ Look up a single `AppointmentLegacySlot` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
   """
   appointmentLegacySlot(
@@ -65,6 +79,20 @@ extend type Query {
     """
     first: AppointmentPrivateDetails_FirstRow
   ): AppointmentPrivateDetails @fdc_generated(from: "AppointmentPrivateDetails", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `AppointmentUnit` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  appointmentUnit(
+    """
+    The key used to identify the object.
+    """
+    key: AppointmentUnit_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: AppointmentUnit_FirstRow
+  ): AppointmentUnit @fdc_generated(from: "AppointmentUnit", purpose: QUERY_SINGLE)
   """
   ✨ Look up a single `AuditLog` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
   """
@@ -103,6 +131,39 @@ extend type Query {
     """
     first: Branch_FirstRow
   ): Branch @fdc_generated(from: "Branch", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `CalendarBlock` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  calendarBlock(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: CalendarBlock_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: CalendarBlock_FirstRow
+  ): CalendarBlock @fdc_generated(from: "CalendarBlock", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `CalendarFeed` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  calendarFeed(
+    """
+    The key used to identify the object.
+    """
+    key: CalendarFeed_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: CalendarFeed_FirstRow
+  ): CalendarFeed @fdc_generated(from: "CalendarFeed", purpose: QUERY_SINGLE)
   """
   ✨ Look up a single `ClinicProfile` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
   """
@@ -151,6 +212,20 @@ extend type Query {
     """
     first: ClinicSettings_FirstRow
   ): ClinicSettings @fdc_generated(from: "ClinicSettings", purpose: QUERY_SINGLE)
+  """
+  ✨ Look up a single `DayTokenCounter` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  dayTokenCounter(
+    """
+    The key used to identify the object.
+    """
+    key: DayTokenCounter_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: DayTokenCounter_FirstRow
+  ): DayTokenCounter @fdc_generated(from: "DayTokenCounter", purpose: QUERY_SINGLE)
   """
   ✨ Look up a single `Department` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
   """
@@ -592,6 +667,25 @@ extend type Query {
     first: User_FirstRow
   ): User @fdc_generated(from: "User", purpose: QUERY_SINGLE)
   """
+  ✨ Look up a single `WaitlistEntry` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
+  """
+  waitlistEntry(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: WaitlistEntry_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: WaitlistEntry_FirstRow
+  ): WaitlistEntry @fdc_generated(from: "WaitlistEntry", purpose: QUERY_SINGLE)
+  """
   ✨ List `Appointment` objects in the table and return selected fields, optionally filtered by `where` conditions
   """
   appointments(
@@ -659,6 +753,40 @@ extend type Query {
     """
     having: AppointmentEvent_Having
   ): [AppointmentEvent!]! @fdc_generated(from: "AppointmentEvent", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `AppointmentIntake` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  appointmentIntakes(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: AppointmentIntake_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [AppointmentIntake_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: AppointmentIntake_Having
+  ): [AppointmentIntake!]! @fdc_generated(from: "AppointmentIntake", purpose: QUERY_MULTIPLE)
   """
   ✨ List `AppointmentLegacySlot` objects in the table and return selected fields, optionally filtered by `where` conditions
   """
@@ -728,6 +856,40 @@ extend type Query {
     having: AppointmentPrivateDetails_Having
   ): [AppointmentPrivateDetails!]! @fdc_generated(from: "AppointmentPrivateDetails", purpose: QUERY_MULTIPLE)
   """
+  ✨ List `AppointmentUnit` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  appointmentUnits(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: AppointmentUnit_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [AppointmentUnit_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: AppointmentUnit_Having
+  ): [AppointmentUnit!]! @fdc_generated(from: "AppointmentUnit", purpose: QUERY_MULTIPLE)
+  """
   ✨ List `AuditLog` objects in the table and return selected fields, optionally filtered by `where` conditions
   """
   auditLogs(
@@ -796,6 +958,74 @@ extend type Query {
     having: Branch_Having
   ): [Branch!]! @fdc_generated(from: "Branch", purpose: QUERY_MULTIPLE)
   """
+  ✨ List `CalendarBlock` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  calendarBlocks(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: CalendarBlock_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [CalendarBlock_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: CalendarBlock_Having
+  ): [CalendarBlock!]! @fdc_generated(from: "CalendarBlock", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `CalendarFeed` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  calendarFeeds(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: CalendarFeed_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [CalendarFeed_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: CalendarFeed_Having
+  ): [CalendarFeed!]! @fdc_generated(from: "CalendarFeed", purpose: QUERY_MULTIPLE)
+  """
   ✨ List `ClinicProfile` objects in the table and return selected fields, optionally filtered by `where` conditions
   """
   clinicProfiles(
@@ -863,6 +1093,40 @@ extend type Query {
     """
     having: ClinicSettings_Having
   ): [ClinicSettings!]! @fdc_generated(from: "ClinicSettings", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `DayTokenCounter` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  dayTokenCounters(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: DayTokenCounter_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [DayTokenCounter_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: DayTokenCounter_Having
+  ): [DayTokenCounter!]! @fdc_generated(from: "DayTokenCounter", purpose: QUERY_MULTIPLE)
   """
   ✨ List `Department` objects in the table and return selected fields, optionally filtered by `where` conditions
   """
@@ -1713,4 +1977,38 @@ extend type Query {
     """
     having: User_Having
   ): [User!]! @fdc_generated(from: "User", purpose: QUERY_MULTIPLE)
+  """
+  ✨ List `WaitlistEntry` objects in the table and return selected fields, optionally filtered by `where` conditions
+  """
+  waitlistEntries(
+    """
+    Filter condition to narrow down the query results.
+    """
+    where: WaitlistEntry_Filter
+
+    """
+    Order the query results by specific fields.
+    """
+    orderBy: [WaitlistEntry_Order!]
+
+    """
+    Number of rows to skip before starting to return the results.
+    """
+    offset: Int
+
+    """
+    Maximum number of rows to return (defaults to 100 rows).
+    """
+    limit: Int = 100
+
+    """
+    Set to true to return distinct results.
+    """
+    distinct: Boolean = false
+
+    """
+    Filter condition to apply to the groups of aggregate queries.
+    """
+    having: WaitlistEntry_Having
+  ): [WaitlistEntry!]! @fdc_generated(from: "WaitlistEntry", purpose: QUERY_MULTIPLE)
 }

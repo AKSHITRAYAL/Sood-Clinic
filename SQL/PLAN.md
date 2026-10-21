@@ -111,7 +111,19 @@ Exit: repeat run makes no duplicates; reconciliation report accounts for every r
 
 ## Phase 5 — Low-risk module cutovers
 
+Execution: `SQL/phase 5.md`. The administrator public-contact editor is now implemented end-to-end locally using the existing SQL singleton, live Auth checks, optimistic concurrency, transactional audit/receipt and the existing public reader. Release is still held by the documented source/guest gates; no new schema or production contact write is included. User priority is now complete application features, not additional generic rehearsal tooling.
+
+Catalogue administration is also now implemented locally: branch/department/doctor create/edit, ordered memberships, current administrator checks, versioned atomic audit/receipts, legacy-ID public/admin projection and coordinated availability/booking-selection readers. Actual catalogue census/import and reviewed source/column release remain required before any deployment; no real source record has been imported. Scheduling, visit formats, occupancy and appointments remain separate legacy workflows pending their phases.
+
+Booking policy/service administration is subsequently implemented locally too: versioned global policy and single-format saves share an atomic revision/audit/receipt; all runtime publicConfig consumers now use SQL in the new source. Patient/public calendars and cancellation visibility consume published window/exact-minute cutoff without hard-coded fallbacks. Real settings/service reconciliation and the existing source/guest release gates remain required; schedules/occupancy/appointments/Calendar still retain their current stores. No production import or release occurred. See Phase 5 for the coordinated API/Hosting contract and rollback limits.
+
 Switch in order: public profile/catalog → staff settings → patient profiles/links → admin audit. Each module requires service adapters, role tests, E2E checks and a documented rollback. Public content includes health guides/article/video metadata and consented review moderation; authoring migrations follow actual current storage. Never expose private author/staff data through public projections.
+
+Linked-patient demographic service/SDK operations are now implemented locally with current verified Auth, explicit accepted self/guardian links, bounded selectors, private-field separation and version/link/account-locked audit/receipt saves. No callable/UI or legacy-access change accompanies this slice. Next integrate the remaining patient-facing consumers consistently before enabling those endpoints; retain source/identity/backup/guest release gates. See `SQL/phase 5.md`.
+
+Local patient appointment history now supplies link-nested, current-Auth-scoped first/next/detail reads with twenty-row native-timestamp/unique-reference keyset pagination and operational-only projections. Private clinical/contact/video/Calendar/event fields remain excluded, malformed history fails closed, and no guest identity is adopted. This does not implement Phase 6 scheduler writes or enable a patient endpoint/UI. Continue coordinated patient consumers and release prerequisites; see `SQL/phase 5.md` for cursor/reschedule limitations.
+
+Local self-reported health read/save now extends the patient service with current verified Auth and accepted self-link checks (not guardian clinical access). Blood group and private reported-health text save atomically with the shared demographic revision, account/link locks, audit and payload-bound receipt. Full explicit four-field input prevents accidental partial clearing. This is not a clinician record, patient UI/callable, source migration or production release; preserve all current cutover gates. See `SQL/phase 5.md` for privacy, field, retry and rollback contracts.
 
 Exit: cut-over modules read/write SQL exclusively; no silent fallback can hide SQL failure or split writes.
 

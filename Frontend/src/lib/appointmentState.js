@@ -1,3 +1,5 @@
+import { toDate } from './time';
+
 // Mirror the server transition table for presentation only. The callable remains
 // authoritative and revalidates every requested transition.
 const TRANSITIONS = Object.freeze({
@@ -19,3 +21,8 @@ export const appointmentActionLabel = (transition) => ({
   cancelled: 'Cancel',
   no_show: 'Mark no-show',
 }[transition] || transition.replaceAll('_', ' '));
+
+export const canPatientChangeAppointment = (appointment, cutoffMinutes, now = Date.now()) => {
+  const startsAt = toDate(appointment?.startsAt);
+  return ['scheduled', 'confirmed'].includes(appointment?.status) && Number.isInteger(cutoffMinutes) && cutoffMinutes >= 0 && cutoffMinutes <= 10080 && startsAt !== null && Number.isFinite(now) && startsAt.getTime() > now + cutoffMinutes * 60 * 1000;
+};

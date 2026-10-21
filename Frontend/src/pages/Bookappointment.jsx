@@ -23,12 +23,12 @@ const friendlyError = (error) => {
 const Bookappointment = () => {
   const [catalog, setCatalog] = useState(null);
   const [catalogError, setCatalogError] = useState('');
-  const [selection, setSelection] = useState({ branchId: '', departmentId: '', doctorId: '', visitTypeId: 'consultation' });
+  const [selection, setSelection] = useState({ branchId: '', departmentId: '', doctorId: '', visitTypeId: '' });
   const days = useMemo(() => {
     const today = istDateKey();
-    return Array.from({ length: catalog?.booking?.bookingWindowDays || 14 }, (_, index) => istInstant(addIstDays(today, index)));
+    return Array.from({ length: catalog?.booking?.bookingWindowDays || 0 }, (_, index) => istInstant(addIstDays(today, index)));
   }, [catalog]);
-  const [selectedDate, setSelectedDate] = useState(days[0]);
+  const [selectedDate, setSelectedDate] = useState(() => istInstant(istDateKey()));
   const [slots, setSlots] = useState([]);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [calendarStatus, setCalendarStatus] = useState('');
@@ -49,8 +49,9 @@ const Bookappointment = () => {
     getBookingCatalog().then((data) => {
       if (!active) return;
       const branch = data.branches?.[0]; const department = data.departments?.find((item) => item.branchId === branch?.id); const doctor = data.doctors?.find((item) => item.branchId === branch?.id && item.departmentIds.includes(department?.id));
-      if (!branch || !department || !doctor) { setCatalogError('Online booking is not available right now. Please call the clinic.'); return; }
-      setCatalog(data); setSelection({ branchId: branch.id, departmentId: department.id, doctorId: doctor.id, visitTypeId: data.booking?.visitTypes?.[0]?.id || 'consultation' });
+      const visitTypeId = data.booking?.visitTypes?.[0]?.id;
+      if (!branch || !department || !doctor || !visitTypeId) { setCatalogError('Online booking is not available right now. Please call the clinic.'); return; }
+      setCatalog(data); setSelection({ branchId: branch.id, departmentId: department.id, doctorId: doctor.id, visitTypeId });
     }).catch(() => active && setCatalogError('Online booking is temporarily unavailable. Please call the clinic or try again shortly.'));
     return () => { active = false; };
   }, []);

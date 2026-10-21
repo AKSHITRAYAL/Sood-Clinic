@@ -11,4 +11,8 @@ describe('patient appointment cancellation policy', () => {
     expect(canPatientCancel({ appointment: appointment(2), uid: 'patient-one', now })).toBe(false);
     expect(canPatientCancel({ appointment: appointment(3), uid: 'patient-two', now })).toBe(false);
   });
+  it('uses exact-minute SQL policy through fractional hours without rounding back to two hours', () => {
+    expect(canPatientCancel({ appointment: appointment(46 / 60), uid: 'patient-one', now, cutoffHours: 45 / 60 })).toBe(true);
+    expect(canPatientCancel({ appointment: appointment(45 / 60), uid: 'patient-one', now, cutoffHours: 45 / 60 })).toBe(false);
+  });
 });

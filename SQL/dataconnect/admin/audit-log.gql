@@ -1,0 +1,26 @@
+# Audited IAM read of the operational audit projection. Not public, not a browser query.
+# Keyset note: UUID filters have no lt/gt, so pagination is native-microsecond le plus
+# an exact cursor-row strip; writers must keep occurredAt immutable request.time values.
+mutation ReadAdminAuditLog($actorUid: String!, $actorRole: String!)
+@auth(level: NO_ACCESS) @transaction {
+  user_updateMany(where: {id: {eq: $actorUid}, active: {eq: true}}, data: {active: true})
+    @check(expr: "this == 1", message: "AUDIT_LOG_ACCOUNT_UNAVAILABLE")
+  query {
+    auditLogs(orderBy: [{occurredAt: DESC}, {id: DESC}], limit: 22) {
+      id actorUid actorRole action resourceType resourceId occurredAt
+    }
+  }
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: "audit_log_viewed", resourceType: "admin_audit", resourceId: "admin_audit"})
+}
+
+mutation ReadAdminAuditLogAfter($actorUid: String!, $actorRole: String!, $afterOccurredAt: Timestamp!)
+@auth(level: NO_ACCESS) @transaction {
+  user_updateMany(where: {id: {eq: $actorUid}, active: {eq: true}}, data: {active: true})
+    @check(expr: "this == 1", message: "AUDIT_LOG_ACCOUNT_UNAVAILABLE")
+  query {
+    auditLogs(where: {occurredAt: {le: $afterOccurredAt}}, orderBy: [{occurredAt: DESC}, {id: DESC}], limit: 22) {
+      id actorUid actorRole action resourceType resourceId occurredAt
+    }
+  }
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: "audit_log_viewed", resourceType: "admin_audit", resourceId: "admin_audit"})
+}

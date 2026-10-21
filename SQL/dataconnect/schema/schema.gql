@@ -112,7 +112,8 @@ type Patient @table(name: "clinic_patients") @index(fields: ["phone", "displayNa
 }
 
 # Patient-reported health text is never part of manager demographic projections.
-# No connector operation exposes this table before the scoped patient cutover.
+# Local IAM health operations require current Auth and an accepted self-link;
+# no browser/callable access until the coordinated patient cutover.
 type PatientReportedProfile @table(name: "clinic_patient_reported_profiles", key: "patient") {
   patient: Patient!
   allergies: String
@@ -270,6 +271,16 @@ type Appointment @table(name: "clinic_appointments") @index(fields: ["doctorId",
   clinicDate: Date!
   status: String!
   source: String!
+  # Phase 6 draft (LOCAL ONLY): guest booking contact and staff queue timestamps.
+  # intake answers live in AppointmentIntake; unit references are the FK on
+  # AppointmentUnit (no slotIds array on the patient-visible appointment).
+  contactEmail: String
+  contactEmailLower: String
+  contactPhoneKey: String
+  tokenNumber: Int
+  checkedInAt: Timestamp
+  startedAt: Timestamp
+  completedAt: Timestamp
   createdByUid: String
   consentVersion: String!
   consentAcceptedAt: Timestamp!
@@ -326,6 +337,10 @@ type AppointmentPrivateDetails @table(name: "clinic_appointment_private_details"
   cancellationByRole: String
   cancellationReason: String
   cancellationAt: Timestamp
+  # Phase 6 draft (LOCAL ONLY): guest manage link; hash only, never the token.
+  manageTokenHash: String
+  manageCreatedAt: Timestamp
+  ipHash: String
 }
 
 # Historical lock references only, never used as SQL occupancy or access grants.
@@ -432,4 +447,72 @@ type StaffAccessLock @table(name: "clinic_staff_access_locks", key: "id") {
   requestId: UUID!
   actorUid: String!
   createdAt: Timestamp! @default(expr: "request.time")
+}
+
+# Phase 6 scheduler drafts (LOCAL ONLY, 2026-10-20): no connector operation
+# exposes these before the coordinated scheduler slice; deployment stays behind
+# the guest/source/identity/backup release gates. Never model one row per start
+# time — occupancy is one row per aligned five-minute unit.
+type AppointmentUnit @table(name: "clinic_appointment_units", key: "unitKey") @index(fields: ["doctorId", "unitAt"]) @index(fields: ["appointmentId"]) {
+  unitKey: String!
+  doctor: Doctor!
+  # Aligned to the five-minute grid (IST) by the handler, never client input.
+  unitAt: Timestamp!
+  kind: String!            # core | buffer | hold
+  appointment: Appointment # null while held; set when the hold converts
+  holdHash: String         # SHA-256 of the holdId; never the holdId itself
+  expiresAt: Timestamp     # hold rows only; expired holds are reclaimable
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+# Staff-only availability removal; titles are never part of public projections.
+type CalendarBlock @table(name: "clinic_calendar_blocks") @index(fields: ["doctorId", "startsAt"]) {
+  doctor: Doctor!
+  kind: String!            # time_off | block
+  title: String!
+  startsAt: Timestamp!
+  endsAt: Timestamp!
+  allDay: Boolean!
+  dateKeyStart: String!
+  dateKeyEnd: String!
+  createdBy: String
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# Server-only waitlist; contact is written by callables and never browser-readable.
+type WaitlistEntry @table(name: "clinic_waitlist_entries") @index(fields: ["doctorId", "status"]) {
+  doctor: Doctor!
+  service: Service!
+  clinicDate: String       # IST YYYY-MM-DD; null/empty means any day
+  contactName: String!
+  contactPhoneKey: String!
+  contactEmail: String
+  status: String!          # waiting | offered | booked | expired | cancelled
+  offeredAt: Timestamp
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# Feed tokens are stored hashed; the URL is returned once and never persisted.
+type CalendarFeed @table(name: "clinic_calendar_feeds", key: "doctor") {
+  doctor: Doctor!
+  tokenHash: String!
+  createdAt: Timestamp! @default(expr: "request.time")
+  rotatedAt: Timestamp
+}
+
+# Front-desk queue number per doctor/day (replaces Firestore counters/ token-*).
+type DayTokenCounter @table(name: "clinic_day_token_counters", key: ["doctor", "dayKey"]) {
+  doctor: Doctor!
+  dayKey: String!          # IST YYYY-MM-DD
+  nextNumber: Int!
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# Booking intake answers; one bounded row per question, never free-form bulk JSON.
+type AppointmentIntake @table(name: "clinic_appointment_intake", key: ["appointment", "questionId"]) {
+  appointment: Appointment!
+  questionId: String!
+  answer: String!          # <= 500 chars, validated by the callable
 }

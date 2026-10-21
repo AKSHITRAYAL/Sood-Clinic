@@ -11,6 +11,7 @@ This README will guide you through the process of using the generated JavaScript
   - [*GetPublicClinic*](#getpublicclinic)
   - [*GetOwnSqlProfile*](#getownsqlprofile)
   - [*GetPublicClinicContact*](#getpubliccliniccontact)
+  - [*GetPublicDoctorHours*](#getpublicdoctorhours)
 - [**Mutations**](#mutations)
   - [*SaveOwnSqlProfile*](#saveownsqlprofile)
 
@@ -395,6 +396,143 @@ console.log(data.clinicProfile);
 executeQuery(ref).then((response) => {
   const data = response.data;
   console.log(data.clinicProfile);
+});
+```
+
+## GetPublicDoctorHours
+You can execute the `GetPublicDoctorHours` query using the following action shortcut function, or by calling `executeQuery()` after calling the following `QueryRef` function, both of which are defined in [clinic/index.d.ts](./index.d.ts):
+```typescript
+getPublicDoctorHours(vars: GetPublicDoctorHoursVariables, options?: ExecuteQueryOptions): QueryPromise<GetPublicDoctorHoursData, GetPublicDoctorHoursVariables>;
+
+interface GetPublicDoctorHoursRef {
+  ...
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: GetPublicDoctorHoursVariables): QueryRef<GetPublicDoctorHoursData, GetPublicDoctorHoursVariables>;
+}
+export const getPublicDoctorHoursRef: GetPublicDoctorHoursRef;
+```
+You can also pass in a `DataConnect` instance to the action shortcut function or `QueryRef` function.
+```typescript
+getPublicDoctorHours(dc: DataConnect, vars: GetPublicDoctorHoursVariables, options?: ExecuteQueryOptions): QueryPromise<GetPublicDoctorHoursData, GetPublicDoctorHoursVariables>;
+
+interface GetPublicDoctorHoursRef {
+  ...
+  (dc: DataConnect, vars: GetPublicDoctorHoursVariables): QueryRef<GetPublicDoctorHoursData, GetPublicDoctorHoursVariables>;
+}
+export const getPublicDoctorHoursRef: GetPublicDoctorHoursRef;
+```
+
+If you need the name of the operation without creating a ref, you can retrieve the operation name by calling the `operationName` property on the getPublicDoctorHoursRef:
+```typescript
+const name = getPublicDoctorHoursRef.operationName;
+console.log(name);
+```
+
+### Variables
+The `GetPublicDoctorHours` query requires an argument of type `GetPublicDoctorHoursVariables`, which is defined in [clinic/index.d.ts](./index.d.ts). It has the following fields:
+
+```typescript
+export interface GetPublicDoctorHoursVariables {
+  doctorLegacyId: string;
+  date: DateString;
+  weekday: number;
+}
+```
+### Return Type
+Recall that executing the `GetPublicDoctorHours` query returns a `QueryPromise` that resolves to an object with a `data` property.
+
+The `data` property is an object of type `GetPublicDoctorHoursData`, which is defined in [clinic/index.d.ts](./index.d.ts). It has the following fields:
+```typescript
+export interface GetPublicDoctorHoursData {
+  doctors: ({
+    legacyId?: string | null;
+    name: string;
+    branch: {
+      timezone: string;
+    };
+    state?: {
+      authority: string;
+      updatedAt?: TimestampString | null;
+    };
+    weekly: ({
+      startMinute: number;
+      endMinute: number;
+    })[];
+    exceptions: ({
+      date: DateString;
+      kind: string;
+      sessions: ({
+        startMinute: number;
+        endMinute: number;
+      })[];
+    })[];
+  })[];
+}
+```
+### Using `GetPublicDoctorHours`'s action shortcut function
+
+```typescript
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, getPublicDoctorHours, GetPublicDoctorHoursVariables } from '@clinic/sql-client';
+
+// The `GetPublicDoctorHours` query requires an argument of type `GetPublicDoctorHoursVariables`:
+const getPublicDoctorHoursVars: GetPublicDoctorHoursVariables = {
+  doctorLegacyId: ..., 
+  date: ..., 
+  weekday: ..., 
+};
+
+// Call the `getPublicDoctorHours()` function to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await getPublicDoctorHours(getPublicDoctorHoursVars);
+// Variables can be defined inline as well.
+const { data } = await getPublicDoctorHours({ doctorLegacyId: ..., date: ..., weekday: ..., });
+
+// You can also pass in a `DataConnect` instance to the action shortcut function.
+const dataConnect = getDataConnect(connectorConfig);
+const { data } = await getPublicDoctorHours(dataConnect, getPublicDoctorHoursVars);
+
+console.log(data.doctors);
+
+// Or, you can use the `Promise` API.
+getPublicDoctorHours(getPublicDoctorHoursVars).then((response) => {
+  const data = response.data;
+  console.log(data.doctors);
+});
+```
+
+### Using `GetPublicDoctorHours`'s `QueryRef` function
+
+```typescript
+import { getDataConnect, executeQuery } from 'firebase/data-connect';
+import { connectorConfig, getPublicDoctorHoursRef, GetPublicDoctorHoursVariables } from '@clinic/sql-client';
+
+// The `GetPublicDoctorHours` query requires an argument of type `GetPublicDoctorHoursVariables`:
+const getPublicDoctorHoursVars: GetPublicDoctorHoursVariables = {
+  doctorLegacyId: ..., 
+  date: ..., 
+  weekday: ..., 
+};
+
+// Call the `getPublicDoctorHoursRef()` function to get a reference to the query.
+const ref = getPublicDoctorHoursRef(getPublicDoctorHoursVars);
+// Variables can be defined inline as well.
+const ref = getPublicDoctorHoursRef({ doctorLegacyId: ..., date: ..., weekday: ..., });
+
+// You can also pass in a `DataConnect` instance to the `QueryRef` function.
+const dataConnect = getDataConnect(connectorConfig);
+const ref = getPublicDoctorHoursRef(dataConnect, getPublicDoctorHoursVars);
+
+// Call `executeQuery()` on the reference to execute the query.
+// You can use the `await` keyword to wait for the promise to resolve.
+const { data } = await executeQuery(ref);
+
+console.log(data.doctors);
+
+// Or, you can use the `Promise` API.
+executeQuery(ref).then((response) => {
+  const data = response.data;
+  console.log(data.doctors);
 });
 ```
 

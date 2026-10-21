@@ -1,0 +1,17 @@
+# IAM only. Called AFTER current Auth + App Check verification, BEFORE code lookup.
+# No code/hash, patient ID, contact, IP or app identifier is recorded.
+mutation ConsumePatientLinkAttempt($actorUid: String!) @auth(level: NO_ACCESS) @transaction {
+  # Serialize attempts across instances and against SQL account deactivation.
+  user_updateMany(where: {id: {eq: $actorUid}, active: {eq: true}}, data: {active: true})
+    @check(expr: "this == 1", message: "LINK_ATTEMPT_ACCOUNT_UNAVAILABLE")
+  query @redact {
+    auditLogs(where: {
+      actorUid: {eq: $actorUid}, action: {eq: "patient_link_attempt"},
+      occurredAt: {gt_time: {now: true, sub: {minutes: 10}}}
+    }, limit: 5) @check(expr: "this.size() < 5", message: "LINK_ATTEMPT_LIMIT") { id }
+  }
+  auditLog_insert(data: {
+    actorUid: $actorUid, actorRole: "patient", action: "patient_link_attempt",
+    resourceType: "patient_account", resourceId: $actorUid
+  })
+}

@@ -18,6 +18,15 @@ extend type Mutation {
     data: AppointmentEvent_Data!
   ): AppointmentEvent_KeyOutput! @fdc_generated(from: "AppointmentEvent", purpose: INSERT_SINGLE)
   """
+  ✨ Insert a single `AppointmentIntake` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  appointmentIntake_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: AppointmentIntake_Data!
+  ): AppointmentIntake_KeyOutput! @fdc_generated(from: "AppointmentIntake", purpose: INSERT_SINGLE)
+  """
   ✨ Insert a single `AppointmentLegacySlot` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
   """
   appointmentLegacySlot_insert(
@@ -35,6 +44,15 @@ extend type Mutation {
     """
     data: AppointmentPrivateDetails_Data!
   ): AppointmentPrivateDetails_KeyOutput! @fdc_generated(from: "AppointmentPrivateDetails", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `AppointmentUnit` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  appointmentUnit_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: AppointmentUnit_Data!
+  ): AppointmentUnit_KeyOutput! @fdc_generated(from: "AppointmentUnit", purpose: INSERT_SINGLE)
   """
   ✨ Insert a single `AuditLog` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
   """
@@ -54,6 +72,24 @@ extend type Mutation {
     data: Branch_Data!
   ): Branch_KeyOutput! @fdc_generated(from: "Branch", purpose: INSERT_SINGLE)
   """
+  ✨ Insert a single `CalendarBlock` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  calendarBlock_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: CalendarBlock_Data!
+  ): CalendarBlock_KeyOutput! @fdc_generated(from: "CalendarBlock", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `CalendarFeed` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  calendarFeed_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: CalendarFeed_Data!
+  ): CalendarFeed_KeyOutput! @fdc_generated(from: "CalendarFeed", purpose: INSERT_SINGLE)
+  """
   ✨ Insert a single `ClinicProfile` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
   """
   clinicProfile_insert(
@@ -71,6 +107,15 @@ extend type Mutation {
     """
     data: ClinicSettings_Data!
   ): ClinicSettings_KeyOutput! @fdc_generated(from: "ClinicSettings", purpose: INSERT_SINGLE)
+  """
+  ✨ Insert a single `DayTokenCounter` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  dayTokenCounter_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: DayTokenCounter_Data!
+  ): DayTokenCounter_KeyOutput! @fdc_generated(from: "DayTokenCounter", purpose: INSERT_SINGLE)
   """
   ✨ Insert a single `Department` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
   """
@@ -297,6 +342,15 @@ extend type Mutation {
     data: User_Data!
   ): User_KeyOutput! @fdc_generated(from: "User", purpose: INSERT_SINGLE)
   """
+  ✨ Insert a single `WaitlistEntry` into the table and return its key. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  waitlistEntry_insert(
+    """
+    Data object to insert into the table.
+    """
+    data: WaitlistEntry_Data!
+  ): WaitlistEntry_KeyOutput! @fdc_generated(from: "WaitlistEntry", purpose: INSERT_SINGLE)
+  """
   ✨ Insert `Appointment` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
   """
   appointment_insertMany(
@@ -314,6 +368,15 @@ extend type Mutation {
     """
     data: [AppointmentEvent_Data!]!
   ): [AppointmentEvent_KeyOutput!]! @fdc_generated(from: "AppointmentEvent", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `AppointmentIntake` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  appointmentIntake_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [AppointmentIntake_Data!]!
+  ): [AppointmentIntake_KeyOutput!]! @fdc_generated(from: "AppointmentIntake", purpose: INSERT_MULTIPLE)
   """
   ✨ Insert `AppointmentLegacySlot` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
   """
@@ -333,6 +396,15 @@ extend type Mutation {
     data: [AppointmentPrivateDetails_Data!]!
   ): [AppointmentPrivateDetails_KeyOutput!]! @fdc_generated(from: "AppointmentPrivateDetails", purpose: INSERT_MULTIPLE)
   """
+  ✨ Insert `AppointmentUnit` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  appointmentUnit_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [AppointmentUnit_Data!]!
+  ): [AppointmentUnit_KeyOutput!]! @fdc_generated(from: "AppointmentUnit", purpose: INSERT_MULTIPLE)
+  """
   ✨ Insert `AuditLog` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
   """
   auditLog_insertMany(
@@ -351,6 +423,24 @@ extend type Mutation {
     data: [Branch_Data!]!
   ): [Branch_KeyOutput!]! @fdc_generated(from: "Branch", purpose: INSERT_MULTIPLE)
   """
+  ✨ Insert `CalendarBlock` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  calendarBlock_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [CalendarBlock_Data!]!
+  ): [CalendarBlock_KeyOutput!]! @fdc_generated(from: "CalendarBlock", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `CalendarFeed` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  calendarFeed_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [CalendarFeed_Data!]!
+  ): [CalendarFeed_KeyOutput!]! @fdc_generated(from: "CalendarFeed", purpose: INSERT_MULTIPLE)
+  """
   ✨ Insert `ClinicProfile` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
   """
   clinicProfile_insertMany(
@@ -368,6 +458,15 @@ extend type Mutation {
     """
     data: [ClinicSettings_Data!]!
   ): [ClinicSettings_KeyOutput!]! @fdc_generated(from: "ClinicSettings", purpose: INSERT_MULTIPLE)
+  """
+  ✨ Insert `DayTokenCounter` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  dayTokenCounter_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [DayTokenCounter_Data!]!
+  ): [DayTokenCounter_KeyOutput!]! @fdc_generated(from: "DayTokenCounter", purpose: INSERT_MULTIPLE)
   """
   ✨ Insert `Department` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
   """
@@ -594,6 +693,15 @@ extend type Mutation {
     data: [User_Data!]!
   ): [User_KeyOutput!]! @fdc_generated(from: "User", purpose: INSERT_MULTIPLE)
   """
+  ✨ Insert `WaitlistEntry` objects into the table and return their keys. Columns not specified in `data` will receive defaults (e.g. `null`).
+  """
+  waitlistEntry_insertMany(
+    """
+    List of data objects to insert into the table.
+    """
+    data: [WaitlistEntry_Data!]!
+  ): [WaitlistEntry_KeyOutput!]! @fdc_generated(from: "WaitlistEntry", purpose: INSERT_MULTIPLE)
+  """
   ✨ Insert or update a single `Appointment` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Appointment`.
   """
   appointment_upsert(
@@ -611,6 +719,15 @@ extend type Mutation {
     """
     data: AppointmentEvent_Data!
   ): AppointmentEvent_KeyOutput! @fdc_generated(from: "AppointmentEvent", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `AppointmentIntake` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `AppointmentIntake`.
+  """
+  appointmentIntake_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: AppointmentIntake_Data!
+  ): AppointmentIntake_KeyOutput! @fdc_generated(from: "AppointmentIntake", purpose: UPSERT_SINGLE)
   """
   ✨ Insert or update a single `AppointmentLegacySlot` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `AppointmentLegacySlot`.
   """
@@ -630,6 +747,15 @@ extend type Mutation {
     data: AppointmentPrivateDetails_Data!
   ): AppointmentPrivateDetails_KeyOutput! @fdc_generated(from: "AppointmentPrivateDetails", purpose: UPSERT_SINGLE)
   """
+  ✨ Insert or update a single `AppointmentUnit` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `AppointmentUnit`.
+  """
+  appointmentUnit_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: AppointmentUnit_Data!
+  ): AppointmentUnit_KeyOutput! @fdc_generated(from: "AppointmentUnit", purpose: UPSERT_SINGLE)
+  """
   ✨ Insert or update a single `AuditLog` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `AuditLog`.
   """
   auditLog_upsert(
@@ -648,6 +774,24 @@ extend type Mutation {
     data: Branch_Data!
   ): Branch_KeyOutput! @fdc_generated(from: "Branch", purpose: UPSERT_SINGLE)
   """
+  ✨ Insert or update a single `CalendarBlock` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `CalendarBlock`.
+  """
+  calendarBlock_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: CalendarBlock_Data!
+  ): CalendarBlock_KeyOutput! @fdc_generated(from: "CalendarBlock", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `CalendarFeed` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `CalendarFeed`.
+  """
+  calendarFeed_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: CalendarFeed_Data!
+  ): CalendarFeed_KeyOutput! @fdc_generated(from: "CalendarFeed", purpose: UPSERT_SINGLE)
+  """
   ✨ Insert or update a single `ClinicProfile` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `ClinicProfile`.
   """
   clinicProfile_upsert(
@@ -665,6 +809,15 @@ extend type Mutation {
     """
     data: ClinicSettings_Data!
   ): ClinicSettings_KeyOutput! @fdc_generated(from: "ClinicSettings", purpose: UPSERT_SINGLE)
+  """
+  ✨ Insert or update a single `DayTokenCounter` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `DayTokenCounter`.
+  """
+  dayTokenCounter_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: DayTokenCounter_Data!
+  ): DayTokenCounter_KeyOutput! @fdc_generated(from: "DayTokenCounter", purpose: UPSERT_SINGLE)
   """
   ✨ Insert or update a single `Department` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Department`.
   """
@@ -891,6 +1044,15 @@ extend type Mutation {
     data: User_Data!
   ): User_KeyOutput! @fdc_generated(from: "User", purpose: UPSERT_SINGLE)
   """
+  ✨ Insert or update a single `WaitlistEntry` into the table, based on the primary key. Returns the key of the newly inserted or existing updated `WaitlistEntry`.
+  """
+  waitlistEntry_upsert(
+    """
+    Data object to insert or update if it already exists.
+    """
+    data: WaitlistEntry_Data!
+  ): WaitlistEntry_KeyOutput! @fdc_generated(from: "WaitlistEntry", purpose: UPSERT_SINGLE)
+  """
   ✨ Insert or update `Appointment` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Appointment`.
   """
   appointment_upsertMany(
@@ -908,6 +1070,15 @@ extend type Mutation {
     """
     data: [AppointmentEvent_Data!]!
   ): [AppointmentEvent_KeyOutput!]! @fdc_generated(from: "AppointmentEvent", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `AppointmentIntake` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `AppointmentIntake`.
+  """
+  appointmentIntake_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [AppointmentIntake_Data!]!
+  ): [AppointmentIntake_KeyOutput!]! @fdc_generated(from: "AppointmentIntake", purpose: UPSERT_MULTIPLE)
   """
   ✨ Insert or update `AppointmentLegacySlot` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `AppointmentLegacySlot`.
   """
@@ -927,6 +1098,15 @@ extend type Mutation {
     data: [AppointmentPrivateDetails_Data!]!
   ): [AppointmentPrivateDetails_KeyOutput!]! @fdc_generated(from: "AppointmentPrivateDetails", purpose: UPSERT_MULTIPLE)
   """
+  ✨ Insert or update `AppointmentUnit` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `AppointmentUnit`.
+  """
+  appointmentUnit_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [AppointmentUnit_Data!]!
+  ): [AppointmentUnit_KeyOutput!]! @fdc_generated(from: "AppointmentUnit", purpose: UPSERT_MULTIPLE)
+  """
   ✨ Insert or update `AuditLog` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `AuditLog`.
   """
   auditLog_upsertMany(
@@ -945,6 +1125,24 @@ extend type Mutation {
     data: [Branch_Data!]!
   ): [Branch_KeyOutput!]! @fdc_generated(from: "Branch", purpose: UPSERT_MULTIPLE)
   """
+  ✨ Insert or update `CalendarBlock` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `CalendarBlock`.
+  """
+  calendarBlock_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [CalendarBlock_Data!]!
+  ): [CalendarBlock_KeyOutput!]! @fdc_generated(from: "CalendarBlock", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `CalendarFeed` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `CalendarFeed`.
+  """
+  calendarFeed_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [CalendarFeed_Data!]!
+  ): [CalendarFeed_KeyOutput!]! @fdc_generated(from: "CalendarFeed", purpose: UPSERT_MULTIPLE)
+  """
   ✨ Insert or update `ClinicProfile` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `ClinicProfile`.
   """
   clinicProfile_upsertMany(
@@ -962,6 +1160,15 @@ extend type Mutation {
     """
     data: [ClinicSettings_Data!]!
   ): [ClinicSettings_KeyOutput!]! @fdc_generated(from: "ClinicSettings", purpose: UPSERT_MULTIPLE)
+  """
+  ✨ Insert or update `DayTokenCounter` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `DayTokenCounter`.
+  """
+  dayTokenCounter_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [DayTokenCounter_Data!]!
+  ): [DayTokenCounter_KeyOutput!]! @fdc_generated(from: "DayTokenCounter", purpose: UPSERT_MULTIPLE)
   """
   ✨ Insert or update `Department` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `Department`.
   """
@@ -1188,6 +1395,15 @@ extend type Mutation {
     data: [User_Data!]!
   ): [User_KeyOutput!]! @fdc_generated(from: "User", purpose: UPSERT_MULTIPLE)
   """
+  ✨ Insert or update `WaitlistEntry` objects into the table, based on the primary key. Returns the key of the newly inserted or existing updated `WaitlistEntry`.
+  """
+  waitlistEntry_upsertMany(
+    """
+    List of data objects to insert or update if it already exists.
+    """
+    data: [WaitlistEntry_Data!]!
+  ): [WaitlistEntry_KeyOutput!]! @fdc_generated(from: "WaitlistEntry", purpose: UPSERT_MULTIPLE)
+  """
   ✨ Update a single `Appointment` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `Appointment` or `null` if not found.
   """
   appointment_update(
@@ -1236,6 +1452,25 @@ extend type Mutation {
     data: AppointmentEvent_Data!
   ): AppointmentEvent_KeyOutput @fdc_generated(from: "AppointmentEvent", purpose: UPDATE_SINGLE)
   """
+  ✨ Update a single `AppointmentIntake` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `AppointmentIntake` or `null` if not found.
+  """
+  appointmentIntake_update(
+    """
+    The key used to identify the object.
+    """
+    key: AppointmentIntake_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: AppointmentIntake_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: AppointmentIntake_Data!
+  ): AppointmentIntake_KeyOutput @fdc_generated(from: "AppointmentIntake", purpose: UPDATE_SINGLE)
+  """
   ✨ Update a single `AppointmentLegacySlot` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `AppointmentLegacySlot` or `null` if not found.
   """
   appointmentLegacySlot_update(
@@ -1273,6 +1508,25 @@ extend type Mutation {
     """
     data: AppointmentPrivateDetails_Data!
   ): AppointmentPrivateDetails_KeyOutput @fdc_generated(from: "AppointmentPrivateDetails", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `AppointmentUnit` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `AppointmentUnit` or `null` if not found.
+  """
+  appointmentUnit_update(
+    """
+    The key used to identify the object.
+    """
+    key: AppointmentUnit_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: AppointmentUnit_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: AppointmentUnit_Data!
+  ): AppointmentUnit_KeyOutput @fdc_generated(from: "AppointmentUnit", purpose: UPDATE_SINGLE)
   """
   ✨ Update a single `AuditLog` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `AuditLog` or `null` if not found.
   """
@@ -1321,6 +1575,49 @@ extend type Mutation {
     """
     data: Branch_Data!
   ): Branch_KeyOutput @fdc_generated(from: "Branch", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `CalendarBlock` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `CalendarBlock` or `null` if not found.
+  """
+  calendarBlock_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: CalendarBlock_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: CalendarBlock_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: CalendarBlock_Data!
+  ): CalendarBlock_KeyOutput @fdc_generated(from: "CalendarBlock", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `CalendarFeed` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `CalendarFeed` or `null` if not found.
+  """
+  calendarFeed_update(
+    """
+    The key used to identify the object.
+    """
+    key: CalendarFeed_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: CalendarFeed_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: CalendarFeed_Data!
+  ): CalendarFeed_KeyOutput @fdc_generated(from: "CalendarFeed", purpose: UPDATE_SINGLE)
   """
   ✨ Update a single `ClinicProfile` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `ClinicProfile` or `null` if not found.
   """
@@ -1379,6 +1676,25 @@ extend type Mutation {
     """
     data: ClinicSettings_Data!
   ): ClinicSettings_KeyOutput @fdc_generated(from: "ClinicSettings", purpose: UPDATE_SINGLE)
+  """
+  ✨ Update a single `DayTokenCounter` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `DayTokenCounter` or `null` if not found.
+  """
+  dayTokenCounter_update(
+    """
+    The key used to identify the object.
+    """
+    key: DayTokenCounter_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: DayTokenCounter_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: DayTokenCounter_Data!
+  ): DayTokenCounter_KeyOutput @fdc_generated(from: "DayTokenCounter", purpose: UPDATE_SINGLE)
   """
   ✨ Update a single `Department` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `Department` or `null` if not found.
   """
@@ -1945,6 +2261,30 @@ extend type Mutation {
     data: User_Data!
   ): User_KeyOutput @fdc_generated(from: "User", purpose: UPDATE_SINGLE)
   """
+  ✨ Update a single `WaitlistEntry` based on `id`, `key` or `first`, setting columns specified in `data`. Returns the key of the updated `WaitlistEntry` or `null` if not found.
+  """
+  waitlistEntry_update(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: WaitlistEntry_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: WaitlistEntry_FirstRow
+
+    """
+    Data object containing fields to be updated.
+    """
+    data: WaitlistEntry_Data!
+  ): WaitlistEntry_KeyOutput @fdc_generated(from: "WaitlistEntry", purpose: UPDATE_SINGLE)
+  """
   ✨ Update `Appointment` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
   """
   appointment_updateMany(
@@ -1982,6 +2322,25 @@ extend type Mutation {
     """
     data: AppointmentEvent_Data!
   ): Int! @fdc_generated(from: "AppointmentEvent", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `AppointmentIntake` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  appointmentIntake_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: AppointmentIntake_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: AppointmentIntake_Data!
+  ): Int! @fdc_generated(from: "AppointmentIntake", purpose: UPDATE_MULTIPLE)
   """
   ✨ Update `AppointmentLegacySlot` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
   """
@@ -2021,6 +2380,25 @@ extend type Mutation {
     data: AppointmentPrivateDetails_Data!
   ): Int! @fdc_generated(from: "AppointmentPrivateDetails", purpose: UPDATE_MULTIPLE)
   """
+  ✨ Update `AppointmentUnit` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  appointmentUnit_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: AppointmentUnit_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: AppointmentUnit_Data!
+  ): Int! @fdc_generated(from: "AppointmentUnit", purpose: UPDATE_MULTIPLE)
+  """
   ✨ Update `AuditLog` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
   """
   auditLog_updateMany(
@@ -2059,6 +2437,44 @@ extend type Mutation {
     data: Branch_Data!
   ): Int! @fdc_generated(from: "Branch", purpose: UPDATE_MULTIPLE)
   """
+  ✨ Update `CalendarBlock` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  calendarBlock_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: CalendarBlock_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: CalendarBlock_Data!
+  ): Int! @fdc_generated(from: "CalendarBlock", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `CalendarFeed` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  calendarFeed_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: CalendarFeed_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: CalendarFeed_Data!
+  ): Int! @fdc_generated(from: "CalendarFeed", purpose: UPDATE_MULTIPLE)
+  """
   ✨ Update `ClinicProfile` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
   """
   clinicProfile_updateMany(
@@ -2096,6 +2512,25 @@ extend type Mutation {
     """
     data: ClinicSettings_Data!
   ): Int! @fdc_generated(from: "ClinicSettings", purpose: UPDATE_MULTIPLE)
+  """
+  ✨ Update `DayTokenCounter` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  dayTokenCounter_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: DayTokenCounter_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: DayTokenCounter_Data!
+  ): Int! @fdc_generated(from: "DayTokenCounter", purpose: UPDATE_MULTIPLE)
   """
   ✨ Update `Department` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
   """
@@ -2572,6 +3007,25 @@ extend type Mutation {
     data: User_Data!
   ): Int! @fdc_generated(from: "User", purpose: UPDATE_MULTIPLE)
   """
+  ✨ Update `WaitlistEntry` objects matching `where` conditions (or `all`, if true) according to `data`. Returns the number of rows updated.
+  """
+  waitlistEntry_updateMany(
+    """
+    Filter condition to specify which rows to update.
+    """
+    where: WaitlistEntry_Filter
+
+    """
+    Set to true to update all rows.
+    """
+    all: Boolean = false
+
+    """
+    Data object containing fields to update.
+    """
+    data: WaitlistEntry_Data!
+  ): Int! @fdc_generated(from: "WaitlistEntry", purpose: UPDATE_MULTIPLE)
+  """
   ✨ Delete a single `Appointment` based on `id`, `key` or `first` and return its key (or `null` if not found).
   """
   appointment_delete(
@@ -2610,6 +3064,20 @@ extend type Mutation {
     first: AppointmentEvent_FirstRow
   ): AppointmentEvent_KeyOutput @fdc_generated(from: "AppointmentEvent", purpose: DELETE_SINGLE)
   """
+  ✨ Delete a single `AppointmentIntake` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  appointmentIntake_delete(
+    """
+    The key used to identify the object.
+    """
+    key: AppointmentIntake_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: AppointmentIntake_FirstRow
+  ): AppointmentIntake_KeyOutput @fdc_generated(from: "AppointmentIntake", purpose: DELETE_SINGLE)
+  """
   ✨ Delete a single `AppointmentLegacySlot` based on `id`, `key` or `first` and return its key (or `null` if not found).
   """
   appointmentLegacySlot_delete(
@@ -2637,6 +3105,20 @@ extend type Mutation {
     """
     first: AppointmentPrivateDetails_FirstRow
   ): AppointmentPrivateDetails_KeyOutput @fdc_generated(from: "AppointmentPrivateDetails", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `AppointmentUnit` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  appointmentUnit_delete(
+    """
+    The key used to identify the object.
+    """
+    key: AppointmentUnit_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: AppointmentUnit_FirstRow
+  ): AppointmentUnit_KeyOutput @fdc_generated(from: "AppointmentUnit", purpose: DELETE_SINGLE)
   """
   ✨ Delete a single `AuditLog` based on `id`, `key` or `first` and return its key (or `null` if not found).
   """
@@ -2675,6 +3157,39 @@ extend type Mutation {
     """
     first: Branch_FirstRow
   ): Branch_KeyOutput @fdc_generated(from: "Branch", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `CalendarBlock` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  calendarBlock_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: CalendarBlock_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: CalendarBlock_FirstRow
+  ): CalendarBlock_KeyOutput @fdc_generated(from: "CalendarBlock", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `CalendarFeed` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  calendarFeed_delete(
+    """
+    The key used to identify the object.
+    """
+    key: CalendarFeed_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: CalendarFeed_FirstRow
+  ): CalendarFeed_KeyOutput @fdc_generated(from: "CalendarFeed", purpose: DELETE_SINGLE)
   """
   ✨ Delete a single `ClinicProfile` based on `id`, `key` or `first` and return its key (or `null` if not found).
   """
@@ -2723,6 +3238,20 @@ extend type Mutation {
     """
     first: ClinicSettings_FirstRow
   ): ClinicSettings_KeyOutput @fdc_generated(from: "ClinicSettings", purpose: DELETE_SINGLE)
+  """
+  ✨ Delete a single `DayTokenCounter` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  dayTokenCounter_delete(
+    """
+    The key used to identify the object.
+    """
+    key: DayTokenCounter_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: DayTokenCounter_FirstRow
+  ): DayTokenCounter_KeyOutput @fdc_generated(from: "DayTokenCounter", purpose: DELETE_SINGLE)
   """
   ✨ Delete a single `Department` based on `id`, `key` or `first` and return its key (or `null` if not found).
   """
@@ -3164,6 +3693,25 @@ extend type Mutation {
     first: User_FirstRow
   ): User_KeyOutput @fdc_generated(from: "User", purpose: DELETE_SINGLE)
   """
+  ✨ Delete a single `WaitlistEntry` based on `id`, `key` or `first` and return its key (or `null` if not found).
+  """
+  waitlistEntry_delete(
+    """
+    The unique ID of the object.
+    """
+    id: UUID
+
+    """
+    The key used to identify the object.
+    """
+    key: WaitlistEntry_Key
+
+    """
+    Fetch the first row based on the filters and ordering.
+    """
+    first: WaitlistEntry_FirstRow
+  ): WaitlistEntry_KeyOutput @fdc_generated(from: "WaitlistEntry", purpose: DELETE_SINGLE)
+  """
   ✨ Delete `Appointment` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
   """
   appointment_deleteMany(
@@ -3191,6 +3739,20 @@ extend type Mutation {
     """
     all: Boolean = false
   ): Int! @fdc_generated(from: "AppointmentEvent", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `AppointmentIntake` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  appointmentIntake_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: AppointmentIntake_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "AppointmentIntake", purpose: DELETE_MULTIPLE)
   """
   ✨ Delete `AppointmentLegacySlot` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
   """
@@ -3220,6 +3782,20 @@ extend type Mutation {
     all: Boolean = false
   ): Int! @fdc_generated(from: "AppointmentPrivateDetails", purpose: DELETE_MULTIPLE)
   """
+  ✨ Delete `AppointmentUnit` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  appointmentUnit_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: AppointmentUnit_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "AppointmentUnit", purpose: DELETE_MULTIPLE)
+  """
   ✨ Delete `AuditLog` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
   """
   auditLog_deleteMany(
@@ -3248,6 +3824,34 @@ extend type Mutation {
     all: Boolean = false
   ): Int! @fdc_generated(from: "Branch", purpose: DELETE_MULTIPLE)
   """
+  ✨ Delete `CalendarBlock` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  calendarBlock_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: CalendarBlock_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "CalendarBlock", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `CalendarFeed` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  calendarFeed_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: CalendarFeed_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "CalendarFeed", purpose: DELETE_MULTIPLE)
+  """
   ✨ Delete `ClinicProfile` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
   """
   clinicProfile_deleteMany(
@@ -3275,6 +3879,20 @@ extend type Mutation {
     """
     all: Boolean = false
   ): Int! @fdc_generated(from: "ClinicSettings", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `DayTokenCounter` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  dayTokenCounter_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: DayTokenCounter_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "DayTokenCounter", purpose: DELETE_MULTIPLE)
   """
   ✨ Delete `Department` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
   """
@@ -3625,4 +4243,18 @@ extend type Mutation {
     """
     all: Boolean = false
   ): Int! @fdc_generated(from: "User", purpose: DELETE_MULTIPLE)
+  """
+  ✨ Delete `WaitlistEntry` objects matching `where` conditions (or `all`, if true). Returns the number of rows deleted.
+  """
+  waitlistEntry_deleteMany(
+    """
+    Filter condition to specify which rows to delete.
+    """
+    where: WaitlistEntry_Filter
+
+    """
+    Set to true to delete all rows.
+    """
+    all: Boolean = false
+  ): Int! @fdc_generated(from: "WaitlistEntry", purpose: DELETE_MULTIPLE)
 }

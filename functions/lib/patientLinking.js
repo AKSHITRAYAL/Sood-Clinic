@@ -1,7 +1,7 @@
 const { randomBytes, createHash } = require('node:crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { requireLiveStaff } = require('./staffAuthorization');
-const { isStaffRole } = require('./staffAccess');
+const { verifiedPatient, requireLivePatient } = require('./patientAuthorization');
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const uidValid = (value) => typeof value === 'string' && value.length > 0 && value.length <= 128 && !/[\s\x00-\x1f\x7f]/.test(value);
 const unavailable = () => new HttpsError('unavailable', 'The linking change could not be confirmed. Ask the clinic to check access before retrying.');
@@ -13,9 +13,6 @@ function input(data, fields) {
 }
 function pair(data) {
   if (typeof data.patientId !== 'string' || !uuidPattern.test(data.patientId) || !uidValid(data.targetUid)) throw new HttpsError('invalid-argument', 'Select the patient and account explicitly.');
-}
-function verifiedPatient(user) {
-  return user && !user.disabled && user.emailVerified === true && !isStaffRole(user.customClaims?.role) && user.customClaims?.forcePasswordChange !== true;
 }
 
 // Pre-cutover service only: no callable exports or legacy patient-store writes.
@@ -44,11 +41,7 @@ function createPatientLinking({ auth, store, now = Date.now }) {
       if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in to link a patient.');
       const { code } = input(request.data, ['code']);
       if (typeof code !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(code)) throw new HttpsError('invalid-argument', 'Enter a valid clinic-issued code.');
-      let user;
-      try { user = await auth.getUser(request.auth.uid); } catch { throw new HttpsError('permission-denied', 'Sign in again to verify access.'); }
-      const token = request.auth.token || {};
-      const cutoff = user?.tokensValidAfterTime ? Math.floor(Date.parse(user.tokensValidAfterTime) / 1000) : 0;
-      if (!verifiedPatient(user) || token.email_verified !== true || isStaffRole(token.role) || token.forcePasswordChange === true || !Number.isFinite(token.auth_time) || !Number.isFinite(cutoff) || token.auth_time < cutoff || token.auth_time > now() / 1000 + 60) throw new HttpsError('permission-denied', 'Sign in again with a verified patient account.');
+      const user = await requireLivePatient(auth, request, now);
       const tokenHash = hash(code);
       let invitation;
       try { invitation = await store.find({ tokenHash, targetUid: user.uid }); } catch { throw unavailable(); }

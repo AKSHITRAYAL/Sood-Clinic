@@ -7,6 +7,7 @@ import { auth, firestore, functions } from '../lib/firebase';
 import { addIstDays, istDateKey, istInstant } from '../lib/ist';
 import { toDate } from '../lib/time';
 import { reschedulePatientAppointment } from '../services/appointmentService';
+import { getBookingCatalog, readBookingPolicy } from '../services/bookingCatalogService';
 
 const getAvailability = httpsCallable(functions, 'getAvailability');
 const labelDate = (date) => date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short' });
@@ -23,7 +24,15 @@ const RescheduleAppointment = () => {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const days = useMemo(() => Array.from({ length: 14 }, (_, index) => istInstant(addIstDays(istDateKey(), index))), []);
+  const [bookingWindowDays, setBookingWindowDays] = useState(null);
+  const days = useMemo(() => Array.from({ length: bookingWindowDays || 0 }, (_, index) => istInstant(addIstDays(istDateKey(), index))), [bookingWindowDays]);
+
+  useEffect(() => {
+    let active = true;
+    getBookingCatalog().then(catalog => { if (active) setBookingWindowDays(readBookingPolicy(catalog).bookingWindowDays); })
+      .catch(() => { if (active) setError('Online rescheduling policy could not be loaded. Reload this page to retry.'); });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => onAuthStateChanged(auth, (next) => setUser(next || null)), []);
   useEffect(() => {
@@ -37,7 +46,7 @@ const RescheduleAppointment = () => {
     return () => { active = false; };
   }, [user, appointmentId]);
   useEffect(() => {
-    if (!appointment?.doctorId || !appointment?.visitType) return undefined;
+    if (!appointment?.doctorId || !appointment?.visitType || !bookingWindowDays) return undefined;
     let active = true;
     setSelectedSlot(null); setSlots([]); setError(''); setLoadingSlots(true);
     getAvailability({ doctorId: appointment.doctorId, dateKey: istDateKey(selectedDate), visitTypeId: appointment.visitType })
@@ -45,7 +54,7 @@ const RescheduleAppointment = () => {
       .catch((caught) => active && setError(friendlyError(caught)))
       .finally(() => active && setLoadingSlots(false));
     return () => { active = false; };
-  }, [appointment, selectedDate]);
+  }, [appointment, selectedDate, bookingWindowDays]);
 
   const submit = async () => {
     if (!selectedSlot) { setError('Choose a new available time.'); return; }
