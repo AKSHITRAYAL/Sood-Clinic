@@ -11,11 +11,18 @@ function LinkEditor({ patientId, api }) {
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
     if (!issued) return undefined;
-    const clearExpired = () => { if (Date.now() >= Date.parse(issued.expiresAt)) { setIssued(null); setNotice('This code expired. Verify the selected account before issuing another.'); } };
-    const timeout = window.setTimeout(clearExpired, Math.max(0, Date.parse(issued.expiresAt) - Date.now()));
-    window.addEventListener('focus', clearExpired);
-    document.addEventListener('visibilitychange', clearExpired);
-    return () => { window.clearTimeout(timeout); window.removeEventListener('focus', clearExpired); document.removeEventListener('visibilitychange', clearExpired); };
+    let timeout = null;
+    const clearExpired = () => {
+      const remaining = Date.parse(issued.expiresAt) - Date.now();
+      if (remaining <= 0) { setIssued(null); setNotice('This code expired. Verify the selected account before issuing another.'); return; }
+      // A timer can fire marginally early; re-arm instead of leaving an expired code on screen.
+      timeout = window.setTimeout(clearExpired, remaining);
+    };
+    clearExpired();
+    const schedule = () => { window.clearTimeout(timeout); clearExpired(); };
+    window.addEventListener('focus', schedule);
+    document.addEventListener('visibilitychange', schedule);
+    return () => { window.clearTimeout(timeout); window.removeEventListener('focus', schedule); document.removeEventListener('visibilitychange', schedule); };
   }, [issued]);
   const targetValid = target.length > 0 && target.length <= 128 && !/\s/.test(target) && ![...target].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127);
   const issue = async () => {

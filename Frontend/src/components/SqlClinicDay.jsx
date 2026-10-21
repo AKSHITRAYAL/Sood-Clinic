@@ -49,4 +49,5 @@ ClinicDay.propTypes = { role: PropTypes.string.isRequired, assignedDoctorId: Pro
 export default function SqlClinicDay({ accountUid, role, assignedDoctorId, api = sqlClinicDayService }) {
   if (!accountUid || !['admin', 'manager', 'doctor'].includes(role) || (role === 'doctor' && !assignedDoctorId)) return <p role="alert">Current staff access is required.</p>;
   return <ClinicDay key={`${accountUid}:${role}:${assignedDoctorId || ''}`} role={role} assignedDoctorId={assignedDoctorId} api={api} />;
+}
 SqlClinicDay.propTypes = { accountUid: PropTypes.string.isRequired, role: PropTypes.string.isRequired, assignedDoctorId: PropTypes.string, api: PropTypes.object };

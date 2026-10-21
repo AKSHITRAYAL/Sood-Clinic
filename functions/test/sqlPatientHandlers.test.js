@@ -77,7 +77,9 @@ test('live patient auth runs before any attempt is consumed', async () => {
   expect(linkingApi.accept).not.toHaveBeenCalled();
 });
 
-test('no staged handler is exported from functions/index.js', () => {
-  const source = readFileSync(require.resolve('../index.js'), 'utf8');
-  for (const name of handlerNames) expect(source).not.toMatch(new RegExp(`exports\\.${name}\\b`));
+test('every staged handler is exported only through the frozen callable options', () => {
+  const lines = readFileSync(require.resolve('../index.js'), 'utf8').split('\n').map(line => line.trim());
+  for (const name of handlerNames) {
+    expect(lines).toContain(`exports.${name} = onCall(sqlPatientCallableOptions, sqlPatientHandler('${name}'));`);
+  }
 });

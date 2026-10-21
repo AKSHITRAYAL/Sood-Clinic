@@ -4,46 +4,112 @@ import { sqlWeeklyHoursService } from '../services/sqlWeeklyHoursService';
 import ConfirmDialog from './ConfirmDialog';
 
 const minutesToClock = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+const clockToMinutes = value => {
+  const match = /^(\d{2}):(\d{2})$/.exec(value || '');
+  if (!match) return null;
+  const minutes = Number(match[1]) * 60 + Number(match[2]);
+  return minutes >= 0 && minutes <= 1439 ? minutes : null;
+};
 const weekdayLabel = d => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][d - 1] || `Day ${d}`;
-function WeeklyHours({ doctorId, record, dirty, saving, onSave, onReload, reloadConfirm }) {
-  const rows = record?.sessions?.map(session => ({ weekday: session.weekday, start: minutesToClock(session.startMinute), end: minutesToClock(session.endMinute), key: `${session.weekday}-${session.startMinute}-${session.endMinute}` })) || [];
-  return <fieldset disabled={saving}><ul>{rows.map(row => <li key={row.key}><label>{weekdayLabel(row.weekday)}</label><input type="time" label="Start" value={row.start} disabled readOnly />–<input type="time" label="End" value={row.end} disabled readOnly /><input type="hidden" name={`session-${row.weekday}`} value={JSON.stringify({ weekday: row.weekday, startMinute: rows.indexOf(row) })} /></li>)}</ul></fieldset>;
+const newRequestId = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : '00000000-0000-4000-8000-000000000000');
+const failClosed = ['functions/permission-denied', 'functions/unauthenticated'];
+const inputErrors = [...failClosed, 'functions/invalid-argument'];
+
+function WeeklyHours({ sessions, editing, saving, onChange }) {
+  return <fieldset disabled={saving}><legend>Weekly sessions (IST)</legend>
+    {!sessions.length && <p>No regular sessions are recorded for this doctor. This is not the same as closed permanently.</p>}
+    <ul>{sessions.map((session, index) => <li key={`${session.weekday}-${index}`}>
+      <label>{weekdayLabel(session.weekday)}</label>
+      <input type="time" aria-label="Start" step="300" value={minutesToClock(session.startMinute)} disabled={!editing} onChange={event => {
+        const minutes = clockToMinutes(event.target.value);
+        if (minutes !== null) onChange(index, 'startMinute', minutes);
+      }} />–<input type="time" aria-label="End" step="300" value={minutesToClock(session.endMinute)} disabled={!editing} onChange={event => {
+        const minutes = clockToMinutes(event.target.value);
+        if (minutes !== null) onChange(index, 'endMinute', minutes);
+      }} />
+    </li>)}</ul>
+  </fieldset>;
 }
-WeeklyHours.propTypes = { doctorId: PropTypes.string.isRequired, record: PropTypes.shape({ sessions: PropTypes.array }).isRequired, dirty: PropTypes.bool, saving: PropTypes.bool, onSave: PropTypes.func, onReload: PropTypes.func, reloadConfirm: PropTypes.bool };
-// Staged only; do not replace current staff routes before the coordinated release.
-export default function SqlWeeklyHours({ accountUid, role, assignedDoctorId, api = sqlWeeklyHoursService }) {
-  if (!accountUid || !['admin', 'doctor'].includes(role) || (role === 'doctor' && !assignedDoctorId)) return <p role="alert">Current administrator or assigned doctor access is required.</p>;
-  const [doctorId, setDoctorId] = useState(assignedDoctorId || ''); const [record, setRecord] = useState(null); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [editing, setEditing] = useState(false); const [saveBusy, setSaveBusy] = useState(false); const [reloadAsk, setReloadAsk] = useState(false); const alive = useRef(false); const requestId = useRef(null);
+WeeklyHours.propTypes = {
+  sessions: PropTypes.array.isRequired,
+  editing: PropTypes.bool.isRequired,
+  saving: PropTypes.bool.isRequired,
+  onChange: PropTypes.func.isRequired,
+};
+
+function WeeklyHoursEditor({ role, assignedDoctorId, api }) {
+  const [doctorId, setDoctorId] = useState(assignedDoctorId || '');
+  const [record, setRecord] = useState(null);
+  const [sessions, setSessions] = useState([]);
+  const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+  const [editing, setEditing] = useState(false); const [saveBusy, setSaveBusy] = useState(false);
+  const [blocked, setBlocked] = useState(false); const [reloadAsk, setReloadAsk] = useState(false);
+  const alive = useRef(false); const running = useRef(false); const requestId = useRef(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+
   const load = async () => {
-    if (busy) return;
-    setBusy(true); setError(''); setEditing(false); setReloadAsk(false); requestId.current = crypto.randomUUID ? crypto.randomUUID() : '00000000-0000-4000-8000-000000000000';
+    if (running.current) return;
+    running.current = true; setBusy(true); setError(''); setEditing(false); setBlocked(false); setReloadAsk(false);
     try {
       const row = await api.get(doctorId);
       if (!alive.current) return;
-      setRecord(row); setEditing(false);
-    } catch (caught) {
+      setRecord(row); setSessions(row.sessions); requestId.current = newRequestId();
+    } catch {
+      if (!alive.current) return;
+      setRecord(null); setSessions([]);
       setError('Weekly hours are unavailable. Revert to the current staff schedule and try again.');
-      if (['functions/permission-denied', 'functions/unauthenticated'].includes(caught?.code)) setRecord(null);
-    } finally { if (alive.current) { setBusy(false); } }
+    } finally { running.current = false; if (alive.current) setBusy(false); }
   };
   const save = async () => {
-    if (saveBusy) return;
-    setSaveBusy(true);
-      const saved = await api.save({ doctorId, expectedUpdatedAt: record?.updatedAt, sessions: record?.sessions, requestId: requestId.current });
-      setRecord(saved); setEditing(false); setReloadAsk(false); requestId.current = crypto.randomUUID ? crypto.randomUUID() : '00000000-0000-4000-8000-000000000000';
-      if (['functions/invalid-argument', 'functions/permission-denied', 'functions/unauthenticated'].includes(caught?.code)) {
+    if (saveBusy || !record) return;
+    setSaveBusy(true); setError('');
+    try {
+      await api.save({ doctorId: record.doctorId, expectedUpdatedAt: record.updatedAt, sessions, requestId: requestId.current });
+      if (!alive.current) return;
+      setRecord(previous => ({ ...previous, sessions }));
+      setEditing(false); setBlocked(true);
+    } catch (caught) {
+      if (!alive.current) return;
+      if (failClosed.includes(caught?.code)) {
+        setRecord(null); setSessions([]); setEditing(false);
+        setError('Weekly hours are unavailable. Revert to the current staff schedule and try again.');
+      } else if (inputErrors.includes(caught?.code)) {
         setError(caught?.message || 'Check weekdays and start/end times.');
+        if (caught?.code === 'functions/invalid-argument') requestId.current = newRequestId();
       } else {
-        setError('Save could not be confirmed.');
+        setError('Save could not be confirmed. Reload the current server record before editing again.');
         setReloadAsk(true);
       }
-    } finally { if (alive.current) { setSaveBusy(false); } }
-  if (!record) return <section className="admin-panel"><h1>Regular clinic hours</h1>{error && <p role="alert" className="staff-login__error">{error}</p>}{busy && <p role="status">Loading weekly hours…</p>}<form onSubmit={event => { event.preventDefault(); load(); }}><fieldset disabled={busy}><legend>Select doctor</legend><label>Doctor ID<input required autoComplete="off" maxLength={80} value={doctorId} readOnly={role === 'doctor'} onChange={event => setDoctorId(event.target.value)} /></label><button type="submit" disabled={busy || !doctorId}>{busy ? 'Loading…' : 'Load / reload hours'}</button></fieldset></form></section>;
-  return <section className="admin-panel"><h1>{record.doctorName}</h1><p>Times are in IST. Read-only operational view until the SQL weekly-hours cutover is released.</p>
-    <WeeklyHours doctorId={doctorId} record={record} />
-    {error && <p role="alert" className="staff-login__error">{error}</p>}
-    {editing ? <button type="button" disabled={saveBusy} onClick={save}>{saveBusy ? 'Saving…' : 'Save weekly hours'}</button> : <button type="button" disabled={busy} onClick={() => { setEditing(true); setError(''); }}>Edit weekly hours</button>}
-    {reloadAsk && <ConfirmDialog open={true} title="Reload weekly hours?" message="You have unsaved changes. Reload the current server record and discard your edits?" confirmLabel="Reload" requireReason={false} onConfirm={() => { load(); setReloadAsk(false); }} onCancel={() => setReloadAsk(false)} />}
+    } finally { if (alive.current) setSaveBusy(false); }
+  };
+  const askReload = event => {
+    event.preventDefault();
+    if (busy) return;
+    if (editing || blocked) setReloadAsk(true); else load();
+  };
+  const change = (index, key, value) => setSessions(current => current.map((session, position) => position === index ? { ...session, [key]: value } : session));
+
+  return <section className="admin-panel"><h1>Regular clinic hours</h1>
+    <p>Times are in IST. No fallback clinic hours are invented; an empty record means the clinic has no verified weekly schedule for this doctor.</p>
+    {error && <p role="alert" className="staff-login__error">{error}</p>}{busy && <p role="status">Loading weekly hours…</p>}
+    <form onSubmit={askReload}><fieldset disabled={busy || saveBusy}><legend>Select doctor</legend>
+      <label>Doctor ID<input required autoComplete="off" maxLength={80} value={doctorId} readOnly={role === 'doctor'} onChange={event => setDoctorId(event.target.value)} /></label>
+      <button type="submit" disabled={busy || saveBusy || !doctorId}>{busy ? 'Loading…' : 'Load / reload hours'}</button>
+    </fieldset></form>
+    {record && <><h2>{record.doctorName}</h2><p>Last verified {new Date(record.updatedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST.</p>
+      <WeeklyHours sessions={sessions} editing={editing} saving={saveBusy || busy} onChange={change} />
+      {editing
+        ? <button type="button" disabled={saveBusy} onClick={save}>{saveBusy ? 'Saving…' : 'Save weekly hours'}</button>
+        : <button type="button" disabled={busy || saveBusy || blocked} onClick={() => { setEditing(true); setError(''); }}>Edit weekly hours</button>}
+      {blocked && !editing && <p role="status">Saved. Reload the record before editing again so the next save uses the current revision.</p>}</>}
+    <ConfirmDialog open={reloadAsk} title="Reload weekly hours?" message="You have unsaved or unconfirmed changes. Reload the current server record and discard your edits?" confirmLabel="Reload" onConfirm={() => { setReloadAsk(false); load(); }} onCancel={() => setReloadAsk(false)} />
   </section>;
+}
+WeeklyHoursEditor.propTypes = { role: PropTypes.string.isRequired, assignedDoctorId: PropTypes.string, api: PropTypes.object.isRequired };
+
+// Staged only; do not replace current staff routes before the coordinated release.
+export default function SqlWeeklyHours({ accountUid, role, assignedDoctorId, api = sqlWeeklyHoursService }) {
+  if (!accountUid || !['admin', 'doctor'].includes(role) || (role === 'doctor' && !assignedDoctorId)) return <p role="alert">Current administrator or assigned doctor access is required.</p>;
+  return <WeeklyHoursEditor key={`${accountUid}:${role}:${assignedDoctorId || ''}`} role={role} assignedDoctorId={assignedDoctorId} api={api} />;
+}
 SqlWeeklyHours.propTypes = { accountUid: PropTypes.string.isRequired, role: PropTypes.string.isRequired, assignedDoctorId: PropTypes.string, api: PropTypes.object };

@@ -1,9 +1,6 @@
 // @vitest-environment jsdom
-import React from 'react';
-// @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
-void React;
 vi.mock('../lib/firebase', () => ({ functions: {}, auth: {}, firebaseApp: {} }));
 vi.mock('firebase/functions', () => ({ httpsCallable: () => vi.fn() }));
 import SqlClinicDay from './SqlClinicDay';
