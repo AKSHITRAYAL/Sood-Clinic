@@ -14,7 +14,9 @@ function AuditLog({ api }) {
   const load = async more => {
     if (running.current || (more && !cursor)) return;
     const position = more ? cursor : null; const key = JSON.stringify(position);
-    if (positions.current.has(key)) { setError('That activity page was already requested. Refresh from the start.'); return; }
+    // Only paging can repeat a window; a fresh load clears the visited set below,
+    // so guarding the first page here would make "Refresh from the start" dead.
+    if (more && positions.current.has(key)) { setError('That activity page was already requested. Refresh from the start.'); return; }
     running.current = true; setBusy(true); setError('');
     if (!more) { setEvents(null); setCursor(null); positions.current.clear(); seen.current.clear(); }
     try {

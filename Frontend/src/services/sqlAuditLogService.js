@@ -19,7 +19,9 @@ export const sqlAuditLogService = {
     const events = data.events.map(row => {
       if (!row || typeof row.id !== 'string' || !uuid.test(row.id) || ids.has(row.id.toLowerCase()) || !instant(row.at)
         || !label(row.action, 120) || !label(row.actorRole, 40) || !label(row.resourceType, 80) || !label(row.resourceId, 200)
-        || !label(row.actorUid, 200, true)) throw fail();
+        // A system event has no actor; `label` returns null for a nullable field, so
+        // this must be tested separately or every unattributed row is rejected.
+        || (row.actorUid != null && !label(row.actorUid, 200))) throw fail();
       if (previous && canonical(previous) < canonical(row.at)) throw fail();
       previous = row.at;
       ids.add(row.id.toLowerCase());
