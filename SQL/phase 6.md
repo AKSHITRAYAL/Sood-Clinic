@@ -4,7 +4,7 @@ Read `AGENTS.md`, `SQL/PLAN.md`, `SQL/PROGRESS.md` and this file before Phase 6 
 
 # Phase 6 — SQL scheduler
 
-Status: inspection and local schema foundation complete 2026-10-20 (local only, not deployed). Percentages stay in `SQL/PROGRESS.md` and do not move until tests and integration support it.
+Status: inspection and local schema foundation complete 2026-10-20; ported engine libs (`functions/lib/engine/*`) and the drafted claim/release connector (`admin/scheduler-units.gql`) added 2026-10-22 (local only, not deployed, **no behaviour tests exist — the queue stops at B018**). `SQL/PROGRESS.md` carries the phase percentage: scaffolding and drafted operations are credited as partial local code, never as a working scheduler, verified interval protection or integration.
 
 ## Inspection (2026-10-20)
 
