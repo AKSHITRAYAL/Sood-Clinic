@@ -1,6 +1,6 @@
 # Instructions for AI CLIs
 
-Read `AGENTS.md`, `SQL/PLAN.md` and `SQL/phase 4.md` before changing this directory. These files are local rehearsal tools, not production migration commands. Do not replace fixtures with real data, add cloud credentials, bypass a guard or add an apply flag. Preserve the explicit unknown-field and default-deny behavior.
+Read `AGENTS.md` and `README.md` before changing this directory. These files are local rehearsal tools, not production migration commands. Do not replace fixtures with real data, add cloud credentials, bypass a guard or add an apply flag. Preserve the explicit unknown-field and default-deny behavior.
 
 # Local rehearsal
 

@@ -1,47 +1,96 @@
 # Sood Clinic
 
-Firebase-backed appointment and clinic operations application for Sood Clinic, Panchkula.
+Firebase-backed appointment and clinic operations application for Sood Clinic, Panchkula
+(Dr. Brig. A. K. Sood VSM (Retd), gastroenterology; House No. 398, Sector 10, Panchkula,
+Haryana 134109).
 
 ## Project structure
 
-- `Frontend/` — React and Vite single-page application. Public pages, patient portal, and role-based staff workspaces live in `Frontend/src/`.
-- `functions/` — Firebase Functions source, data seeding, and one-time trusted staff-role utilities.
-- `firebase.json` — Firebase Hosting, Firestore, and Functions configuration.
-- `firestore.rules` and `firestore.indexes.json` — Firestore access controls and indexes.
+- `Frontend/` — React 18 + Vite + Tailwind SPA. Two entries build separate bundles:
+  `src/entry/public.jsx` → `dist/public` (public site, booking, patient portal) and
+  `src/entry/staff.jsx` → `dist/staff` (role-based staff workspaces).
+- `functions/` — Firebase Functions (Node 22, `asia-south1`): booking/availability, staff
+  lifecycle, catalogue/contact/policy, calendar, feedback, video, and the SQL staff and
+  scheduler backends. Local admin scripts: `seed.js`, `assign-staff-role.js`,
+  `migrate-legacy-staff-role.js`.
+- `firestore.rules`, `firestore.indexes.json` — Firestore access control and indexes.
+- `firebase.json`, `.firebaserc` — Hosting (two sites on one project), Firestore,
+  Functions and Data Connect configuration.
+- `SQL/` — the SQL Connect backend: `dataconnect/` source (schema, connectors, admin
+  operations), `generated/` committed SDKs, `scripts/` (compile, test, rehearse,
+  release-check), `migration/` local migration/rehearsal tooling, `tests/`.
+- `tests/` — rules, callable, booking, schedule, time and staff-access suites.
 
-## Continuation guides
+## Commands
 
-- [AGENTS.md](AGENTS.md) is the entry point for AI coding agents: golden rules, work protocol, and the doc map.
-- [`files/`](files/) is the current documentation set: `01` current state, `02` audit findings, `03` target architecture,
-  `04` backlog, `05` security/privacy, `06` UI/UX handoff, `07` open decisions, `08` dev workflow/testing.
-- [`SQL/`](SQL/) covers the in-progress SQL backend: `PLAN.md`, `PROGRESS.md`, phase logs, and the
-  `TEST-QUEUE.md`/`TEST-RESULTS.md` test handoff. Start from `SQL/HANDOVER.md`.
-- Local development, Firebase, role-assignment, and Git commands live in `AGENTS.md` §3 and `files/08-dev-workflow-testing.md`.
-
-## Local development
+Frontend:
 
 ```bash
 cd Frontend
 npm ci
-npm run dev
+npm run dev            # Vite dev server
+npm run lint           # eslint, passes clean
+npm run build          # both bundles → dist/public and dist/staff
+npm test               # component/service tests (jsdom)
 ```
 
-Build the hosted application with `npm run build`. Firebase Hosting serves `Frontend/dist`.
+From the repository root (`npm ci` once):
 
-## Local Firebase checks
+```bash
+npm run emulators        # Firebase emulators (demo-sood-clinic), UI on :4000
+npm run test:time        # IST helper tests
+npm run test:rules       # Firestore rules against the demo-project emulator
+npm run test:callables   # callable Functions against the emulators
+npm run test:booking     # booking/reschedule callables against the source SQL
+npm run test:functions   # functions unit tests
+npm run test:schedule    # schedule reader tests
+npm run test:staff-access
+npm run sql:compile      # compile Data Connect source → CJS/ESM/types
+npm run sql:test         # SQL foundation tests
+npm run test:migration   # local migration/reconciliation tests
+npm run sql:release-check # MUST exit 1 today — see "Release gates"
+npm --prefix functions run lint
+```
 
-From the repository root, run `npm ci` once, then `npm run test:rules`. It launches the
-Firestore emulator against the deliberately fake `demo-sood-clinic` project and verifies
-that unknown Firestore collections remain inaccessible. It never contacts production.
+Auth model: Firebase Auth email/password. Staff roles are custom claims (`role` =
+`admin` | `doctor` | `manager`; a doctor also carries `doctorId`). Patients are
+authenticated users without a staff role. Time is Asia/Kolkata (IST, UTC+05:30, no DST);
+store instants as Firestore `Timestamp` plus an IST `dateKey`.
 
 ## Deployment
 
+Build first, then ship Hosting only:
+
 ```bash
-npm --prefix Frontend run build
-npx firebase-tools deploy --only firestore:rules,firestore:indexes,functions,hosting:sood-clinic --project sood-clinic
+cd Frontend && npm run build
+NO_UPDATE_NOTIFIER=1 npx firebase-tools deploy --only hosting:public,hosting:staff --project sood-clinic
 ```
 
-This is a coordinated production release command. Use it only after tests and explicit
-approval; a Hosting-only deployment does not publish rules, indexes, or Functions.
+Hosting-only publishes nothing else. Rules, indexes, Functions and Data Connect each need
+their own command and explicit approval. A `functions` deploy publishes every function
+exported by `functions/index.js`, including ones no client calls yet.
 
 Never commit service-account keys, Firebase CLI credentials, or `.env` files.
+
+## Release gates
+
+- `npm run sql:release-check` currently exits 1 **by design**
+  (`SYNTHETIC_REHEARSAL_OPERATIONS_PRESENT`, `SYNTHETIC_REHEARSAL_SDK_PRESENT`,
+  `GUEST_RELATION_RELEASE_REVIEW_REQUIRED`). It is a safety stop, not a failing test.
+  Never silence it to make a deployment green.
+- The local SQL schema is ahead of the deployed one. The catalogue, patient, schedule,
+  appointment and scheduler-hold additions are local-only until the guest-relation
+  DDL/API review, a verified backup, and a real import path exist.
+- `Appointment.patient` is nullable locally but not in production, so the SQL migration is
+  **not** purely additive. Do not apply it under an additive-only rule.
+- No App Check site key is configured (`VITE_RECAPTCHA_SITE_KEY` is unset), so the deployed
+  site sends no App Check tokens and every `enforceAppCheck: true` callable returns 401 from
+  the browser.
+- A newly created callable needs `roles/run.invoker` for `allUsers`. The CLI honours
+  `invoker: 'public'` when it creates a service but ignores it on update, so re-check the
+  binding after any redeploy that recreates a service.
+
+## Docs
+
+- `AGENTS.md` — operating rules: golden rules, security, deploy protocol, release gates.
+- `SQL/migration/README.md` — local migration and rehearsal tooling, and its limits.

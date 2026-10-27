@@ -286,3 +286,4 @@ a { text-decoration: none; }
 .confirm-dialog textarea { resize: vertical; min-height: 5rem; }
 .confirm-dialog small { color: #6d8097; }
 .confirm-dialog__actions { display: flex; justify-content: flex-end; gap: .75rem; flex-wrap: wrap; }
+@media (max-width: 400px) { .patient-auth__links { flex-wrap: wrap; white-space: normal; }.patient-auth__links > span { width: 100%; margin-left: 0; } }

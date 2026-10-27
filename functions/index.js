@@ -4,10 +4,10 @@ const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
 const crypto = require('crypto');
-const { istDateKey, toIstParts, weekdayIst } = require('./lib/ist');
+const { istDateKey, istInstant, toIstParts, weekdayIst } = require('./lib/ist');
 const { buildAvailability, makeSlotId } = require('./lib/availability');
 const { buildAuthorizationUrl, createEvent, deleteEvent, decrypt, encrypt, exchangeAuthorizationCode, freeBusy, refreshAccessToken, updateEventTime } = require('./lib/googleCalendar');
-const { canTransition } = require('./lib/stateMachine');
+const { canMarkNoShow, canStaffReschedule, canTransition, NO_SHOW_GRACE_MINUTES } = require('./lib/stateMachine');
 const { isDoctorId, isEmail, isStaffRole, normalizeEmail } = require('./lib/staffAccess');
 const { canPatientCancel } = require('./lib/appointmentPolicy');
 const { formatUhid, isUhid, normalizePatientName, normalizePhone } = require('./lib/patientRegistry');
@@ -24,6 +24,14 @@ const { createSqlClinicDayBackend } = require('./lib/sqlClinicDay');
 const { createSqlWeeklyHoursBackend } = require('./lib/sqlWeeklyHours');
 const { createSqlSpecialHoursBackend } = require('./lib/sqlSpecialHours');
 const { createBookingSettings, sqlBookingSettingsStore, selectVisitType } = require('./lib/bookingSettings');
+// TEMPORARY TECHNICAL DEBT (2026-10-25): see lib/bookingFallback.js. SQL stays the
+// authority; the Firestore read only covers an unusable SQL read until the reviewed
+// SQL seed + connector release ships.
+const { createBookingReads, firestoreCatalogue, firestoreConfig } = require('./lib/bookingFallback');
+const { createSchedulerHoldHandler } = require('./lib/schedulerHoldsCallable');
+const { createSqlSchedulerHolds } = require('./lib/sqlSchedulerHolds');
+const { createSqlSchedulerAvailability, sqlSchedulerAvailabilityStore } = require('./lib/sqlSchedulerAvailability');
+const { createSqlSchedulerClaims, sqlSchedulerClaimStore } = require('./lib/sqlSchedulerClaims');
 
 admin.initializeApp();
 setGlobalOptions({ region: 'asia-south1', maxInstances: 10 });
@@ -33,6 +41,9 @@ const GOOGLE_CALENDAR_CLIENT_ID = defineSecret('GOOGLE_CALENDAR_CLIENT_ID');
 const GOOGLE_CALENDAR_CLIENT_SECRET = defineSecret('GOOGLE_CALENDAR_CLIENT_SECRET');
 const GOOGLE_CALENDAR_TOKEN_KEY = defineSecret('GOOGLE_CALENDAR_TOKEN_KEY');
 const callableOptions = { region: 'asia-south1', enforceAppCheck: process.env.ENFORCE_APP_CHECK === 'true' };
+// The public/patient booking flow is reachable without a staff identity, and its
+// services must be invocable (each handler still authorises the caller itself).
+const bookingCallableOptions = { ...callableOptions, invoker: 'public' };
 const requireAdmin = (request) => requireLiveAdmin(admin.auth(), request);
 const requireRegistrationStaff = async (request) => {
   const user = await requireLiveStaff(admin.auth(), request, { roles: ['admin', 'manager'] });
@@ -381,10 +392,26 @@ const bookingSettingsService = () => createBookingSettings({
   store: sqlBookingSettingsStore(getDataConnect({ serviceId: 'ak-sood-clinic-service', location: 'asia-south1', connector: 'clinic-admin' })),
 });
 
+const bookingReads = () => createBookingReads({
+  sql: {
+    catalogue: () => sqlCatalogueService().public(),
+    config: () => bookingSettingsService().runtime(),
+  },
+  firestore: {
+    catalogue: async () => {
+      const [branches, departments, doctors] = await Promise.all(['branches', 'departments', 'doctors'].map((name) => db.collection(name).get()));
+      const rows = (snapshot) => snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      return firestoreCatalogue({ branches: rows(branches), departments: rows(departments), doctors: rows(doctors) });
+    },
+    config: async () => firestoreConfig((await db.collection('clinic').doc('publicConfig').get()).data()),
+  },
+});
+
 // Public booking reads its catalogue through this narrow contract rather than
 // embedding clinic/doctor IDs in the client.
-exports.getBookingCatalog = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async () => {
-  const [catalogue, config] = await Promise.all([sqlCatalogueService().public(), bookingSettingsService().runtime()]);
+exports.getBookingCatalog = onCall({ ...bookingCallableOptions, timeoutSeconds: 30, memory: '256MiB' }, async () => {
+  const reads = bookingReads();
+  const [catalogue, config] = await Promise.all([reads.catalogue(), reads.config()]);
   return { ...catalogue, booking: { bookingWindowDays: config.bookingWindowDays, cancelCutoffMinutes: config.cancelCutoffMinutes, visitTypes: config.visitTypes.filter(item => item.active).map(({ id, label, minutes, mode }) => ({ id, label, minutes, mode })) } };
 });
 
@@ -545,6 +572,38 @@ const assertPhoneBookingCapacity = async (phoneKey, now = new Date()) => {
 };
 
 
+// Phase 6 hold path, exported for review with the rest of the scheduler slice.
+// The doctor's SQL UUID is resolved server-side here: the public catalogue exposes
+// only legacy ids, and `place` reads the schedule again for the claim itself, so one
+// bounded day read buys the identity. Two limits stand in for a rate limiter while
+// the Phase 6 throttling decision is open: App Check is enforced, and maxInstances
+// is capped at the same 1 used by the SQL patient backends.
+const schedulerDc = () => getDataConnect({ serviceId: 'ak-sood-clinic-service', location: 'asia-south1', connector: 'clinic-admin' });
+
+const schedulerDoctorIdentity = async ({ actorUid, doctorLegacyId, visitTypeId, dateKey }) => {
+  const rangeStart = istInstant(dateKey);
+  const rangeEnd = new Date(rangeStart.getTime() + 24 * 60 * 60 * 1000);
+  const source = await sqlSchedulerAvailabilityStore(schedulerDc()).read({ actorUid, doctorLegacyId, dateKey, rangeStart: rangeStart.toISOString(), rangeEnd: rangeEnd.toISOString() });
+  const doctors = Array.isArray(source?.doctors) ? source.doctors : [];
+  // Ambiguous or missing rows leave the UUID unset; the handler refuses rather than
+  // trusting a client-supplied identity.
+  const doctorId = doctors.length === 1 ? doctors[0].id : null;
+  return { doctorId, visitType: selectVisitType(await bookingReads().config(), visitTypeId) };
+};
+
+// Guest identity is still unresolved: the claim requires an active SQL user row, so
+// an anonymous hold fails closed until the guest-relation gate is reviewed. This
+// callable is not wired to any client yet.
+exports.holdAppointment = onCall({
+  ...bookingCallableOptions, enforceAppCheck: true, maxInstances: 1, timeoutSeconds: 30, memory: '256MiB',
+}, createSchedulerHoldHandler({
+  holds: createSqlSchedulerHolds({
+    availability: createSqlSchedulerAvailability({ store: sqlSchedulerAvailabilityStore(schedulerDc()) }),
+    claims: createSqlSchedulerClaims({ store: sqlSchedulerClaimStore(schedulerDc()) }),
+  }),
+  resolveDoctor: schedulerDoctorIdentity,
+}));
+
 const slotBusyRanges = async (doctorId, dateKey) => {
   const snapshot = await db.collection('appointmentSlots').where('doctorId', '==', doctorId).where('dateKey', '==', dateKey).get();
   return snapshot.docs.map((item) => item.data()).filter((item) => ['booked', 'blocked', 'held'].includes(item.status))
@@ -586,13 +645,14 @@ const externalBusyRanges = async ({ doctorId, dateKey }) => {
 };
 
 const availabilityContext = async ({ doctorId, dateKey, visitTypeId }) => {
+  const reads = bookingReads();
   const [doctor, legacySchedule, scheduleSnapshot, exceptionSnapshot, config] = await Promise.all([
-    sqlCatalogueService().availableDoctor(doctorId),
+    reads.doctor(doctorId),
     // Legacy embedded hours remain a scheduling source, never catalogue authority.
     db.collection('doctors').doc(doctorId).get(),
     db.collection('doctorSchedules').doc(doctorId).get(),
     db.collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`).get(),
-    bookingSettingsService().runtime(),
+    reads.config(),
   ]);
   const visitType = selectVisitType(config, visitTypeId);
   const [slots, external] = await Promise.all([slotBusyRanges(doctorId, dateKey), externalBusyRanges({ doctorId, dateKey })]);
@@ -611,7 +671,7 @@ const availabilityContext = async ({ doctorId, dateKey, visitTypeId }) => {
   };
 };
 
-exports.getAvailability = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+exports.getAvailability = onCall({ ...bookingCallableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
   const { doctorId, dateKey, visitTypeId } = request.data || {};
   if (!doctorId || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || ''))) throw publicError('invalid-argument', 'Choose a doctor and appointment date.');
   const context = await availabilityContext({ doctorId, dateKey, visitTypeId });
@@ -648,7 +708,7 @@ const deleteAppointmentFromGoogle = async ({ ref, appointment }) => {
   }
 };
 
-exports.createBooking = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+exports.createBooking = onCall({ ...bookingCallableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
   const { branchId, departmentId, doctorId, dateKey, time, visitTypeId, patient, reason, consentVersion, clientRequestId } = request.data || {};
   if (!branchId || !departmentId || !doctorId || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || '')) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(time || ''))) throw publicError('invalid-argument', 'Choose a valid appointment time.');
   if (!validClientRequestId(clientRequestId)) throw publicError('invalid-argument', 'Please refresh and try booking again.');
@@ -659,18 +719,36 @@ exports.createBooking = onCall({ ...callableOptions, timeoutSeconds: 30, memory:
   if (email && !isEmail(email)) throw publicError('invalid-argument', 'Enter a valid email address.');
   const phoneKey = toE164(phone);
   if (!phoneKey) throw publicError('invalid-argument', 'Enter a valid Indian phone number.');
+  const requestRef = db.collection('bookingRequests').doc(clientRequestId);
+  const slotRef = db.collection('appointmentSlots').doc(makeSlotId(doctorId, dateKey, time));
+  // A retry after a lost acknowledgement must return the original booking, not a
+  // "time is no longer available" refusal: the confirmed slot removes that time from
+  // `buildAvailability`, so this replay check has to run before the availability
+  // preflight (the transaction below still re-checks it atomically). Returned only to
+  // the caller who already knows the client request id it generated.
+  const replayed = await requestRef.get();
+  if (replayed.exists) {
+    return { appointmentId: replayed.get('appointmentId'), reference: replayed.get('reference'), status: replayed.get('status'), idempotent: true };
+  }
   await enforceBookingRateLimit(request);
   await assertPhoneBookingCapacity(phoneKey);
   const context = await availabilityContext({ doctorId, dateKey, visitTypeId });
   const appointmentSlots = buildAvailability({ doctorId, dateKey, weeklySessions: context.weeklySessions, exception: context.exception, durationMinutes: context.visitType.minutes, intervalMinutes: context.config.intervalMinutes, bufferBeforeMinutes: context.config.bufferBeforeMinutes, bufferAfterMinutes: context.config.bufferAfterMinutes, leadMinutes: context.config.leadMinutes, bookingWindowDays: context.config.bookingWindowDays, busyRanges: context.busyRanges });
   const requested = appointmentSlots.find((slot) => slot.time === time);
-  if (!requested) throw publicError('failed-precondition', 'That time is no longer available. Please choose another slot.');
-  await sqlCatalogueService().validateSelection({ branchId, departmentId, doctorId });
+  if (!requested) {
+    // A time removed from availability because someone else just booked it is a
+    // conflict, not a validation failure: the booking page recovers from
+    // `already-exists` by dropping the taken slot, which `failed-precondition` skips.
+    const taken = await slotRef.get();
+    if (taken.exists && taken.get('status') === 'booked') throw publicError('already-exists', 'That time has just been booked. Please choose another slot.');
+    throw publicError('failed-precondition', 'That time is no longer available. Please choose another slot.');
+  }
+  // Same catalogue check as `validateSelection`, on the doctor already resolved for
+  // this request, so one booking reads the catalogue once.
+  if (context.doctor.branchId !== branchId || !context.doctor.departmentIds.includes(departmentId)) throw publicError('failed-precondition', 'The selected clinic service is not available.');
 
-  const requestRef = db.collection('bookingRequests').doc(clientRequestId);
   const exceptionRef = db.collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`);
   const appointmentRef = db.collection('appointments').doc();
-  const slotRef = db.collection('appointmentSlots').doc(makeSlotId(doctorId, dateKey, time));
   const reference = appointmentReference();
   const role = roleFor(request.auth);
   let result;
@@ -681,7 +759,10 @@ exports.createBooking = onCall({ ...callableOptions, timeoutSeconds: 30, memory:
         result = { appointmentId: prior.get('appointmentId'), reference: prior.get('reference'), status: prior.get('status'), idempotent: true };
         return;
       }
-      if (slot.exists) throw publicError('already-exists', 'That time has just been booked. Please choose another slot.');
+      if (slot.exists) {
+        if (slot.get('status') === 'booked') throw publicError('already-exists', 'That time has just been booked. Please choose another slot.');
+        throw publicError('failed-precondition', 'That time is no longer available. Please choose another slot.');
+      }
       if (currentException.exists && currentException.get('type') === 'closed') throw publicError('failed-precondition', 'This clinic day has just been closed. Please choose another time.');
       const status = context.config.autoConfirm ? 'confirmed' : 'scheduled';
       const createdBy = request.auth ? { uid: request.auth.uid, role } : { uid: null, role: 'public' };
@@ -764,7 +845,9 @@ exports.setVideoConsultationAccess = onCall({ ...callableOptions, timeoutSeconds
 
 // All appointment lifecycle changes happen on the trusted server. Browser clients
 // may read appointments, but Firestore rules intentionally deny direct writes.
-exports.transitionAppointment = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+// The invoker stays public like every other callable in this project: the Cloud Run
+// binding is not an authorization layer, and `requireLiveStaff` below is.
+exports.transitionAppointment = onCall({ ...callableOptions, invoker: 'public', timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
   const user = await requireLiveStaff(admin.auth(), request);
   const role = user.customClaims.role;
   const { appointmentId, to, reason } = request.data || {};
@@ -779,6 +862,11 @@ exports.transitionAppointment = onCall({ ...callableOptions, timeoutSeconds: 30,
     const appointment = snapshot.data();
     if (role === 'doctor' && appointment.doctorId !== request.auth.token.doctorId) throw publicError('permission-denied', 'You can only update your own appointments.');
     if (!canTransition(appointment.status, to, role)) throw publicError('failed-precondition', 'That appointment change is not allowed.');
+    // The transition table alone would let a manager mark a future appointment as
+    // a no-show, or check in a patient on the wrong day. Both are time conditions
+    // in the target design and are enforced here, not only in the UI.
+    if (to === 'no_show' && !canMarkNoShow({ appointment, graceMinutes: NO_SHOW_GRACE_MINUTES })) throw publicError('failed-precondition', `A no-show can only be recorded ${NO_SHOW_GRACE_MINUTES} minutes after the appointment start time.`);
+    if (to === 'checked_in' && appointment.dateKey !== istDateKey()) throw publicError('failed-precondition', 'Check-in is only available on the appointment day.');
     const now = FieldValue.serverTimestamp();
     const update = { status: to, updatedAt: now };
     if (to === 'cancelled') update.cancellation = { byUid: request.auth.uid, byRole: role, reason: cancellationReason, at: now };
@@ -797,12 +885,12 @@ exports.transitionAppointment = onCall({ ...callableOptions, timeoutSeconds: 30,
 
 // Patients can release their own future slot before the configured cutoff. The
 // appointment, slot release, event, and audit record are one transaction.
-exports.cancelPatientAppointment = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+exports.cancelPatientAppointment = onCall({ ...bookingCallableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
   if (!request.auth || isStaffRole(request.auth.token.role)) throw publicError('permission-denied', 'Sign in to cancel your appointment.');
   const appointmentId = trimmed(request.data?.appointmentId, 200);
   if (!/^[A-Za-z0-9_-]{1,200}$/.test(appointmentId)) throw publicError('invalid-argument', 'Invalid appointment.');
   const reason = trimmed(request.data?.reason, 300) || 'Cancelled by patient';
-  const config = await bookingSettingsService().runtime();
+  const config = await bookingReads().config();
   const ref = db.collection('appointments').doc(appointmentId);
   let cancelledAppointment;
   await db.runTransaction(async (transaction) => {
@@ -824,14 +912,14 @@ exports.cancelPatientAppointment = onCall({ ...callableOptions, timeoutSeconds: 
 
 // Patients may move an eligible future appointment, but all availability and
 // slot ownership decisions remain on the trusted server.
-exports.reschedulePatientAppointment = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+exports.reschedulePatientAppointment = onCall({ ...bookingCallableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
   if (!request.auth || isStaffRole(request.auth.token.role)) throw publicError('permission-denied', 'Sign in to reschedule your appointment.');
   const appointmentId = trimmed(request.data?.appointmentId, 200);
   const dateKey = trimmed(request.data?.dateKey, 10);
   const time = trimmed(request.data?.time, 5);
   if (!/^[A-Za-z0-9_-]{1,200}$/.test(appointmentId) || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw publicError('invalid-argument', 'Choose a valid new appointment time.');
 
-  const config = await bookingSettingsService().runtime();
+  const config = await bookingReads().config();
   const ref = db.collection('appointments').doc(appointmentId);
   const initial = await ref.get();
   if (!initial.exists) throw publicError('not-found', 'Appointment not found.');
@@ -870,6 +958,64 @@ exports.reschedulePatientAppointment = onCall({ ...callableOptions, timeoutSecon
         const { accessToken, calendarId } = await calendarAccess(connection);
         await updateEventTime({ accessToken, calendarId, eventId: appointment.externalCalendar.eventId, startsAt: asDate(appointment.startsAt).toISOString(), endsAt: asDate(appointment.endsAt).toISOString() });
         await ref.set({ externalCalendar: { ...appointment.externalCalendar, syncStatus: 'synced', lastSyncedAt: FieldValue.serverTimestamp() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      }
+    }
+  } catch (_error) {
+    await ref.set({ externalCalendar: { provider: 'google', syncStatus: 'pending', lastSyncError: 'Calendar event could not be updated.' }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  }
+  return { ok: true, ...result };
+});
+
+// Staff rescheduling moves an upcoming appointment to a free time on the same
+// doctor's schedule. The old slot is released and the new one reserved in the
+// same transaction, so a reschedule can never free a slot without taking one.
+exports.rescheduleAppointment = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
+  const user = await requireLiveStaff(admin.auth(), request);
+  const role = user.customClaims.role;
+  const appointmentId = trimmed(request.data?.appointmentId, 200);
+  const dateKey = trimmed(request.data?.dateKey, 10);
+  const time = trimmed(request.data?.time, 5);
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(appointmentId) || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw publicError('invalid-argument', 'Choose a valid new appointment time.');
+  const ref = db.collection('appointments').doc(appointmentId);
+  const initial = await ref.get();
+  if (!initial.exists) throw publicError('not-found', 'Appointment not found.');
+  const appointment = initial.data();
+  if (role === 'doctor' && appointment.doctorId !== request.auth.token.doctorId) throw publicError('permission-denied', 'You can only reschedule your own appointments.');
+  if (!canStaffReschedule({ appointment, role, actorDoctorId: request.auth.token.doctorId })) throw publicError('failed-precondition', 'Only an upcoming appointment can be rescheduled.');
+  const context = await availabilityContext({ doctorId: appointment.doctorId, dateKey, visitTypeId: appointment.visitType });
+  const availableSlots = buildAvailability({ doctorId: appointment.doctorId, dateKey, weeklySessions: context.weeklySessions, exception: context.exception, durationMinutes: context.visitType.minutes, intervalMinutes: context.config.intervalMinutes, bufferBeforeMinutes: context.config.bufferBeforeMinutes, bufferAfterMinutes: context.config.bufferAfterMinutes, leadMinutes: context.config.leadMinutes, bookingWindowDays: context.config.bookingWindowDays, busyRanges: context.busyRanges });
+  const requested = availableSlots.find((slot) => slot.time === time);
+  if (!requested) throw publicError('failed-precondition', 'That time is no longer available. Please choose another slot.');
+  const newSlotRef = db.collection('appointmentSlots').doc(makeSlotId(appointment.doctorId, dateKey, time));
+  let result;
+  await db.runTransaction(async (transaction) => {
+    const [snapshot, newSlot] = await Promise.all([transaction.get(ref), transaction.get(newSlotRef)]);
+    if (!snapshot.exists) throw publicError('not-found', 'Appointment not found.');
+    const current = snapshot.data();
+    if (role === 'doctor' && current.doctorId !== request.auth.token.doctorId) throw publicError('permission-denied', 'You can only reschedule your own appointments.');
+    if (!canStaffReschedule({ appointment: current, role, actorDoctorId: request.auth.token.doctorId })) throw publicError('failed-precondition', 'Only an upcoming appointment can be rescheduled.');
+    const existingSlotIds = Array.isArray(current.slotIds) && current.slotIds.length ? current.slotIds : (current.slotId ? [current.slotId] : []);
+    if (existingSlotIds.includes(newSlotRef.id)) throw publicError('failed-precondition', 'Choose a different appointment time.');
+    if (newSlot.exists) throw publicError('already-exists', 'That time has just been booked. Please choose another slot.');
+    const now = FieldValue.serverTimestamp();
+    existingSlotIds.forEach((slotId) => transaction.delete(db.collection('appointmentSlots').doc(slotId)));
+    transaction.set(newSlotRef, { doctorId: current.doctorId, dateKey, startsAt: Timestamp.fromDate(requested.startsAt), endsAt: Timestamp.fromDate(requested.endsAt), appointmentId: ref.id, status: 'booked', createdAt: now });
+    transaction.update(ref, { dateKey, startsAt: Timestamp.fromDate(requested.startsAt), endsAt: Timestamp.fromDate(requested.endsAt), slotIds: [newSlotRef.id], updatedAt: now, externalCalendar: { ...(current.externalCalendar || {}), syncStatus: current.externalCalendar?.eventId ? 'pending' : 'not_connected' } });
+    transaction.set(ref.collection('events').doc(), { from: current.status, to: current.status, byUid: request.auth.uid, byRole: role, at: now, meta: { action: 'rescheduled', fromDateKey: current.dateKey, toDateKey: dateKey, toTime: time } });
+    transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: request.auth.uid, role }, action: 'appointment_rescheduled', resource: { type: 'appointment', id: ref.id }, meta: { fromDateKey: current.dateKey, toDateKey: dateKey, byStaff: true } });
+    result = { appointmentId: ref.id, dateKey, time, status: current.status };
+  });
+
+  // The Google Calendar event is a mirror of the clinic record; a transient
+  // provider failure must not roll back the slot that was just reserved.
+  try {
+    const saved = (await ref.get()).data();
+    if (saved.externalCalendar?.eventId) {
+      const connection = await calendarConnection(saved.doctorId);
+      if (connection) {
+        const { accessToken, calendarId } = await calendarAccess(connection);
+        await updateEventTime({ accessToken, calendarId, eventId: saved.externalCalendar.eventId, startsAt: asDate(saved.startsAt).toISOString(), endsAt: asDate(saved.endsAt).toISOString() });
+        await ref.set({ externalCalendar: { ...saved.externalCalendar, syncStatus: 'synced', lastSyncedAt: FieldValue.serverTimestamp() }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
       }
     }
   } catch (_error) {

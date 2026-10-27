@@ -1,6 +1,9 @@
 # Dependencies and generated application output
 **/node_modules/
 Frontend/.vite/
+# Built hosting payload. `npm run build` (or the deploy step) regenerates it; hashes
+# change every build, so committing it only produces churn.
+Frontend/dist/
 
 # Local development data and logs
 .mongodb/

@@ -9,6 +9,41 @@ permissions:
   contents: read
 
 jobs:
+  # The 2026-10-25 incident: a Functions release shipped code that needed a SQL
+  # connector operation which was never released, and /book went down. This job runs
+  # the booking + reschedule callable suites against the *source* schema/connectors,
+  # so a Functions change that depends on unreleased SQL fails before it can merge.
+  # It does not compare the deployed connector; that stays a manual preflight
+  # (`npx firebase-tools dataconnect:services:list`, see AI_STATE.md).
+  booking-sql:
+    name: Booking callables against the SQL source
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install root tooling
+        run: npm ci
+
+      - name: Install Functions dependencies
+        run: npm --prefix functions ci
+
+      - name: Booking and reschedule callables
+        run: npm run test:booking
+
   verify:
     name: Lint, test and build
     runs-on: ubuntu-latest

@@ -31,8 +31,35 @@ const overlaps = (start, end, busyStart, busyEnd) => start < busyEnd && end > bu
 const makeSlotId = (doctorId, dateKey, time) => `${doctorId}_${dateKey.replaceAll('-', '')}_${time.replace(':', '')}`;
 
 /**
- * Produces bookable, half-open IST intervals. All caller-supplied busy values are
- * absolute instants; weekly sessions and exceptions deliberately remain local IST.
+ * P0-02 pure availability engine for the clinic booking callable.
+ *
+ * Turns recurring weekly sessions, one per-date exception (`closed | extra |
+ * replace`), the visit duration/interval and lead/buffer windows into an ordered
+ * list of bookable slots, then removes anything outside the booking window, anything
+ * in the past for the given `now`, and anything covered by a busy range (booked/
+ * blocked/held Firestore slot locks or external calendar busy periods).
+ *
+ * All caller-supplied busy values are absolute instants; weekly sessions and
+ * exceptions remain local IST wall-clock values.
+ *
+ * Contract:
+ *  - Returns slots only within [today, today + bookingWindowDays] in IST.
+ *  - `closed` returns no slots for that date.
+ *  - `replace` ignores recurring sessions for that date.
+ *  - `extra` keeps recurring sessions and adds the exception sessions.
+ *  - Overlapping sessions are merged implicitly by the per-session slot loop.
+ *  - Slot times are the engine's canonical `timeFor(minutes)` values, so the slot
+ *    id from `makeSlotId(doctorId, dateKey, time)` and the `{time}` returned to
+ *    callers are identical.
+ *  - `now` is the engine's IST-aware wall clock for lead-time and future-only slot
+ *    filtering; pass a fixed value when testing IST boundary cases.
+ *  - Slot generation uses half-open IST intervals: a slot with `startsAt` exactly at
+ *    the end of a session is never produced because the loop enforces
+ *    `cursor + durationMinutes <= sessionEnd`.
+ *  - Busy ranges are normalized to finite start/end pairs before overlap checks so
+ *    malformed busy locks cannot remove every slot on a day.
+ *  - Buffer windows are applied around each slot before overlap checks, so a booked
+ *    slot removes surrounding buffer space as well as the booked interval.
  */
 const buildAvailability = ({
   doctorId,
@@ -56,14 +83,19 @@ const buildAvailability = ({
   const lastBookableDate = addIstDays(today, bookingWindowDays);
   if (dateKey < today || dateKey > lastBookableDate) return [];
   const unavailableRanges = busyRanges
-    .map((range) => ({ start: new Date(range.startsAt).getTime(), end: new Date(range.endsAt).getTime() }))
-    .filter((range) => Number.isFinite(range.start) && Number.isFinite(range.end) && range.start < range.end);
+    .map((range) => {
+      const start = new Date(range.startsAt).getTime();
+      const end = new Date(range.endsAt).getTime();
+      return Number.isFinite(start) && Number.isFinite(end) && start < end ? { start, end } : null;
+    })
+    .filter(Boolean);
   const leadBoundary = now.getTime() + leadMinutes * 60 * 1000;
 
   return windowsForDate({ dateKey, weeklySessions, exception }).flatMap(({ start, end }) => {
     const result = [];
     const sessionStart = minutesFor(start);
     const sessionEnd = minutesFor(end);
+    if (!Number.isFinite(sessionStart) || !Number.isFinite(sessionEnd) || sessionStart >= sessionEnd) return result;
     for (let cursor = sessionStart; cursor + durationMinutes <= sessionEnd; cursor += intervalMinutes) {
       const startTime = timeFor(cursor);
       const startsAt = istInstant(dateKey, startTime);

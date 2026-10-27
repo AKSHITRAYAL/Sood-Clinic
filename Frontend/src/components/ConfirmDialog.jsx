@@ -3,9 +3,11 @@ import PropTypes from 'prop-types';
 
 const focusableSelector = 'button:not([disabled]), textarea:not([disabled]), [href], input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-const ConfirmDialog = ({ open, title, message, confirmLabel, requireReason, onConfirm, onCancel }) => {
+const ConfirmDialog = ({ open, title, message, confirmLabel, requireReason = false, onConfirm, onCancel }) => {
   const dialogRef = useRef(null);
   const openerRef = useRef(null);
+  const cancelRef = useRef(onCancel);
+  cancelRef.current = onCancel;
   const [reason, setReason] = useState('');
   const titleId = useId();
   const reasonIsValid = !requireReason || reason.trim().length >= 3;
@@ -18,7 +20,7 @@ const ConfirmDialog = ({ open, title, message, confirmLabel, requireReason, onCo
       dialogRef.current?.querySelector(requireReason ? 'textarea' : 'button:not([disabled])')?.focus();
     }, 0);
     const onKeyDown = (event) => {
-      if (event.key === 'Escape') { event.preventDefault(); onCancel(); return; }
+      if (event.key === 'Escape') { event.preventDefault(); cancelRef.current(); return; }
       if (event.key !== 'Tab') return;
       const items = [...(dialogRef.current?.querySelectorAll(focusableSelector) || [])];
       if (!items.length) return;
@@ -28,7 +30,7 @@ const ConfirmDialog = ({ open, title, message, confirmLabel, requireReason, onCo
     };
     document.addEventListener('keydown', onKeyDown);
     return () => { window.clearTimeout(focusTimer); document.removeEventListener('keydown', onKeyDown); openerRef.current?.focus?.(); };
-  }, [open, requireReason, onCancel]);
+  }, [open, requireReason]);
 
   if (!open) return null;
   const submit = () => { if (reasonIsValid) onConfirm(reason.trim()); };
@@ -53,5 +55,4 @@ ConfirmDialog.propTypes = {
   onCancel: PropTypes.func.isRequired,
 };
 
-ConfirmDialog.defaultProps = { requireReason: false };
 export default ConfirmDialog;

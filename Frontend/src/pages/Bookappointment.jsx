@@ -12,10 +12,14 @@ const createBooking = httpsCallable(functions, 'createBooking');
 
 const labelDate = (date) => date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short' });
 const requestId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+const errorCode = (error) => String(error?.code || '').replace('functions/', '');
 const friendlyError = (error) => {
-  const code = String(error?.code || '').replace('functions/', '');
+  const code = errorCode(error);
   if (code === 'already-exists') return 'That time has just been booked. Please choose another slot.';
   if (code === 'failed-precondition') return error.message || 'That time is no longer available. Please choose another slot.';
+  // Per-phone cap and IP throttle arrive as resource-exhausted; the server copy
+  // already names the next step, so only a stripped message needs a fallback.
+  if (code === 'resource-exhausted') return error?.message || 'You have reached the online booking limit. Please call the clinic to book.';
   if (code === 'unavailable') return 'Booking is temporarily unavailable. Please call the clinic or try again shortly.';
   return error?.message || 'We could not complete your booking. Please try again.';
 };
@@ -119,6 +123,14 @@ const Bookappointment = () => {
       setSlots((current) => current.filter((slot) => slot.slotId !== selectedSlot.slotId));
     } catch (error) {
       setMessage(friendlyError(error));
+      // The patient entered their details for one specific time. If that exact time
+      // was taken mid-booking, a dead slot must not stay clickable; other reasons
+      // (e.g. the day just closed) are explained by the message and reload on a
+      // new date.
+      if (errorCode(error) === 'already-exists') {
+        setSlots((current) => current.filter((slot) => slot.slotId !== selectedSlot?.slotId));
+        setSelectedSlot(null);
+      }
       setStep('schedule');
     } finally {
       setSaving(false);

@@ -16,6 +16,11 @@ export const reschedulePatientAppointment = async (appointmentId, dateKey, time)
   return invoke({ appointmentId, dateKey, time });
 };
 
+export const rescheduleStaffAppointment = async (appointmentId, dateKey, time) => {
+  const invoke = httpsCallable(functions, 'rescheduleAppointment');
+  return invoke({ appointmentId, dateKey, time });
+};
+
 export const closeDay = async ({ doctorId, dateKey, mode = 'preview', action = 'keep', reason = '' }) => {
   const invoke = httpsCallable(functions, 'closeDay');
   return invoke({ doctorId, dateKey, mode, action, reason });

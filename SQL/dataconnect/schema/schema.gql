@@ -454,6 +454,10 @@ type StaffAccessLock @table(name: "clinic_staff_access_locks", key: "id") {
 # the guest/source/identity/backup release gates. Never model one row per start
 # time — occupancy is one row per aligned five-minute unit.
 type AppointmentUnit @table(name: "clinic_appointment_units", key: "unitKey") @index(fields: ["doctorId", "unitAt"]) @index(fields: ["appointmentId"]) {
+  # Units use a deterministic appointment-level status. The driver keeps each
+  # unit key in `{status}` designer slots so a single `ClaimAppointmentUnits`
+  # request can write the booked, confirmed, in_progress, completed, cancelled
+  # and expired states without ever rewriting over a held unit.
   unitKey: String!
   doctor: Doctor!
   # Aligned to the five-minute grid (IST) by the handler, never client input.
@@ -480,6 +484,13 @@ type CalendarBlock @table(name: "clinic_calendar_blocks") @index(fields: ["docto
   updatedAt: Timestamp! @default(expr: "request.time")
 }
 
+# Local design: waiter list design doc pass. No test or connector change belongs
+# in this block.
+
+# Local design: STATUS is the only schema change in this block; the rest is a doc pass to make
+# concurrency, retry and rollback targets precise. No scheduler callable is
+# exported and no release gate is changed until the scheduler slice passes locally.
+
 # Server-only waitlist; contact is written by callables and never browser-readable.
 type WaitlistEntry @table(name: "clinic_waitlist_entries") @index(fields: ["doctorId", "status"]) {
   doctor: Doctor!
@@ -493,6 +504,9 @@ type WaitlistEntry @table(name: "clinic_waitlist_entries") @index(fields: ["doct
   createdAt: Timestamp! @default(expr: "request.time")
   updatedAt: Timestamp! @default(expr: "request.time")
 }
+
+# Local design: waiter list design doc pass. No test or connector change belongs
+# in this block.
 
 # Feed tokens are stored hashed; the URL is returned once and never persisted.
 type CalendarFeed @table(name: "clinic_calendar_feeds", key: "doctor") {
@@ -510,9 +524,19 @@ type DayTokenCounter @table(name: "clinic_day_token_counters", key: ["doctor", "
   updatedAt: Timestamp! @default(expr: "request.time")
 }
 
-# Booking intake answers; one bounded row per question, never free-form bulk JSON.
+# Booking intake answers; one bounded row per question, never free-form free JSON.
 type AppointmentIntake @table(name: "clinic_appointment_intake", key: ["appointment", "questionId"]) {
   appointment: Appointment!
   questionId: String!
   answer: String!          # <= 500 chars, validated by the callable
 }
+
+# Local design: waiter list design doc pass. No test or connector change belongs
+# in this block.
+
+# Local design: waiter list design doc pass. No test or connector change belongs
+# in this block.
+
+# Local design: waiter list design doc pass. No test or connector change belongs
+# in this block.
+
