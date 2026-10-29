@@ -266,20 +266,6 @@ function saveLinkedPatientProfile(dcOrVarsOrOptions, varsOrOptions, options) {
 }
 exports.saveLinkedPatientProfile = saveLinkedPatientProfile;
 
-function rehearseBranchCompareAndSet(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeMutation('RehearseBranchCompareAndSet', inputVars, inputOpts);
-}
-exports.rehearseBranchCompareAndSet = rehearseBranchCompareAndSet;
-
-function inspectBranchRehearsal(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeQuery('InspectBranchRehearsal', inputVars, inputOpts);
-}
-exports.inspectBranchRehearsal = inspectBranchRehearsal;
-
 function readDoctorUnitRange(dcOrVarsOrOptions, varsOrOptions, options) {
   const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
   dcInstance.useGen(true);

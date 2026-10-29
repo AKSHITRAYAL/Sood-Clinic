@@ -122,6 +122,26 @@ describe('Firestore default-deny boundary', () => {
     await assertSucceeds(getDoc(doc(manager, 'appointments', 'appointment-one')));
   });
 
+  it('keeps a guest appointment (null patientId) unreadable to visitors and other patients, but visible to staff', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'appointments', 'guest-one'), {
+        patientId: null, doctorId: 'doctor-a', status: 'scheduled',
+        patientSnapshot: { name: 'Guest One', phone: '+919000000001', email: 'guest@example.com' },
+      });
+    });
+    const anonymous = testEnv.unauthenticatedContext().firestore();
+    const patient = testEnv.authenticatedContext('patient-two', { email: 'patient-two@example.com' }).firestore();
+    const doctor = testEnv.authenticatedContext('doctor-one', { role: 'doctor', doctorId: 'doctor-a' }).firestore();
+    const manager = testEnv.authenticatedContext('manager-one', { role: 'manager', forcePasswordChange: false }).firestore();
+    const admin = testEnv.authenticatedContext('admin-one', { role: 'admin' }).firestore();
+
+    await assertFails(getDoc(doc(anonymous, 'appointments', 'guest-one')));
+    await assertFails(getDoc(doc(patient, 'appointments', 'guest-one')));
+    await assertSucceeds(getDoc(doc(doctor, 'appointments', 'guest-one')));
+    await assertSucceeds(getDoc(doc(manager, 'appointments', 'guest-one')));
+    await assertSucceeds(getDoc(doc(admin, 'appointments', 'guest-one')));
+  });
+
   it('never lets an administrator browser session write staff access records', async () => {
     const db = testEnv.authenticatedContext('admin-one', { role: 'admin', email: 'admin@example.com' }).firestore();
     await assertFails(setDoc(doc(db, 'staffProfiles', 'staff-one'), {

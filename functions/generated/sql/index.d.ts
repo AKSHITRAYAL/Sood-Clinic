@@ -599,34 +599,6 @@ export interface ImportPublicClinicContactVariables {
   timezone: string;
 }
 
-export interface InspectBranchRehearsalData {
-  branch?: {
-    name: string;
-    updatedAt: TimestampString;
-    code: string;
-    active: boolean;
-  };
-  legacySourceInstant?: {
-    sqlValue: TimestampString;
-    exactValue: string;
-    sourcePath: string;
-  };
-  operationReceipt?: {
-    operation: string;
-  };
-  auditLog?: {
-    action: string;
-    actorUid?: string | null;
-    actorRole: string;
-    resourceId: string;
-    resourceType: string;
-  };
-}
-
-export interface InspectBranchRehearsalVariables {
-  requestId: UUIDString;
-}
-
 export interface InspectStaffAccessChangeData {
   auditLog?: {
     id: UUIDString;
@@ -1350,24 +1322,6 @@ export interface ReadStaffPatientDemographicsVariables {
   patientId: UUIDString;
 }
 
-export interface RehearseBranchCompareAndSetData {
-  branch_updateMany: number;
-  legacySourceInstant_upsert: LegacySourceInstant_Key;
-  auditLog_insert: AuditLog_Key;
-  operationReceipt_insert: OperationReceipt_Key;
-}
-
-export interface RehearseBranchCompareAndSetVariables {
-  requestId: UUIDString;
-  expectedName: string;
-  expectedAt: TimestampString;
-  name: string;
-  updatedAt: TimestampString;
-  exactValue: string;
-  operation: string;
-  action: string;
-}
-
 export interface ReleaseAppointmentUnitsData {
   user_updateMany: number;
   appointmentUnit_deleteMany: number;
@@ -2007,16 +1961,6 @@ export function getPatientProfileReceipt(vars: GetPatientProfileReceiptVariables
 export function saveLinkedPatientProfile(dc: DataConnect, vars: SaveLinkedPatientProfileVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<SaveLinkedPatientProfileData>>;
 /** Generated Node Admin SDK operation action function for the 'SaveLinkedPatientProfile' Mutation. Allow users to pass in custom DataConnect instances. */
 export function saveLinkedPatientProfile(vars: SaveLinkedPatientProfileVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<SaveLinkedPatientProfileData>>;
-
-/** Generated Node Admin SDK operation action function for the 'RehearseBranchCompareAndSet' Mutation. Allow users to execute without passing in DataConnect. */
-export function rehearseBranchCompareAndSet(dc: DataConnect, vars: RehearseBranchCompareAndSetVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<RehearseBranchCompareAndSetData>>;
-/** Generated Node Admin SDK operation action function for the 'RehearseBranchCompareAndSet' Mutation. Allow users to pass in custom DataConnect instances. */
-export function rehearseBranchCompareAndSet(vars: RehearseBranchCompareAndSetVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<RehearseBranchCompareAndSetData>>;
-
-/** Generated Node Admin SDK operation action function for the 'InspectBranchRehearsal' Query. Allow users to execute without passing in DataConnect. */
-export function inspectBranchRehearsal(dc: DataConnect, vars: InspectBranchRehearsalVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<InspectBranchRehearsalData>>;
-/** Generated Node Admin SDK operation action function for the 'InspectBranchRehearsal' Query. Allow users to pass in custom DataConnect instances. */
-export function inspectBranchRehearsal(vars: InspectBranchRehearsalVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<InspectBranchRehearsalData>>;
 
 /** Generated Node Admin SDK operation action function for the 'ReadDoctorUnitRange' Query. Allow users to execute without passing in DataConnect. */
 export function readDoctorUnitRange(dc: DataConnect, vars: ReadDoctorUnitRangeVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<ReadDoctorUnitRangeData>>;

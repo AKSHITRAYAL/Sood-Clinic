@@ -1,4 +1,5 @@
-# LOCAL SYNTHETIC REHEARSAL ONLY. Undeployed; exclude from any production release.
+# LOCAL SYNTHETIC REHEARSAL ONLY. This connector (clinic-rehearsal) is excluded from
+# the release deploy set in SQL/release/plan.json and is never part of clinic-admin.
 # The only caller also requires demo-sood-clinic and the exact loopback emulator.
 mutation RehearseBranchCompareAndSet(
   $requestId: UUID!, $expectedName: String!, $expectedAt: Timestamp!,

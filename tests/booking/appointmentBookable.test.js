@@ -6,7 +6,7 @@
 // Outside the emulators every case is skipped, so a bare `vitest run` stays green.
 import { createRequire } from 'node:module';
 import { initializeApp } from 'firebase/app';
-import { connectAuthEmulator, getAuth, signInWithEmailAndPassword } from 'firebase/auth';
+import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -79,6 +79,13 @@ const signInStaff = async (uid, claims) => {
   await config.authAdmin.createUser({ uid, email: `${uid}@synthetic.test`, password: PASSWORD });
   createdUsers.push(uid);
   await config.authAdmin.setCustomUserClaims(uid, claims);
+  await signInWithEmailAndPassword(config.auth, `${uid}@synthetic.test`, PASSWORD);
+};
+
+const signInPatient = async (uid) => {
+  await config.authAdmin.createUser({ uid, email: `${uid}@synthetic.test`, password: PASSWORD });
+  createdUsers.push(uid);
+  await config.authAdmin.setCustomUserClaims(uid, { role: 'patient' });
   await signInWithEmailAndPassword(config.auth, `${uid}@synthetic.test`, PASSWORD);
 };
 
@@ -297,6 +304,48 @@ suite('createBooking', () => {
     await expect(createBooking(submission({ time: '09:00' }))).rejects.toMatchObject({ code: 'functions/resource-exhausted' });
     expect(await appointmentCount()).toBe(0);
   }, 180_000);
+  it('links an authenticated patient booking to that patient and never to the guest path', async () => {
+    await signInPatient('patient-booker');
+    const payload = submission({ time: '10:20' });
+    const { data } = await createBooking(payload);
+
+    const appointment = (await db.collection('appointments').doc(data.appointmentId).get()).data();
+    expect(appointment).toMatchObject({
+      patientId: 'patient-booker',
+      source: 'patient_portal',
+      phoneKey: payload.patient.phone,
+      createdBy: { uid: 'patient-booker', role: 'patient' },
+      consent: { actor: 'authenticated_patient' },
+    });
+    const audit = (await db.collection('auditLogs').where('action', '==', 'appointment_created').get()).docs[0].data();
+    expect(audit.meta).toMatchObject({ source: 'patient_portal', guest: false, contact: 'patient_account' });
+  }, 120_000);
+
+  it('labels a guest booking as a guest in consent and in the audit row', async () => {
+    await signOut(config.auth);
+    const { data } = await createBooking(submission({ time: '11:00' }));
+
+    const appointment = (await db.collection('appointments').doc(data.appointmentId).get()).data();
+    expect(appointment).toMatchObject({
+      patientId: null,
+      source: 'web',
+      createdBy: { uid: null, role: 'public' },
+      consent: { version: 'booking-v1', actor: 'guest' },
+    });
+    const audit = (await db.collection('auditLogs').where('action', '==', 'appointment_created').get()).docs[0].data();
+    expect(audit.meta).toMatchObject({ source: 'web', guest: true, contact: 'phone_and_email' });
+  }, 90_000);
+
+  it('classifies a guest who gave only a phone number as a phone contact', async () => {
+    await signOut(config.auth);
+    const phoneOnly = submission({ time: '11:20' });
+    phoneOnly.patient = { ...phoneOnly.patient, email: '' };
+    const { data } = await createBooking(phoneOnly);
+
+    expect((await db.collection('appointments').doc(data.appointmentId).get()).get('patientSnapshot.email')).toBeNull();
+    const audit = (await db.collection('auditLogs').where('action', '==', 'appointment_created').get()).docs[0].data();
+    expect(audit.meta).toMatchObject({ guest: true, contact: 'phone' });
+  }, 90_000);
 });
 
 // The reschedule success path needs the same catalogue/settings rows, so it runs in

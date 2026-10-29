@@ -81,11 +81,12 @@ Never commit service-account keys, Firebase CLI credentials, or `.env` files.
 - The local SQL schema is ahead of the deployed one. The catalogue, patient, schedule,
   appointment and scheduler-hold additions are local-only until the guest-relation
   DDL/API review, a verified backup, and a real import path exist.
+- Guest booking is enabled on the Firestore booking path only: `createBooking` requires a
+  validated name plus phone or email, keeps `appointments.patientId` null, and records
+  consent, per-caller throttling, idempotency and an audit row. No SQL guest write
+  operation exists, and this does not clear `GUEST_RELATION_RELEASE_REVIEW_REQUIRED`.
 - `Appointment.patient` is nullable locally but not in production, so the SQL migration is
   **not** purely additive. Do not apply it under an additive-only rule.
-- No App Check site key is configured (`VITE_RECAPTCHA_SITE_KEY` is unset), so the deployed
-  site sends no App Check tokens and every `enforceAppCheck: true` callable returns 401 from
-  the browser.
 - A newly created callable needs `roles/run.invoker` for `allUsers`. The CLI honours
   `invoker: 'public'` when it creates a service but ignores it on update, so re-check the
   binding after any redeploy that recreates a service.

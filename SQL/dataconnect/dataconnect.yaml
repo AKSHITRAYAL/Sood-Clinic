@@ -12,3 +12,6 @@ schema:
 connectorDirs:
   - ./clinic
   - ./admin
+  # Local synthetic rehearsal only. The emulator serves it for SQL/migration rehearsal
+  # tests; SQL/release/plan.json excludes it from every deploy.
+  - ./rehearsal

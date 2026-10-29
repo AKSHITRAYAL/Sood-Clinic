@@ -1,0 +1,25 @@
+{
+  "unconfirmed": [
+    "clinicSettings.bookingWindowDays",
+    "clinicSettings.leadMinutes",
+    "clinicSettings.intervalMinutes",
+    "clinicSettings.bufferBeforeMinutes",
+    "clinicSettings.bufferAfterMinutes",
+    "clinicSettings.cancelCutoffMinutes",
+    "clinicSettings.autoConfirm",
+    "services[0].legacyId",
+    "services[0].legacySortOrder"
+  ],
+  "clinicSettings": {
+    "bookingWindowDays": 14,
+    "leadMinutes": 30,
+    "intervalMinutes": 20,
+    "bufferBeforeMinutes": 0,
+    "bufferAfterMinutes": 0,
+    "cancelCutoffMinutes": 120,
+    "autoConfirm": false
+  },
+  "services": [
+    { "code": "consultation", "legacyId": "consultation", "legacySortOrder": 0 }
+  ]
+}

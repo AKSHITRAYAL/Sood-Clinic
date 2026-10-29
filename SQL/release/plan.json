@@ -1,0 +1,19 @@
+{
+  "service": "ak-sood-clinic-service",
+  "location": "asia-south1",
+  "deployableConnectors": ["clinic", "admin"],
+  "excludedConnectors": {
+    "rehearsal": "LOCAL_SYNTHETIC_REHEARSAL: emulator-only migration rehearsal operations, never deployed"
+  },
+  "guestRelation": {
+    "status": "approved",
+    "approvedOn": "2026-10-30",
+    "approvedBy": "owner",
+    "guestsAllowed": true,
+    "appointmentPatientNullable": true,
+    "guestDataInPrivateDetails": true,
+    "publicSqlAppointmentWriterReleased": false,
+    "productionSchemaTransitionReviewed": false,
+    "note": "Owner confirmed 2026-10-30: guest appointments are allowed and SQL Appointment.patient stays nullable. Guest bookings keep their details in private patient details and never in a public projection; no public SQL appointment writer is released (Firestore createBooking remains the only live booking path). The production NOT NULL -> nullable transition is NOT yet reviewed for apply, and nothing is applied by this record."
+  }
+}

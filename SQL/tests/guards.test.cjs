@@ -41,6 +41,23 @@ test('fixture guard refuses absent emulator, cloud hosts and production project'
   }
 });
 
+test('booking-config seeder reports unconfirmed values and keeps the template unappliable', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { readManifest } = require('../scripts/seed-booking-config.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clinic-manifest-'));
+  const file = path.join(dir, 'confirmed.json');
+  const settings = { bookingWindowDays: 14, leadMinutes: 30, intervalMinutes: 20, bufferBeforeMinutes: 0, bufferAfterMinutes: 0, cancelCutoffMinutes: 120, autoConfirm: false };
+  try {
+    fs.writeFileSync(file, JSON.stringify({ clinicSettings: settings, services: [] }));
+    assert.deepEqual(readManifest(file).unconfirmed, []);
+    assert.throws(() => { fs.writeFileSync(file, JSON.stringify({ clinicSettings: settings, services: [], unconfirmed: [7] })); readManifest(file); }, /INVALID_MANIFEST/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  // The checked-in template must never be apply-ready by accident.
+  assert.ok(readManifest(path.resolve(__dirname, '../release/booking-config.template.json')).unconfirmed.length >= 8);
+});
+
 test('local target capture rejects invalid encryption keys before connecting to SQL', async () => {
   const keys = ['DATA_CONNECT_EMULATOR_HOST', 'GCLOUD_PROJECT', 'FIREBASE_DATACONNECT_POSTGRESQL_STRING'];
   const original = { ...process.env };

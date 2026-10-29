@@ -1,13 +1,25 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const Module = require('node:module');
 const { localDataConnect } = require('./local.cjs');
 const { createHash } = require('node:crypto');
 const { encodeInstant } = require('../migration/instant-preservation.cjs');
 const { timestampNanos } = require('../migration/rehearsal.cjs');
-const { rehearseBranchCompareAndSet, inspectBranchRehearsal } = require('../../functions/generated/sql');
+// The rehearsal operations live in the local-only clinic-rehearsal connector, never in
+// the deployable clinic-admin SDK. The generated SDK is written outside functions/, so
+// bind its firebase-admin import to the functions dependency tree rather than adding a
+// second copy or a node_modules symlink.
+const sdkPath = path.resolve(__dirname, '../generated/rehearsal/index.cjs.js');
+const sdk = new Module(sdkPath, module);
+sdk.filename = sdkPath;
+sdk.require = Module.createRequire(path.resolve(__dirname, '../../functions/package.json'));
+sdk._compile(fs.readFileSync(sdkPath, 'utf8'), sdkPath);
+const { rehearseBranchCompareAndSet, inspectBranchRehearsal } = sdk.exports;
 const branchId = '00000000-0000-4000-8000-000000009001';
 
 async function rehearseBranchStep(input) {
   // This driver must never become a production importer or accept arbitrary row IDs.
-  const dc = localDataConnect();
+  const dc = localDataConnect('clinic-rehearsal');
   if (process.env.FIREBASE_DATACONNECT_POSTGRESQL_STRING) throw new Error('REHEARSAL_ENVIRONMENT_REJECTED');
   let variables;
   try {

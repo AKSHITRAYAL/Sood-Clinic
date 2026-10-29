@@ -751,6 +751,9 @@ exports.createBooking = onCall({ ...bookingCallableOptions, timeoutSeconds: 30, 
   const appointmentRef = db.collection('appointments').doc();
   const reference = appointmentReference();
   const role = roleFor(request.auth);
+  // Guest vs patient account decides the consent label and the audit classification.
+  const guest = !request.auth;
+  const contact = guest ? (email ? 'phone_and_email' : 'phone') : 'patient_account';
   let result;
   try {
     await db.runTransaction(async (transaction) => {
@@ -772,11 +775,11 @@ exports.createBooking = onCall({ ...bookingCallableOptions, timeoutSeconds: 30, 
         startsAt: Timestamp.fromDate(requested.startsAt), endsAt: Timestamp.fromDate(requested.endsAt),
         status, source: request.auth ? 'patient_portal' : 'web', patientId: request.auth?.uid || null,
         patientSnapshot: { name, phone, email: email || null }, phoneKey, reason: trimmed(reason, 500) || null, slotIds: [slotRef.id],
-        consent: { version: trimmed(consentVersion, 40) || 'booking-v1', acceptedAt: FieldValue.serverTimestamp() },
+        consent: { version: trimmed(consentVersion, 40) || 'booking-v1', actor: guest ? 'guest' : 'authenticated_patient', acceptedAt: FieldValue.serverTimestamp() },
         createdBy, externalCalendar: { provider: 'google', syncStatus: 'not_connected' }, videoConsultation: context.visitType.mode === 'video' ? { status: 'awaiting_link' } : null, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
       });
       transaction.set(appointmentRef.collection('events').doc(), { from: null, to: status, byUid: createdBy.uid, byRole: createdBy.role, at: FieldValue.serverTimestamp(), meta: { source: request.auth ? 'patient_portal' : 'web' } });
-      transaction.set(db.collection('auditLogs').doc(), { at: FieldValue.serverTimestamp(), actor: createdBy, action: 'appointment_created', resource: { type: 'appointment', id: appointmentRef.id }, meta: { source: request.auth ? 'patient_portal' : 'web', status } });
+      transaction.set(db.collection('auditLogs').doc(), { at: FieldValue.serverTimestamp(), actor: createdBy, action: 'appointment_created', resource: { type: 'appointment', id: appointmentRef.id }, meta: { source: request.auth ? 'patient_portal' : 'web', guest, contact, status } });
       transaction.set(requestRef, { appointmentId: appointmentRef.id, reference, status, createdAt: FieldValue.serverTimestamp() });
       result = { appointmentId: appointmentRef.id, reference, status, idempotent: false };
     });

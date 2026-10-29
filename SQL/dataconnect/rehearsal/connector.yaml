@@ -1,0 +1,8 @@
+connectorId: clinic-rehearsal
+# LOCAL SYNTHETIC REHEARSAL ONLY. This connector is served by the emulator for the
+# migration rehearsal tests and is never part of the release deploy set; see
+# SQL/release/plan.json (deployableConnectors) and SQL/scripts/release-check.cjs.
+generate:
+  adminNodeSdk:
+    outputDir: ../../generated/rehearsal
+    package: '@clinic/sql-rehearsal'
