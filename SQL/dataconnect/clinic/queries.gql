@@ -25,22 +25,9 @@ query GetPublicClinicContact @auth(level: PUBLIC, insecureReason: "Published cli
   clinicProfile(key: {id: "sood-clinic"}) { name phone email address timezone }
 }
 
-# Read-only public hours projection. It exposes published clinic hours only;
-# appointments, patient data, legacy notes and schedule provenance stay private.
-query GetPublicDoctorHours($doctorLegacyId: String!, $date: Date!, $weekday: Int!)
-@auth(level: PUBLIC, insecureReason: "Published doctor hours only; no patient, appointment or private schedule fields.") {
-  doctors(where: {legacyId: {eq: $doctorLegacyId}, active: {eq: true}, bookingEnabled: {eq: true}}, limit: 2) {
-    legacyId name branch { timezone }
-    state: doctorScheduleState_on_doctor { authority updatedAt }
-    weekly: doctorSchedules_on_doctor(where: {weekday: {eq: $weekday}}, limit: 4, orderBy: [{startMinute: ASC}, {id: ASC}]) {
-      startMinute endMinute
-    }
-    exceptions: scheduleExceptions_on_doctor(where: {date: {eq: $date}}, limit: 2) {
-      date kind
-      sessions: exceptionWindows_on_exception(limit: 4, orderBy: [{startMinute: ASC}, {id: ASC}]) { startMinute endMinute }
-    }
-  }
-}
+# The public doctor-hours projection is deferred with the schedule-state model and
+# the unmounted hours page; it is kept in
+# `SQL/dataconnect/deferred/connectors/clinic/public-hours.gql`.
 
 mutation SaveOwnSqlProfile($displayName: String!, $requestId: UUID!)
 @auth(expr: "auth != null && auth.uid != '' && 'email_verified' in auth.token && auth.token.email_verified == true && vars.displayName.size() >= 2 && vars.displayName.size() <= 160 && vars.displayName.matches('^\\\\S(?:[^\\\\r\\\\n]*\\\\S)?$') && (!('forcePasswordChange' in auth.token) || auth.token.forcePasswordChange != true)")

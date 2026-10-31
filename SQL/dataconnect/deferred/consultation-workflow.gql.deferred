@@ -1,0 +1,52 @@
+# DEFERRED — not compiled and not part of the reduced first release.
+#
+# The working consultation-request/proposal workflow runs on the live Firestore
+# booking path (functions/lib/consultationRequests.js). This is the future SQL
+# shape, kept beside the other deferred models so it can be migrated with the
+# scheduler, occupancy and clinical slices once the real source/census, guest
+# relation and scheduler release gates close. Do not add it to
+# `SQL/dataconnect/schema/` or `dataconnect.yaml` without the matching migration.
+type ConsultationRequest @table(name: "clinic_consultation_requests") @index(fields: ["status", "createdAt"]) {
+  legacyReference: String @unique
+  patient: Patient
+  accountUid: String @col(dataType: "varchar(128)")
+  doctor: Doctor!
+  service: Service!
+  mode: String!
+  locationId: String @col(dataType: "varchar(64)")
+  requestedDate: Date
+  requestedTime: String @col(dataType: "varchar(5)")
+  status: String!
+  serviceLabel: String!
+  durationMinutes: Int!
+  # Intake stays private; the public projection never selects these columns.
+  reason: String
+  contactName: String!
+  contactPhone: String @col(dataType: "varchar(32)")
+  contactEmail: String
+  consentVersion: String!
+  consentAcceptedAt: Timestamp!
+  declineCode: String
+  declineReason: String
+  appointment: Appointment
+  submittedAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type AppointmentProposal @table(name: "clinic_appointment_proposals") @index(fields: ["status", "expiresAt"]) {
+  request: ConsultationRequest!
+  doctor: Doctor!
+  mode: String!
+  locationId: String @col(dataType: "varchar(64)")
+  startsAt: Timestamp!
+  endsAt: Timestamp!
+  dateKey: Date!
+  time: String @col(dataType: "varchar(5)")
+  status: String!
+  expiresAt: Timestamp!
+  acceptedAppointment: Appointment
+  # One-time capability for a guest to answer a proposal; only the hash persists.
+  accessTokenHash: String! @unique @col(dataType: "varchar(64)")
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}

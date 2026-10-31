@@ -95,6 +95,17 @@ service cloud.firestore {
     // Administrative audit and notification/outbox data are server-owned. Their
     // explicit deny rules make this boundary resilient to future catch-all edits.
     match /auditLogs/{logId} { allow read, write: if false; }
+    // Consultation requests and proposed times hold private contact details and
+    // clinical intake. Only callables (which enforce staff/patient authorization
+    // and write the audit trail) touch them; browsers get no direct access.
+    match /consultationRequests/{requestId} {
+      allow read, write: if false;
+      match /{document=**} { allow read, write: if false; }
+    }
+    match /appointmentProposals/{proposalId} {
+      allow read, write: if false;
+      match /{document=**} { allow read, write: if false; }
+    }
     match /notifications/{notificationId} { allow read, write: if false; }
     match /rateLimits/{rateLimitId} { allow read, write: if false; }
     match /counters/{counterId} { allow read, write: if false; }

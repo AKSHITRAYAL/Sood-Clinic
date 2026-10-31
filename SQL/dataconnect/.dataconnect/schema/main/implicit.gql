@@ -8,17 +8,13 @@ extend type Appointment {
   """
   branchId: UUID! @fdc_generated(from: "Appointment.branch", purpose: IMPLICIT_REF_FIELD)
   """
-  ✨ Implicit foreign key field based on `Appointment`.`department`. It must match the value of `Department`.`id`. See `@ref` for how to customize it.
-  """
-  departmentId: UUID @fdc_generated(from: "Appointment.department", purpose: IMPLICIT_REF_FIELD)
-  """
   ✨ Implicit foreign key field based on `Appointment`.`doctor`. It must match the value of `Doctor`.`id`. See `@ref` for how to customize it.
   """
   doctorId: UUID! @fdc_generated(from: "Appointment.doctor", purpose: IMPLICIT_REF_FIELD)
   """
   ✨ Implicit foreign key field based on `Appointment`.`patient`. It must match the value of `Patient`.`id`. See `@ref` for how to customize it.
   """
-  patientId: UUID @fdc_generated(from: "Appointment.patient", purpose: IMPLICIT_REF_FIELD)
+  patientId: UUID! @fdc_generated(from: "Appointment.patient", purpose: IMPLICIT_REF_FIELD)
   """
   ✨ Implicit foreign key field based on `Appointment`.`service`. It must match the value of `Service`.`id`. See `@ref` for how to customize it.
   """
@@ -34,34 +30,6 @@ extend type AppointmentEvent {
   """
   appointmentId: UUID! @fdc_generated(from: "AppointmentEvent.appointment", purpose: IMPLICIT_REF_FIELD)
 }
-extend type AppointmentIntake {
-  """
-  ✨ Implicit foreign key field based on `AppointmentIntake`.`appointment`. It must match the value of `Appointment`.`id`. See `@ref` for how to customize it.
-  """
-  appointmentId: UUID! @fdc_generated(from: "AppointmentIntake.appointment", purpose: IMPLICIT_REF_FIELD)
-}
-extend type AppointmentLegacySlot {
-  """
-  ✨ Implicit foreign key field based on `AppointmentLegacySlot`.`appointment`. It must match the value of `Appointment`.`id`. See `@ref` for how to customize it.
-  """
-  appointmentId: UUID! @fdc_generated(from: "AppointmentLegacySlot.appointment", purpose: IMPLICIT_REF_FIELD)
-}
-extend type AppointmentPrivateDetails {
-  """
-  ✨ Implicit foreign key field based on `AppointmentPrivateDetails`.`appointment`. It must match the value of `Appointment`.`id`. See `@ref` for how to customize it.
-  """
-  appointmentId: UUID! @fdc_generated(from: "AppointmentPrivateDetails.appointment", purpose: IMPLICIT_REF_FIELD)
-}
-extend type AppointmentUnit {
-  """
-  ✨ Implicit foreign key field based on `AppointmentUnit`.`appointment`. It must match the value of `Appointment`.`id`. See `@ref` for how to customize it.
-  """
-  appointmentId: UUID @fdc_generated(from: "AppointmentUnit.appointment", purpose: IMPLICIT_REF_FIELD)
-  """
-  ✨ Implicit foreign key field based on `AppointmentUnit`.`doctor`. It must match the value of `Doctor`.`id`. See `@ref` for how to customize it.
-  """
-  doctorId: UUID! @fdc_generated(from: "AppointmentUnit.doctor", purpose: IMPLICIT_REF_FIELD)
-}
 extend type AuditLog {
   """
   ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
@@ -73,28 +41,6 @@ extend type Branch {
   ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
   """
   id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "Branch", purpose: IMPLICIT_KEY_FIELD)
-}
-extend type CalendarBlock {
-  """
-  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
-  """
-  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "CalendarBlock", purpose: IMPLICIT_KEY_FIELD)
-  """
-  ✨ Implicit foreign key field based on `CalendarBlock`.`doctor`. It must match the value of `Doctor`.`id`. See `@ref` for how to customize it.
-  """
-  doctorId: UUID! @fdc_generated(from: "CalendarBlock.doctor", purpose: IMPLICIT_REF_FIELD)
-}
-extend type CalendarFeed {
-  """
-  ✨ Implicit foreign key field based on `CalendarFeed`.`doctor`. It must match the value of `Doctor`.`id`. See `@ref` for how to customize it.
-  """
-  doctorId: UUID! @fdc_generated(from: "CalendarFeed.doctor", purpose: IMPLICIT_REF_FIELD)
-}
-extend type DayTokenCounter {
-  """
-  ✨ Implicit foreign key field based on `DayTokenCounter`.`doctor`. It must match the value of `Doctor`.`id`. See `@ref` for how to customize it.
-  """
-  doctorId: UUID! @fdc_generated(from: "DayTokenCounter.doctor", purpose: IMPLICIT_REF_FIELD)
 }
 extend type Department {
   """
@@ -136,12 +82,6 @@ extend type DoctorSchedule {
   """
   doctorId: UUID! @fdc_generated(from: "DoctorSchedule.doctor", purpose: IMPLICIT_REF_FIELD)
 }
-extend type DoctorScheduleState {
-  """
-  ✨ Implicit foreign key field based on `DoctorScheduleState`.`doctor`. It must match the value of `Doctor`.`id`. See `@ref` for how to customize it.
-  """
-  doctorId: UUID! @fdc_generated(from: "DoctorScheduleState.doctor", purpose: IMPLICIT_REF_FIELD)
-}
 extend type DoctorService {
   """
   ✨ Implicit foreign key field based on `DoctorService`.`doctor`. It must match the value of `Doctor`.`id`. See `@ref` for how to customize it.
@@ -161,70 +101,6 @@ extend type ExceptionWindow {
   ✨ Implicit foreign key field based on `ExceptionWindow`.`exception`. It must match the value of `ScheduleException`.`id`. See `@ref` for how to customize it.
   """
   exceptionId: UUID! @fdc_generated(from: "ExceptionWindow.exception", purpose: IMPLICIT_REF_FIELD)
-}
-extend type LegacyAuditRecord {
-  """
-  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
-  """
-  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "LegacyAuditRecord", purpose: IMPLICIT_KEY_FIELD)
-}
-extend type LegacyBookingRequest {
-  """
-  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
-  """
-  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "LegacyBookingRequest", purpose: IMPLICIT_KEY_FIELD)
-  """
-  ✨ Implicit foreign key field based on `LegacyBookingRequest`.`appointment`. It must match the value of `Appointment`.`id`. See `@ref` for how to customize it.
-  """
-  appointmentId: UUID! @fdc_generated(from: "LegacyBookingRequest.appointment", purpose: IMPLICIT_REF_FIELD)
-}
-extend type LegacyMedicalDocument {
-  """
-  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
-  """
-  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "LegacyMedicalDocument", purpose: IMPLICIT_KEY_FIELD)
-  """
-  ✨ Implicit foreign key field based on `LegacyMedicalDocument`.`doctor`. It must match the value of `Doctor`.`id`. See `@ref` for how to customize it.
-  """
-  doctorId: UUID @fdc_generated(from: "LegacyMedicalDocument.doctor", purpose: IMPLICIT_REF_FIELD)
-  """
-  ✨ Implicit foreign key field based on `LegacyMedicalDocument`.`patient`. It must match the value of `Patient`.`id`. See `@ref` for how to customize it.
-  """
-  patientId: UUID! @fdc_generated(from: "LegacyMedicalDocument.patient", purpose: IMPLICIT_REF_FIELD)
-}
-extend type LegacyMedicalHistory {
-  """
-  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
-  """
-  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "LegacyMedicalHistory", purpose: IMPLICIT_KEY_FIELD)
-  """
-  ✨ Implicit foreign key field based on `LegacyMedicalHistory`.`doctor`. It must match the value of `Doctor`.`id`. See `@ref` for how to customize it.
-  """
-  doctorId: UUID @fdc_generated(from: "LegacyMedicalHistory.doctor", purpose: IMPLICIT_REF_FIELD)
-  """
-  ✨ Implicit foreign key field based on `LegacyMedicalHistory`.`patient`. It must match the value of `Patient`.`id`. See `@ref` for how to customize it.
-  """
-  patientId: UUID! @fdc_generated(from: "LegacyMedicalHistory.patient", purpose: IMPLICIT_REF_FIELD)
-}
-extend type LegacyPatientFeedback {
-  """
-  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
-  """
-  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "LegacyPatientFeedback", purpose: IMPLICIT_KEY_FIELD)
-  """
-  ✨ Implicit foreign key field based on `LegacyPatientFeedback`.`appointment`. It must match the value of `Appointment`.`id`. See `@ref` for how to customize it.
-  """
-  appointmentId: UUID! @fdc_generated(from: "LegacyPatientFeedback.appointment", purpose: IMPLICIT_REF_FIELD)
-  """
-  ✨ Implicit foreign key field based on `LegacyPatientFeedback`.`patient`. It must match the value of `Patient`.`id`. See `@ref` for how to customize it.
-  """
-  patientId: UUID! @fdc_generated(from: "LegacyPatientFeedback.patient", purpose: IMPLICIT_REF_FIELD)
-}
-extend type LegacyUhidCounter {
-  """
-  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
-  """
-  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "LegacyUhidCounter", purpose: IMPLICIT_KEY_FIELD)
 }
 extend type Notification {
   """
@@ -262,12 +138,6 @@ extend type PatientLinkInvitation {
   """
   userId: String! @fdc_generated(from: "PatientLinkInvitation.user", purpose: IMPLICIT_REF_FIELD)
 }
-extend type PatientReportedProfile {
-  """
-  ✨ Implicit foreign key field based on `PatientReportedProfile`.`patient`. It must match the value of `Patient`.`id`. See `@ref` for how to customize it.
-  """
-  patientId: UUID! @fdc_generated(from: "PatientReportedProfile.patient", purpose: IMPLICIT_REF_FIELD)
-}
 extend type ScheduleException {
   """
   ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
@@ -293,18 +163,4 @@ extend type StaffProfile {
   ✨ Implicit foreign key field based on `StaffProfile`.`doctor`. It must match the value of `Doctor`.`id`. See `@ref` for how to customize it.
   """
   doctorId: UUID @fdc_generated(from: "StaffProfile.doctor", purpose: IMPLICIT_REF_FIELD)
-}
-extend type WaitlistEntry {
-  """
-  ✨ Implicit primary key field. It's a UUID column default to a generated new value. See `@table` for how to customize it.
-  """
-  id: UUID! @default(expr: "uuidV4()") @fdc_generated(from: "WaitlistEntry", purpose: IMPLICIT_KEY_FIELD)
-  """
-  ✨ Implicit foreign key field based on `WaitlistEntry`.`doctor`. It must match the value of `Doctor`.`id`. See `@ref` for how to customize it.
-  """
-  doctorId: UUID! @fdc_generated(from: "WaitlistEntry.doctor", purpose: IMPLICIT_REF_FIELD)
-  """
-  ✨ Implicit foreign key field based on `WaitlistEntry`.`service`. It must match the value of `Service`.`id`. See `@ref` for how to customize it.
-  """
-  serviceId: UUID! @fdc_generated(from: "WaitlistEntry.service", purpose: IMPLICIT_REF_FIELD)
 }

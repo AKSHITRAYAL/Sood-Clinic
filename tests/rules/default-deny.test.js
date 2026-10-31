@@ -36,6 +36,19 @@ describe('Firestore default-deny boundary', () => {
     await assertFails(getDoc(doc(db, 'privateSystem', 'anything')));
   });
 
+  it('keeps consultation requests and proposals callable-only', async () => {
+    const staff = testEnv.authenticatedContext('admin-one', { role: 'admin' }).firestore();
+    const guest = testEnv.unauthenticatedContext().firestore();
+    const patient = testEnv.authenticatedContext('patient-one', { role: 'patient' }).firestore();
+
+    for (const db of [guest, patient, staff]) {
+      await assertFails(getDoc(doc(db, 'consultationRequests', 'request-one')));
+      await assertFails(setDoc(doc(db, 'consultationRequests', 'request-one'), { status: 'pending' }));
+      await assertFails(getDoc(doc(db, 'appointmentProposals', 'proposal-one')));
+      await assertFails(setDoc(doc(db, 'appointmentProposals', 'proposal-one'), { status: 'pending' }));
+    }
+  });
+
   it('denies direct patient profile writes because a trusted callable keeps the private directory in sync', async () => {
     const db = testEnv.authenticatedContext('patient-one', { email: 'patient@example.com' }).firestore();
     const profile = doc(db, 'patients', 'patient-one');

@@ -112,20 +112,6 @@ function updateCatalogueDoctor(dcOrVarsOrOptions, varsOrOptions, options) {
 }
 exports.updateCatalogueDoctor = updateCatalogueDoctor;
 
-function readStaffClinicDay(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeMutation('ReadStaffClinicDay', inputVars, inputOpts);
-}
-exports.readStaffClinicDay = readStaffClinicDay;
-
-function readStaffClinicDayAfter(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeMutation('ReadStaffClinicDayAfter', inputVars, inputOpts);
-}
-exports.readStaffClinicDayAfter = readStaffClinicDayAfter;
-
 function getAdminClinicContact(dcOrOptions, options) {
   const { dc: dcInstance, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrOptions, options, undefined);
   dcInstance.useGen(true);
@@ -168,41 +154,6 @@ function seedFoundation(dcOrOptions, options) {
 }
 exports.seedFoundation = seedFoundation;
 
-function listLinkedPatientAppointments(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeQuery('ListLinkedPatientAppointments', inputVars, inputOpts);
-}
-exports.listLinkedPatientAppointments = listLinkedPatientAppointments;
-
-function listLinkedPatientAppointmentsBefore(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeQuery('ListLinkedPatientAppointmentsBefore', inputVars, inputOpts);
-}
-exports.listLinkedPatientAppointmentsBefore = listLinkedPatientAppointmentsBefore;
-
-function readLinkedPatientAppointment(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeQuery('ReadLinkedPatientAppointment', inputVars, inputOpts);
-}
-exports.readLinkedPatientAppointment = readLinkedPatientAppointment;
-
-function readLinkedPatientHealth(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeQuery('ReadLinkedPatientHealth', inputVars, inputOpts);
-}
-exports.readLinkedPatientHealth = readLinkedPatientHealth;
-
-function saveLinkedPatientHealth(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeMutation('SaveLinkedPatientHealth', inputVars, inputOpts);
-}
-exports.saveLinkedPatientHealth = saveLinkedPatientHealth;
-
 function consumePatientLinkAttempt(dcOrVarsOrOptions, varsOrOptions, options) {
   const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
   dcInstance.useGen(true);
@@ -237,111 +188,6 @@ function revokePatientLink(dcOrVarsOrOptions, varsOrOptions, options) {
   return dcInstance.executeMutation('RevokePatientLink', inputVars, inputOpts);
 }
 exports.revokePatientLink = revokePatientLink;
-
-function listLinkedPatientProfiles(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeQuery('ListLinkedPatientProfiles', inputVars, inputOpts);
-}
-exports.listLinkedPatientProfiles = listLinkedPatientProfiles;
-
-function readLinkedPatientProfile(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeQuery('ReadLinkedPatientProfile', inputVars, inputOpts);
-}
-exports.readLinkedPatientProfile = readLinkedPatientProfile;
-
-function getPatientProfileReceipt(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeQuery('GetPatientProfileReceipt', inputVars, inputOpts);
-}
-exports.getPatientProfileReceipt = getPatientProfileReceipt;
-
-function saveLinkedPatientProfile(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeMutation('SaveLinkedPatientProfile', inputVars, inputOpts);
-}
-exports.saveLinkedPatientProfile = saveLinkedPatientProfile;
-
-function readDoctorUnitRange(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeQuery('ReadDoctorUnitRange', inputVars, inputOpts);
-}
-exports.readDoctorUnitRange = readDoctorUnitRange;
-
-function claimAppointmentUnits(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeMutation('ClaimAppointmentUnits', inputVars, inputOpts);
-}
-exports.claimAppointmentUnits = claimAppointmentUnits;
-
-function releaseAppointmentUnits(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeMutation('ReleaseAppointmentUnits', inputVars, inputOpts);
-}
-exports.releaseAppointmentUnits = releaseAppointmentUnits;
-
-function releaseHoldUnits(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeMutation('ReleaseHoldUnits', inputVars, inputOpts);
-}
-exports.releaseHoldUnits = releaseHoldUnits;
-
-function readDoctorSpecialHours(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeQuery('ReadDoctorSpecialHours', inputVars, inputOpts);
-}
-exports.readDoctorSpecialHours = readDoctorSpecialHours;
-
-function readDoctorSpecialHoursReceipt(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeQuery('ReadDoctorSpecialHoursReceipt', inputVars, inputOpts);
-}
-exports.readDoctorSpecialHoursReceipt = readDoctorSpecialHoursReceipt;
-
-function saveDoctorSpecialHours(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeMutation('SaveDoctorSpecialHours', inputVars, inputOpts);
-}
-exports.saveDoctorSpecialHours = saveDoctorSpecialHours;
-
-function searchStaffPatientsByUhid(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeMutation('SearchStaffPatientsByUhid', inputVars, inputOpts);
-}
-exports.searchStaffPatientsByUhid = searchStaffPatientsByUhid;
-
-function searchStaffPatientsByPhone(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeMutation('SearchStaffPatientsByPhone', inputVars, inputOpts);
-}
-exports.searchStaffPatientsByPhone = searchStaffPatientsByPhone;
-
-function readStaffPatientDemographics(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeMutation('ReadStaffPatientDemographics', inputVars, inputOpts);
-}
-exports.readStaffPatientDemographics = readStaffPatientDemographics;
-
-function saveStaffPatientDemographics(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeMutation('SaveStaffPatientDemographics', inputVars, inputOpts);
-}
-exports.saveStaffPatientDemographics = saveStaffPatientDemographics;
 
 function listStaffIdentityPage(dcOrVarsOrOptions, varsOrOptions, options) {
   const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
@@ -398,25 +244,4 @@ function upsertStaffIdentity(dcOrVarsOrOptions, varsOrOptions, options) {
   return dcInstance.executeMutation('UpsertStaffIdentity', inputVars, inputOpts);
 }
 exports.upsertStaffIdentity = upsertStaffIdentity;
-
-function readDoctorWeeklyHours(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeQuery('ReadDoctorWeeklyHours', inputVars, inputOpts);
-}
-exports.readDoctorWeeklyHours = readDoctorWeeklyHours;
-
-function readDoctorWeeklyHoursReceipt(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeQuery('ReadDoctorWeeklyHoursReceipt', inputVars, inputOpts);
-}
-exports.readDoctorWeeklyHoursReceipt = readDoctorWeeklyHoursReceipt;
-
-function saveDoctorWeeklyHours(dcOrVarsOrOptions, varsOrOptions, options) {
-  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
-  dcInstance.useGen(true);
-  return dcInstance.executeMutation('SaveDoctorWeeklyHours', inputVars, inputOpts);
-}
-exports.saveDoctorWeeklyHours = saveDoctorWeeklyHours;
 

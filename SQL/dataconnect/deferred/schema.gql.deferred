@@ -1,0 +1,235 @@
+# DEFERRED FROM THE FIRST PRODUCTION MIGRATION (2026-10-30).
+# Not compiled: `dataconnect.yaml` schema.source is `./schema`, and this file keeps a
+# `.deferred` extension so no tool picks it up. Restore a block into
+# `schema/schema.gql` only together with its connector operations and the release
+# review it needs.
+#
+# Deferred fields on models that stay in the first release:
+#
+# Branch:      addressLine1, addressLine2, city, state, postalCode, country, legacyUpdatedBy
+# Department:  createdAt, legacyUpdatedBy
+# Doctor:      createdAt, legacyUpdatedBy
+# Patient:     title, maritalStatus, addressLine1, city, state, postalCode,
+#              emergencyContactName, emergencyContactPhone, legacyRecordSource,
+#              legacyCreatedBy, legacyCreatedByUid, legacyCreatedByRole, legacyUpdatedBy
+# Service:     legacyCreatedAt
+# ClinicSettings: slotMinutes, createdAt, legacyUpdatedBy
+# DoctorSchedule: legacyId, sourceOrder
+# ScheduleException: legacyId, legacyCreatedAt, legacyCreatedBy, legacyUpdatedBy,
+#              legacyNote, legacyReason
+# ExceptionWindow: legacyId, sourceOrder
+# Appointment: department, visitMode, legacyVisitType, createdByRole, contactEmail,
+#              contactEmailLower, contactPhoneKey, tokenNumber, checkedInAt,
+#              startedAt, completedAt (and `patient: Patient` nullability with the
+#              ON DELETE SET NULL foreign key)
+# AppointmentEvent: legacyId, legacyReason, legacyCreatedAt, legacyUpdatedAt,
+#              legacyMetaSource, legacyMetaAction, legacyDate, legacyFromDate,
+#              legacyToDate, legacyToTime
+#
+# Deferred models (verbatim from the pre-reduction schema):
+
+# Private preservation drafts, not finalized visits or download/access grants.
+type PatientReportedProfile @table(name: "clinic_patient_reported_profiles", key: "patient") {
+  patient: Patient!
+  allergies: String
+  currentMedications: String
+  healthNotes: String
+}
+
+type LegacyMedicalHistory @table(name: "clinic_legacy_medical_history") @index(fields: ["patientId", "createdAt"]) {
+  legacyId: String! @unique
+  patient: Patient!
+  doctor: Doctor
+  legacyDate: String
+  diagnosis: String
+  notes: String
+  details: String
+  createdAt: Timestamp
+  updatedAt: Timestamp
+}
+
+type LegacyMedicalDocument @table(name: "clinic_legacy_medical_documents") @index(fields: ["patientId", "createdAt"]) {
+  legacyId: String! @unique
+  patient: Patient!
+  doctor: Doctor
+  name: String
+  title: String
+  category: String
+  details: String
+  legacyUrl: String
+  storagePath: String
+  visibleToPatient: Boolean
+  contentType: String
+  sizeBytes: Int
+  createdAt: Timestamp
+  updatedAt: Timestamp
+}
+
+type AppointmentPrivateDetails @table(name: "clinic_appointment_private_details", key: "appointment") {
+  appointment: Appointment!
+  snapshotName: String
+  snapshotPhone: String
+  snapshotEmail: String
+  reason: String
+  phoneKey: String
+  legacySlotId: String
+  legacySlotListPresent: Boolean!
+  calendarProvider: String
+  calendarId: String
+  calendarEventId: String
+  calendarSyncStatus: String
+  calendarLastSyncedAt: Timestamp
+  calendarLastSyncError: String
+  videoStatus: String
+  videoJoinUrl: String
+  videoPreparedBy: String
+  videoPreparedAt: Timestamp
+  videoClearedBy: String
+  videoClearedAt: Timestamp
+  cancellationByUid: String
+  cancellationByRole: String
+  cancellationReason: String
+  cancellationAt: Timestamp
+  manageTokenHash: String
+  manageCreatedAt: Timestamp
+  ipHash: String
+}
+
+# Historical lock references only, never used as SQL occupancy or access grants.
+type AppointmentLegacySlot @table(name: "clinic_appointment_legacy_slots", key: ["appointment", "ordinal"]) {
+  appointment: Appointment!
+  ordinal: Int!
+  legacySlotId: String!
+}
+
+# Immutable source-time evidence; SQL's microseconds do not retain nanoseconds.
+type LegacySourceInstant @table(name: "clinic_legacy_source_instants", key: ["entityType", "entityId", "field"]) {
+  entityType: String!
+  entityId: String!
+  field: String!
+  sourcePath: String!
+  sqlValue: Timestamp!
+  exactValue: String!
+}
+
+# Private retained history; never automatically publish or merge into live audit.
+type LegacyPatientFeedback @table(name: "clinic_legacy_patient_feedback") {
+  legacyId: String! @unique
+  patient: Patient!
+  appointment: Appointment! @unique
+  rating: Int!
+  comment: String
+  status: String!
+  reviewedBy: String
+  reviewedAt: Timestamp
+  publishedAt: Timestamp
+  createdAt: Timestamp
+  updatedAt: Timestamp
+}
+
+type LegacyAuditRecord @table(name: "clinic_legacy_audit_records") {
+  legacyId: String! @unique
+  actorUid: String
+  actorRole: String
+  action: String
+  resourceType: String
+  legacyResourceId: String
+  legacyMetadata: String
+  occurredAt: Timestamp
+  legacyCreatedAt: Timestamp
+  legacyUpdatedAt: Timestamp
+}
+
+# Private migration evidence, not a live allocator or caller-scoped retry receipt.
+type LegacyUhidCounter @table(name: "clinic_legacy_uhid_counters") {
+  legacyId: String! @unique
+  sourceValue: String!
+  observedSourceMax: String!
+  observedTargetMax: String
+  createdAt: Timestamp
+  updatedAt: Timestamp
+}
+
+type LegacyBookingRequest @table(name: "clinic_legacy_booking_requests") {
+  legacyId: String! @unique
+  legacyRequestKey: String!
+  appointment: Appointment!
+  reference: String!
+  status: String!
+  createdAt: Timestamp
+  updatedAt: Timestamp
+}
+
+# A row with zero windows means deliberately closed weekly hours, not fallback.
+type DoctorScheduleState @table(name: "clinic_doctor_schedule_states", key: "doctor") {
+  doctor: Doctor!
+  authority: String!
+  legacySourcePath: String @unique
+  legacyCreatedAt: Timestamp
+  legacyUpdatedBy: String
+  updatedAt: Timestamp
+}
+
+# One row per aligned five-minute occupancy unit; never one row per start time.
+type AppointmentUnit @table(name: "clinic_appointment_units", key: "unitKey") @index(fields: ["doctorId", "unitAt"]) @index(fields: ["appointmentId"]) {
+  unitKey: String!
+  doctor: Doctor!
+  unitAt: Timestamp!
+  kind: String!
+  appointment: Appointment
+  holdHash: String
+  expiresAt: Timestamp
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+# Staff-only availability removal; titles are never part of public projections.
+type CalendarBlock @table(name: "clinic_calendar_blocks") @index(fields: ["doctorId", "startsAt"]) {
+  doctor: Doctor!
+  kind: String!
+  title: String!
+  startsAt: Timestamp!
+  endsAt: Timestamp!
+  allDay: Boolean!
+  dateKeyStart: String!
+  dateKeyEnd: String!
+  createdBy: String
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# Server-only waitlist; contact is written by callables and never browser-readable.
+type WaitlistEntry @table(name: "clinic_waitlist_entries") @index(fields: ["doctorId", "status"]) {
+  doctor: Doctor!
+  service: Service!
+  clinicDate: String
+  contactName: String!
+  contactPhoneKey: String!
+  contactEmail: String
+  status: String!
+  offeredAt: Timestamp
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# Feed tokens are stored hashed; the URL is returned once and never persisted.
+type CalendarFeed @table(name: "clinic_calendar_feeds", key: "doctor") {
+  doctor: Doctor!
+  tokenHash: String!
+  createdAt: Timestamp! @default(expr: "request.time")
+  rotatedAt: Timestamp
+}
+
+# Front-desk queue number per doctor/day.
+type DayTokenCounter @table(name: "clinic_day_token_counters", key: ["doctor", "dayKey"]) {
+  doctor: Doctor!
+  dayKey: String!
+  nextNumber: Int!
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# Booking intake answers; one bounded row per question.
+type AppointmentIntake @table(name: "clinic_appointment_intake", key: ["appointment", "questionId"]) {
+  appointment: Appointment!
+  questionId: String!
+  answer: String!
+}

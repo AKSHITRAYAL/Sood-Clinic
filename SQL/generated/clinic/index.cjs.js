@@ -52,21 +52,6 @@ exports.getPublicClinicContact = function getPublicClinicContact(dcOrOptions, op
 }
 ;
 
-const getPublicDoctorHoursRef = (dcOrVars, vars) => {
-  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
-  dcInstance._useGeneratedSdk();
-  return queryRef(dcInstance, 'GetPublicDoctorHours', inputVars);
-}
-getPublicDoctorHoursRef.operationName = 'GetPublicDoctorHours';
-exports.getPublicDoctorHoursRef = getPublicDoctorHoursRef;
-
-exports.getPublicDoctorHours = function getPublicDoctorHours(dcOrVars, varsOrOptions, options) {
-  
-  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
-  return executeQuery(getPublicDoctorHoursRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
-}
-;
-
 const saveOwnSqlProfileRef = (dcOrVars, vars) => {
   const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
   dcInstance._useGeneratedSdk();

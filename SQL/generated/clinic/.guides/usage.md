@@ -14,7 +14,7 @@ If a user is not using a supported framework, they can use the generated SDK dir
 Here's an example of how to use it with the first 5 operations:
 
 ```js
-import { getPublicClinic, getOwnSqlProfile, getPublicClinicContact, getPublicDoctorHours, saveOwnSqlProfile } from '@clinic/sql-client';
+import { getPublicClinic, getOwnSqlProfile, getPublicClinicContact, saveOwnSqlProfile } from '@clinic/sql-client';
 
 
 // Operation GetPublicClinic: 
@@ -25,9 +25,6 @@ const { data } = await GetOwnSqlProfile(dataConnect);
 
 // Operation GetPublicClinicContact: 
 const { data } = await GetPublicClinicContact(dataConnect);
-
-// Operation GetPublicDoctorHours:  For variables, look at type GetPublicDoctorHoursVars in ../index.d.ts
-const { data } = await GetPublicDoctorHours(dataConnect, getPublicDoctorHoursVars);
 
 // Operation SaveOwnSqlProfile:  For variables, look at type SaveOwnSqlProfileVars in ../index.d.ts
 const { data } = await SaveOwnSqlProfile(dataConnect, saveOwnSqlProfileVars);

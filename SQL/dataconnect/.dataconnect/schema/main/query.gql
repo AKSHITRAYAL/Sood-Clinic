@@ -38,62 +38,6 @@ extend type Query {
     first: AppointmentEvent_FirstRow
   ): AppointmentEvent @fdc_generated(from: "AppointmentEvent", purpose: QUERY_SINGLE)
   """
-  ✨ Look up a single `AppointmentIntake` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
-  """
-  appointmentIntake(
-    """
-    The key used to identify the object.
-    """
-    key: AppointmentIntake_Key
-
-    """
-    Fetch the first row based on the filters and ordering.
-    """
-    first: AppointmentIntake_FirstRow
-  ): AppointmentIntake @fdc_generated(from: "AppointmentIntake", purpose: QUERY_SINGLE)
-  """
-  ✨ Look up a single `AppointmentLegacySlot` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
-  """
-  appointmentLegacySlot(
-    """
-    The key used to identify the object.
-    """
-    key: AppointmentLegacySlot_Key
-
-    """
-    Fetch the first row based on the filters and ordering.
-    """
-    first: AppointmentLegacySlot_FirstRow
-  ): AppointmentLegacySlot @fdc_generated(from: "AppointmentLegacySlot", purpose: QUERY_SINGLE)
-  """
-  ✨ Look up a single `AppointmentPrivateDetails` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
-  """
-  appointmentPrivateDetails(
-    """
-    The key used to identify the object.
-    """
-    key: AppointmentPrivateDetails_Key
-
-    """
-    Fetch the first row based on the filters and ordering.
-    """
-    first: AppointmentPrivateDetails_FirstRow
-  ): AppointmentPrivateDetails @fdc_generated(from: "AppointmentPrivateDetails", purpose: QUERY_SINGLE)
-  """
-  ✨ Look up a single `AppointmentUnit` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
-  """
-  appointmentUnit(
-    """
-    The key used to identify the object.
-    """
-    key: AppointmentUnit_Key
-
-    """
-    Fetch the first row based on the filters and ordering.
-    """
-    first: AppointmentUnit_FirstRow
-  ): AppointmentUnit @fdc_generated(from: "AppointmentUnit", purpose: QUERY_SINGLE)
-  """
   ✨ Look up a single `AuditLog` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
   """
   auditLog(
@@ -131,39 +75,6 @@ extend type Query {
     """
     first: Branch_FirstRow
   ): Branch @fdc_generated(from: "Branch", purpose: QUERY_SINGLE)
-  """
-  ✨ Look up a single `CalendarBlock` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
-  """
-  calendarBlock(
-    """
-    The unique ID of the object.
-    """
-    id: UUID
-
-    """
-    The key used to identify the object.
-    """
-    key: CalendarBlock_Key
-
-    """
-    Fetch the first row based on the filters and ordering.
-    """
-    first: CalendarBlock_FirstRow
-  ): CalendarBlock @fdc_generated(from: "CalendarBlock", purpose: QUERY_SINGLE)
-  """
-  ✨ Look up a single `CalendarFeed` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
-  """
-  calendarFeed(
-    """
-    The key used to identify the object.
-    """
-    key: CalendarFeed_Key
-
-    """
-    Fetch the first row based on the filters and ordering.
-    """
-    first: CalendarFeed_FirstRow
-  ): CalendarFeed @fdc_generated(from: "CalendarFeed", purpose: QUERY_SINGLE)
   """
   ✨ Look up a single `ClinicProfile` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
   """
@@ -212,20 +123,6 @@ extend type Query {
     """
     first: ClinicSettings_FirstRow
   ): ClinicSettings @fdc_generated(from: "ClinicSettings", purpose: QUERY_SINGLE)
-  """
-  ✨ Look up a single `DayTokenCounter` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
-  """
-  dayTokenCounter(
-    """
-    The key used to identify the object.
-    """
-    key: DayTokenCounter_Key
-
-    """
-    Fetch the first row based on the filters and ordering.
-    """
-    first: DayTokenCounter_FirstRow
-  ): DayTokenCounter @fdc_generated(from: "DayTokenCounter", purpose: QUERY_SINGLE)
   """
   ✨ Look up a single `Department` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
   """
@@ -298,20 +195,6 @@ extend type Query {
     first: DoctorSchedule_FirstRow
   ): DoctorSchedule @fdc_generated(from: "DoctorSchedule", purpose: QUERY_SINGLE)
   """
-  ✨ Look up a single `DoctorScheduleState` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
-  """
-  doctorScheduleState(
-    """
-    The key used to identify the object.
-    """
-    key: DoctorScheduleState_Key
-
-    """
-    Fetch the first row based on the filters and ordering.
-    """
-    first: DoctorScheduleState_FirstRow
-  ): DoctorScheduleState @fdc_generated(from: "DoctorScheduleState", purpose: QUERY_SINGLE)
-  """
   ✨ Look up a single `DoctorService` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
   """
   doctorService(
@@ -344,134 +227,6 @@ extend type Query {
     """
     first: ExceptionWindow_FirstRow
   ): ExceptionWindow @fdc_generated(from: "ExceptionWindow", purpose: QUERY_SINGLE)
-  """
-  ✨ Look up a single `LegacyAuditRecord` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
-  """
-  legacyAuditRecord(
-    """
-    The unique ID of the object.
-    """
-    id: UUID
-
-    """
-    The key used to identify the object.
-    """
-    key: LegacyAuditRecord_Key
-
-    """
-    Fetch the first row based on the filters and ordering.
-    """
-    first: LegacyAuditRecord_FirstRow
-  ): LegacyAuditRecord @fdc_generated(from: "LegacyAuditRecord", purpose: QUERY_SINGLE)
-  """
-  ✨ Look up a single `LegacyBookingRequest` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
-  """
-  legacyBookingRequest(
-    """
-    The unique ID of the object.
-    """
-    id: UUID
-
-    """
-    The key used to identify the object.
-    """
-    key: LegacyBookingRequest_Key
-
-    """
-    Fetch the first row based on the filters and ordering.
-    """
-    first: LegacyBookingRequest_FirstRow
-  ): LegacyBookingRequest @fdc_generated(from: "LegacyBookingRequest", purpose: QUERY_SINGLE)
-  """
-  ✨ Look up a single `LegacyMedicalDocument` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
-  """
-  legacyMedicalDocument(
-    """
-    The unique ID of the object.
-    """
-    id: UUID
-
-    """
-    The key used to identify the object.
-    """
-    key: LegacyMedicalDocument_Key
-
-    """
-    Fetch the first row based on the filters and ordering.
-    """
-    first: LegacyMedicalDocument_FirstRow
-  ): LegacyMedicalDocument @fdc_generated(from: "LegacyMedicalDocument", purpose: QUERY_SINGLE)
-  """
-  ✨ Look up a single `LegacyMedicalHistory` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
-  """
-  legacyMedicalHistory(
-    """
-    The unique ID of the object.
-    """
-    id: UUID
-
-    """
-    The key used to identify the object.
-    """
-    key: LegacyMedicalHistory_Key
-
-    """
-    Fetch the first row based on the filters and ordering.
-    """
-    first: LegacyMedicalHistory_FirstRow
-  ): LegacyMedicalHistory @fdc_generated(from: "LegacyMedicalHistory", purpose: QUERY_SINGLE)
-  """
-  ✨ Look up a single `LegacyPatientFeedback` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
-  """
-  legacyPatientFeedback(
-    """
-    The unique ID of the object.
-    """
-    id: UUID
-
-    """
-    The key used to identify the object.
-    """
-    key: LegacyPatientFeedback_Key
-
-    """
-    Fetch the first row based on the filters and ordering.
-    """
-    first: LegacyPatientFeedback_FirstRow
-  ): LegacyPatientFeedback @fdc_generated(from: "LegacyPatientFeedback", purpose: QUERY_SINGLE)
-  """
-  ✨ Look up a single `LegacySourceInstant` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
-  """
-  legacySourceInstant(
-    """
-    The key used to identify the object.
-    """
-    key: LegacySourceInstant_Key
-
-    """
-    Fetch the first row based on the filters and ordering.
-    """
-    first: LegacySourceInstant_FirstRow
-  ): LegacySourceInstant @fdc_generated(from: "LegacySourceInstant", purpose: QUERY_SINGLE)
-  """
-  ✨ Look up a single `LegacyUhidCounter` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
-  """
-  legacyUhidCounter(
-    """
-    The unique ID of the object.
-    """
-    id: UUID
-
-    """
-    The key used to identify the object.
-    """
-    key: LegacyUhidCounter_Key
-
-    """
-    Fetch the first row based on the filters and ordering.
-    """
-    first: LegacyUhidCounter_FirstRow
-  ): LegacyUhidCounter @fdc_generated(from: "LegacyUhidCounter", purpose: QUERY_SINGLE)
   """
   ✨ Look up a single `Notification` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
   """
@@ -552,20 +307,6 @@ extend type Query {
     """
     first: PatientLinkInvitation_FirstRow
   ): PatientLinkInvitation @fdc_generated(from: "PatientLinkInvitation", purpose: QUERY_SINGLE)
-  """
-  ✨ Look up a single `PatientReportedProfile` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
-  """
-  patientReportedProfile(
-    """
-    The key used to identify the object.
-    """
-    key: PatientReportedProfile_Key
-
-    """
-    Fetch the first row based on the filters and ordering.
-    """
-    first: PatientReportedProfile_FirstRow
-  ): PatientReportedProfile @fdc_generated(from: "PatientReportedProfile", purpose: QUERY_SINGLE)
   """
   ✨ Look up a single `ScheduleException` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
   """
@@ -667,25 +408,6 @@ extend type Query {
     first: User_FirstRow
   ): User @fdc_generated(from: "User", purpose: QUERY_SINGLE)
   """
-  ✨ Look up a single `WaitlistEntry` based on `id`, `key` or `first` and return selected fields (or `null` if not found).
-  """
-  waitlistEntry(
-    """
-    The unique ID of the object.
-    """
-    id: UUID
-
-    """
-    The key used to identify the object.
-    """
-    key: WaitlistEntry_Key
-
-    """
-    Fetch the first row based on the filters and ordering.
-    """
-    first: WaitlistEntry_FirstRow
-  ): WaitlistEntry @fdc_generated(from: "WaitlistEntry", purpose: QUERY_SINGLE)
-  """
   ✨ List `Appointment` objects in the table and return selected fields, optionally filtered by `where` conditions
   """
   appointments(
@@ -753,142 +475,6 @@ extend type Query {
     """
     having: AppointmentEvent_Having
   ): [AppointmentEvent!]! @fdc_generated(from: "AppointmentEvent", purpose: QUERY_MULTIPLE)
-  """
-  ✨ List `AppointmentIntake` objects in the table and return selected fields, optionally filtered by `where` conditions
-  """
-  appointmentIntakes(
-    """
-    Filter condition to narrow down the query results.
-    """
-    where: AppointmentIntake_Filter
-
-    """
-    Order the query results by specific fields.
-    """
-    orderBy: [AppointmentIntake_Order!]
-
-    """
-    Number of rows to skip before starting to return the results.
-    """
-    offset: Int
-
-    """
-    Maximum number of rows to return (defaults to 100 rows).
-    """
-    limit: Int = 100
-
-    """
-    Set to true to return distinct results.
-    """
-    distinct: Boolean = false
-
-    """
-    Filter condition to apply to the groups of aggregate queries.
-    """
-    having: AppointmentIntake_Having
-  ): [AppointmentIntake!]! @fdc_generated(from: "AppointmentIntake", purpose: QUERY_MULTIPLE)
-  """
-  ✨ List `AppointmentLegacySlot` objects in the table and return selected fields, optionally filtered by `where` conditions
-  """
-  appointmentLegacySlots(
-    """
-    Filter condition to narrow down the query results.
-    """
-    where: AppointmentLegacySlot_Filter
-
-    """
-    Order the query results by specific fields.
-    """
-    orderBy: [AppointmentLegacySlot_Order!]
-
-    """
-    Number of rows to skip before starting to return the results.
-    """
-    offset: Int
-
-    """
-    Maximum number of rows to return (defaults to 100 rows).
-    """
-    limit: Int = 100
-
-    """
-    Set to true to return distinct results.
-    """
-    distinct: Boolean = false
-
-    """
-    Filter condition to apply to the groups of aggregate queries.
-    """
-    having: AppointmentLegacySlot_Having
-  ): [AppointmentLegacySlot!]! @fdc_generated(from: "AppointmentLegacySlot", purpose: QUERY_MULTIPLE)
-  """
-  ✨ List `AppointmentPrivateDetails` objects in the table and return selected fields, optionally filtered by `where` conditions
-  """
-  appointmentPrivateDetailss(
-    """
-    Filter condition to narrow down the query results.
-    """
-    where: AppointmentPrivateDetails_Filter
-
-    """
-    Order the query results by specific fields.
-    """
-    orderBy: [AppointmentPrivateDetails_Order!]
-
-    """
-    Number of rows to skip before starting to return the results.
-    """
-    offset: Int
-
-    """
-    Maximum number of rows to return (defaults to 100 rows).
-    """
-    limit: Int = 100
-
-    """
-    Set to true to return distinct results.
-    """
-    distinct: Boolean = false
-
-    """
-    Filter condition to apply to the groups of aggregate queries.
-    """
-    having: AppointmentPrivateDetails_Having
-  ): [AppointmentPrivateDetails!]! @fdc_generated(from: "AppointmentPrivateDetails", purpose: QUERY_MULTIPLE)
-  """
-  ✨ List `AppointmentUnit` objects in the table and return selected fields, optionally filtered by `where` conditions
-  """
-  appointmentUnits(
-    """
-    Filter condition to narrow down the query results.
-    """
-    where: AppointmentUnit_Filter
-
-    """
-    Order the query results by specific fields.
-    """
-    orderBy: [AppointmentUnit_Order!]
-
-    """
-    Number of rows to skip before starting to return the results.
-    """
-    offset: Int
-
-    """
-    Maximum number of rows to return (defaults to 100 rows).
-    """
-    limit: Int = 100
-
-    """
-    Set to true to return distinct results.
-    """
-    distinct: Boolean = false
-
-    """
-    Filter condition to apply to the groups of aggregate queries.
-    """
-    having: AppointmentUnit_Having
-  ): [AppointmentUnit!]! @fdc_generated(from: "AppointmentUnit", purpose: QUERY_MULTIPLE)
   """
   ✨ List `AuditLog` objects in the table and return selected fields, optionally filtered by `where` conditions
   """
@@ -958,74 +544,6 @@ extend type Query {
     having: Branch_Having
   ): [Branch!]! @fdc_generated(from: "Branch", purpose: QUERY_MULTIPLE)
   """
-  ✨ List `CalendarBlock` objects in the table and return selected fields, optionally filtered by `where` conditions
-  """
-  calendarBlocks(
-    """
-    Filter condition to narrow down the query results.
-    """
-    where: CalendarBlock_Filter
-
-    """
-    Order the query results by specific fields.
-    """
-    orderBy: [CalendarBlock_Order!]
-
-    """
-    Number of rows to skip before starting to return the results.
-    """
-    offset: Int
-
-    """
-    Maximum number of rows to return (defaults to 100 rows).
-    """
-    limit: Int = 100
-
-    """
-    Set to true to return distinct results.
-    """
-    distinct: Boolean = false
-
-    """
-    Filter condition to apply to the groups of aggregate queries.
-    """
-    having: CalendarBlock_Having
-  ): [CalendarBlock!]! @fdc_generated(from: "CalendarBlock", purpose: QUERY_MULTIPLE)
-  """
-  ✨ List `CalendarFeed` objects in the table and return selected fields, optionally filtered by `where` conditions
-  """
-  calendarFeeds(
-    """
-    Filter condition to narrow down the query results.
-    """
-    where: CalendarFeed_Filter
-
-    """
-    Order the query results by specific fields.
-    """
-    orderBy: [CalendarFeed_Order!]
-
-    """
-    Number of rows to skip before starting to return the results.
-    """
-    offset: Int
-
-    """
-    Maximum number of rows to return (defaults to 100 rows).
-    """
-    limit: Int = 100
-
-    """
-    Set to true to return distinct results.
-    """
-    distinct: Boolean = false
-
-    """
-    Filter condition to apply to the groups of aggregate queries.
-    """
-    having: CalendarFeed_Having
-  ): [CalendarFeed!]! @fdc_generated(from: "CalendarFeed", purpose: QUERY_MULTIPLE)
-  """
   ✨ List `ClinicProfile` objects in the table and return selected fields, optionally filtered by `where` conditions
   """
   clinicProfiles(
@@ -1093,40 +611,6 @@ extend type Query {
     """
     having: ClinicSettings_Having
   ): [ClinicSettings!]! @fdc_generated(from: "ClinicSettings", purpose: QUERY_MULTIPLE)
-  """
-  ✨ List `DayTokenCounter` objects in the table and return selected fields, optionally filtered by `where` conditions
-  """
-  dayTokenCounters(
-    """
-    Filter condition to narrow down the query results.
-    """
-    where: DayTokenCounter_Filter
-
-    """
-    Order the query results by specific fields.
-    """
-    orderBy: [DayTokenCounter_Order!]
-
-    """
-    Number of rows to skip before starting to return the results.
-    """
-    offset: Int
-
-    """
-    Maximum number of rows to return (defaults to 100 rows).
-    """
-    limit: Int = 100
-
-    """
-    Set to true to return distinct results.
-    """
-    distinct: Boolean = false
-
-    """
-    Filter condition to apply to the groups of aggregate queries.
-    """
-    having: DayTokenCounter_Having
-  ): [DayTokenCounter!]! @fdc_generated(from: "DayTokenCounter", purpose: QUERY_MULTIPLE)
   """
   ✨ List `Department` objects in the table and return selected fields, optionally filtered by `where` conditions
   """
@@ -1264,40 +748,6 @@ extend type Query {
     having: DoctorSchedule_Having
   ): [DoctorSchedule!]! @fdc_generated(from: "DoctorSchedule", purpose: QUERY_MULTIPLE)
   """
-  ✨ List `DoctorScheduleState` objects in the table and return selected fields, optionally filtered by `where` conditions
-  """
-  doctorScheduleStates(
-    """
-    Filter condition to narrow down the query results.
-    """
-    where: DoctorScheduleState_Filter
-
-    """
-    Order the query results by specific fields.
-    """
-    orderBy: [DoctorScheduleState_Order!]
-
-    """
-    Number of rows to skip before starting to return the results.
-    """
-    offset: Int
-
-    """
-    Maximum number of rows to return (defaults to 100 rows).
-    """
-    limit: Int = 100
-
-    """
-    Set to true to return distinct results.
-    """
-    distinct: Boolean = false
-
-    """
-    Filter condition to apply to the groups of aggregate queries.
-    """
-    having: DoctorScheduleState_Having
-  ): [DoctorScheduleState!]! @fdc_generated(from: "DoctorScheduleState", purpose: QUERY_MULTIPLE)
-  """
   ✨ List `DoctorService` objects in the table and return selected fields, optionally filtered by `where` conditions
   """
   doctorServices(
@@ -1365,244 +815,6 @@ extend type Query {
     """
     having: ExceptionWindow_Having
   ): [ExceptionWindow!]! @fdc_generated(from: "ExceptionWindow", purpose: QUERY_MULTIPLE)
-  """
-  ✨ List `LegacyAuditRecord` objects in the table and return selected fields, optionally filtered by `where` conditions
-  """
-  legacyAuditRecords(
-    """
-    Filter condition to narrow down the query results.
-    """
-    where: LegacyAuditRecord_Filter
-
-    """
-    Order the query results by specific fields.
-    """
-    orderBy: [LegacyAuditRecord_Order!]
-
-    """
-    Number of rows to skip before starting to return the results.
-    """
-    offset: Int
-
-    """
-    Maximum number of rows to return (defaults to 100 rows).
-    """
-    limit: Int = 100
-
-    """
-    Set to true to return distinct results.
-    """
-    distinct: Boolean = false
-
-    """
-    Filter condition to apply to the groups of aggregate queries.
-    """
-    having: LegacyAuditRecord_Having
-  ): [LegacyAuditRecord!]! @fdc_generated(from: "LegacyAuditRecord", purpose: QUERY_MULTIPLE)
-  """
-  ✨ List `LegacyBookingRequest` objects in the table and return selected fields, optionally filtered by `where` conditions
-  """
-  legacyBookingRequests(
-    """
-    Filter condition to narrow down the query results.
-    """
-    where: LegacyBookingRequest_Filter
-
-    """
-    Order the query results by specific fields.
-    """
-    orderBy: [LegacyBookingRequest_Order!]
-
-    """
-    Number of rows to skip before starting to return the results.
-    """
-    offset: Int
-
-    """
-    Maximum number of rows to return (defaults to 100 rows).
-    """
-    limit: Int = 100
-
-    """
-    Set to true to return distinct results.
-    """
-    distinct: Boolean = false
-
-    """
-    Filter condition to apply to the groups of aggregate queries.
-    """
-    having: LegacyBookingRequest_Having
-  ): [LegacyBookingRequest!]! @fdc_generated(from: "LegacyBookingRequest", purpose: QUERY_MULTIPLE)
-  """
-  ✨ List `LegacyMedicalDocument` objects in the table and return selected fields, optionally filtered by `where` conditions
-  """
-  legacyMedicalDocuments(
-    """
-    Filter condition to narrow down the query results.
-    """
-    where: LegacyMedicalDocument_Filter
-
-    """
-    Order the query results by specific fields.
-    """
-    orderBy: [LegacyMedicalDocument_Order!]
-
-    """
-    Number of rows to skip before starting to return the results.
-    """
-    offset: Int
-
-    """
-    Maximum number of rows to return (defaults to 100 rows).
-    """
-    limit: Int = 100
-
-    """
-    Set to true to return distinct results.
-    """
-    distinct: Boolean = false
-
-    """
-    Filter condition to apply to the groups of aggregate queries.
-    """
-    having: LegacyMedicalDocument_Having
-  ): [LegacyMedicalDocument!]! @fdc_generated(from: "LegacyMedicalDocument", purpose: QUERY_MULTIPLE)
-  """
-  ✨ List `LegacyMedicalHistory` objects in the table and return selected fields, optionally filtered by `where` conditions
-  """
-  legacyMedicalHistories(
-    """
-    Filter condition to narrow down the query results.
-    """
-    where: LegacyMedicalHistory_Filter
-
-    """
-    Order the query results by specific fields.
-    """
-    orderBy: [LegacyMedicalHistory_Order!]
-
-    """
-    Number of rows to skip before starting to return the results.
-    """
-    offset: Int
-
-    """
-    Maximum number of rows to return (defaults to 100 rows).
-    """
-    limit: Int = 100
-
-    """
-    Set to true to return distinct results.
-    """
-    distinct: Boolean = false
-
-    """
-    Filter condition to apply to the groups of aggregate queries.
-    """
-    having: LegacyMedicalHistory_Having
-  ): [LegacyMedicalHistory!]! @fdc_generated(from: "LegacyMedicalHistory", purpose: QUERY_MULTIPLE)
-  """
-  ✨ List `LegacyPatientFeedback` objects in the table and return selected fields, optionally filtered by `where` conditions
-  """
-  legacyPatientFeedbacks(
-    """
-    Filter condition to narrow down the query results.
-    """
-    where: LegacyPatientFeedback_Filter
-
-    """
-    Order the query results by specific fields.
-    """
-    orderBy: [LegacyPatientFeedback_Order!]
-
-    """
-    Number of rows to skip before starting to return the results.
-    """
-    offset: Int
-
-    """
-    Maximum number of rows to return (defaults to 100 rows).
-    """
-    limit: Int = 100
-
-    """
-    Set to true to return distinct results.
-    """
-    distinct: Boolean = false
-
-    """
-    Filter condition to apply to the groups of aggregate queries.
-    """
-    having: LegacyPatientFeedback_Having
-  ): [LegacyPatientFeedback!]! @fdc_generated(from: "LegacyPatientFeedback", purpose: QUERY_MULTIPLE)
-  """
-  ✨ List `LegacySourceInstant` objects in the table and return selected fields, optionally filtered by `where` conditions
-  """
-  legacySourceInstants(
-    """
-    Filter condition to narrow down the query results.
-    """
-    where: LegacySourceInstant_Filter
-
-    """
-    Order the query results by specific fields.
-    """
-    orderBy: [LegacySourceInstant_Order!]
-
-    """
-    Number of rows to skip before starting to return the results.
-    """
-    offset: Int
-
-    """
-    Maximum number of rows to return (defaults to 100 rows).
-    """
-    limit: Int = 100
-
-    """
-    Set to true to return distinct results.
-    """
-    distinct: Boolean = false
-
-    """
-    Filter condition to apply to the groups of aggregate queries.
-    """
-    having: LegacySourceInstant_Having
-  ): [LegacySourceInstant!]! @fdc_generated(from: "LegacySourceInstant", purpose: QUERY_MULTIPLE)
-  """
-  ✨ List `LegacyUhidCounter` objects in the table and return selected fields, optionally filtered by `where` conditions
-  """
-  legacyUhidCounters(
-    """
-    Filter condition to narrow down the query results.
-    """
-    where: LegacyUhidCounter_Filter
-
-    """
-    Order the query results by specific fields.
-    """
-    orderBy: [LegacyUhidCounter_Order!]
-
-    """
-    Number of rows to skip before starting to return the results.
-    """
-    offset: Int
-
-    """
-    Maximum number of rows to return (defaults to 100 rows).
-    """
-    limit: Int = 100
-
-    """
-    Set to true to return distinct results.
-    """
-    distinct: Boolean = false
-
-    """
-    Filter condition to apply to the groups of aggregate queries.
-    """
-    having: LegacyUhidCounter_Having
-  ): [LegacyUhidCounter!]! @fdc_generated(from: "LegacyUhidCounter", purpose: QUERY_MULTIPLE)
   """
   ✨ List `Notification` objects in the table and return selected fields, optionally filtered by `where` conditions
   """
@@ -1774,40 +986,6 @@ extend type Query {
     having: PatientLinkInvitation_Having
   ): [PatientLinkInvitation!]! @fdc_generated(from: "PatientLinkInvitation", purpose: QUERY_MULTIPLE)
   """
-  ✨ List `PatientReportedProfile` objects in the table and return selected fields, optionally filtered by `where` conditions
-  """
-  patientReportedProfiles(
-    """
-    Filter condition to narrow down the query results.
-    """
-    where: PatientReportedProfile_Filter
-
-    """
-    Order the query results by specific fields.
-    """
-    orderBy: [PatientReportedProfile_Order!]
-
-    """
-    Number of rows to skip before starting to return the results.
-    """
-    offset: Int
-
-    """
-    Maximum number of rows to return (defaults to 100 rows).
-    """
-    limit: Int = 100
-
-    """
-    Set to true to return distinct results.
-    """
-    distinct: Boolean = false
-
-    """
-    Filter condition to apply to the groups of aggregate queries.
-    """
-    having: PatientReportedProfile_Having
-  ): [PatientReportedProfile!]! @fdc_generated(from: "PatientReportedProfile", purpose: QUERY_MULTIPLE)
-  """
   ✨ List `ScheduleException` objects in the table and return selected fields, optionally filtered by `where` conditions
   """
   scheduleExceptions(
@@ -1977,38 +1155,4 @@ extend type Query {
     """
     having: User_Having
   ): [User!]! @fdc_generated(from: "User", purpose: QUERY_MULTIPLE)
-  """
-  ✨ List `WaitlistEntry` objects in the table and return selected fields, optionally filtered by `where` conditions
-  """
-  waitlistEntries(
-    """
-    Filter condition to narrow down the query results.
-    """
-    where: WaitlistEntry_Filter
-
-    """
-    Order the query results by specific fields.
-    """
-    orderBy: [WaitlistEntry_Order!]
-
-    """
-    Number of rows to skip before starting to return the results.
-    """
-    offset: Int
-
-    """
-    Maximum number of rows to return (defaults to 100 rows).
-    """
-    limit: Int = 100
-
-    """
-    Set to true to return distinct results.
-    """
-    distinct: Boolean = false
-
-    """
-    Filter condition to apply to the groups of aggregate queries.
-    """
-    having: WaitlistEntry_Having
-  ): [WaitlistEntry!]! @fdc_generated(from: "WaitlistEntry", purpose: QUERY_MULTIPLE)
 }

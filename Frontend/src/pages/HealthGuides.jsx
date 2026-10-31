@@ -49,7 +49,7 @@ const HealthGuides = () => {
       <p>SOOD CLINIC EDUCATION</p>
       <h1>Digestive health, explained clearly.</h1>
       <span>Browse articles and video explainers from Dr. Sood. These resources support informed conversations with your clinician; they do not replace personal medical advice.</span>
-      <div><Link to="/book">Book a consultation</Link><a href="#video-guides">Watch videos</a><a href="#articles">Read articles</a></div>
+      <div><a href="#video-guides">Watch videos</a><a href="#articles">Read articles</a></div>
     </header>
 
     <section className="health-guides__browse" aria-label="Find health guides">

@@ -2,18 +2,40 @@
   "service": "ak-sood-clinic-service",
   "location": "asia-south1",
   "deployableConnectors": ["clinic", "admin"],
+  "connectorIds": {
+    "clinic": "clinic",
+    "admin": "clinic-admin"
+  },
+  "connectorNamingNote": "Verified 2026-10-30: `deployableConnectors` lists the connector DIRECTORY names from `SQL/dataconnect/dataconnect.yaml` because that is what `SQL/scripts/release-check.cjs` compares (`connectorDirs`). The deployed Firebase connector IDs are declared in each `connector.yaml`: directory `clinic` -> id `clinic`, directory `admin` -> id `clinic-admin`. Renaming `admin` to `clinic-admin` here would make the source guard report `UNACCOUNTED_CONNECTOR` for the `admin` directory, so the IDs are recorded in `connectorIds` instead of replacing the directory list.",
   "excludedConnectors": {
-    "rehearsal": "LOCAL_SYNTHETIC_REHEARSAL: emulator-only migration rehearsal operations, never deployed"
+    "rehearsal": "DEFERRED (2026-10-30): the synthetic rehearsal connector depends on clinic_legacy_source_instants and is removed from dataconnect.yaml; its operations are kept in SQL/dataconnect/deferred/connectors/rehearsal and it is never deployed"
+  },
+  "deferredConnectorOperations": {
+    "admin": ["patient-profiles.gql", "patient-health.gql", "patient-appointments.gql", "staff-patients.gql", "clinic-day.gql", "weekly-hours.gql", "special-hours.gql", "scheduler-units.gql"],
+    "clinic": ["GetPublicDoctorHours (public-hours.gql)"],
+    "rehearsal": ["operations.gql"]
+  },
+  "firstMigration": {
+    "additions": [
+      "clinic_settings.interval_minutes",
+      "clinic_settings.buffer_before_minutes",
+      "clinic_settings.buffer_after_minutes",
+      "clinic_services.legacy_id (+ clinic_services_legacyId_uidx)",
+      "clinic_services.legacy_sort_order",
+      "clinic_departments.description",
+      "clinic_doctor_departments.sort_order default 0"
+    ],
+    "guestNullableAppointmentDeferred": true
   },
   "guestRelation": {
     "status": "approved",
     "approvedOn": "2026-10-30",
     "approvedBy": "owner",
     "guestsAllowed": true,
-    "appointmentPatientNullable": true,
+    "appointmentPatientNullable": false,
     "guestDataInPrivateDetails": true,
     "publicSqlAppointmentWriterReleased": false,
     "productionSchemaTransitionReviewed": false,
-    "note": "Owner confirmed 2026-10-30: guest appointments are allowed and SQL Appointment.patient stays nullable. Guest bookings keep their details in private patient details and never in a public projection; no public SQL appointment writer is released (Firestore createBooking remains the only live booking path). The production NOT NULL -> nullable transition is NOT yet reviewed for apply, and nothing is applied by this record."
+    "note": "Owner confirmed 2026-10-30 that guest appointments are allowed. The first production SQL migration keeps Appointment.patient REQUIRED: the NOT NULL -> nullable DDL and its ON DELETE SET NULL foreign key are deferred with the guest write path, and no public SQL appointment writer is released (Firestore createBooking remains the only live booking path). Reintroducing the nullable relation requires its own reviewed migration and re-approval with appointmentPatientNullable=true."
   }
 }

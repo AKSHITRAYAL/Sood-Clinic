@@ -12,7 +12,7 @@
     "test:rules": "XDG_CONFIG_HOME=/tmp/sood-clinic-firebase-config NO_UPDATE_NOTIFIER=1 FIREBASE_DEBUG_PATH=/tmp/sood-clinic-firebase-debug.log firebase emulators:exec --only firestore --project demo-sood-clinic \"vitest run tests/rules\"",
     "test:functions": "XDG_CONFIG_HOME=/tmp/sood-clinic-firebase-config NO_UPDATE_NOTIFIER=1 FIREBASE_DEBUG_PATH=/tmp/sood-clinic-firebase-debug.log firebase emulators:exec --only auth,firestore,functions --project demo-sood-clinic \"vitest run functions/test\"",
     "test:callables": "XDG_CONFIG_HOME=/tmp/sood-clinic-firebase-config NO_UPDATE_NOTIFIER=1 FIREBASE_DEBUG_PATH=/tmp/sood-clinic-firebase-debug.log firebase emulators:exec --only auth,firestore,functions --project demo-sood-clinic \"vitest run tests/callables\"",
-    "test:booking": "XDG_CONFIG_HOME=/tmp/sood-clinic-firebase-config NO_UPDATE_NOTIFIER=1 FIREBASE_DEBUG_PATH=/tmp/sood-clinic-firebase-debug.log firebase emulators:exec --only auth,firestore,functions,dataconnect --project demo-sood-clinic \"vitest run tests/booking/*.test.js\"",
+    "test:booking": "XDG_CONFIG_HOME=/tmp/sood-clinic-firebase-config NO_UPDATE_NOTIFIER=1 FIREBASE_DEBUG_PATH=/tmp/sood-clinic-firebase-debug.log firebase emulators:exec --only auth,firestore,functions,dataconnect --project demo-sood-clinic \"vitest run --no-file-parallelism tests/booking/*.test.js\"",
     "test:time": "vitest run tests/time",
     "test:schedule": "vitest run tests/schedule",
     "test:staff-access": "XDG_CONFIG_HOME=/tmp/sood-clinic-firebase-config NO_UPDATE_NOTIFIER=1 firebase emulators:exec --only auth,firestore,functions --project demo-sood-clinic \"node --test tests/staff-access/*.test.cjs\"",

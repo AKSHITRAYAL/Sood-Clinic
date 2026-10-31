@@ -2,6 +2,7 @@ import Navbar from '../components/Navbar';
 import NoticeSlider from '../components/Slider';
 import Footer from '../components/Footer';
 import { Link } from 'react-router-dom';
+import { doctorName } from '../lib/clinicLocations';
 
 const Home = () => (
   <>
@@ -9,11 +10,11 @@ const Home = () => (
     <main>
       <NoticeSlider />
       <section className="home-feature-strip" aria-label="Sood Clinic benefits">
-        {[['Gastroenterology care', 'Consultations with Dr. Brig. A. K. Sood VSM (Retd)'], ['Choose your visit', 'In-clinic and video consultation options'], ['Plan your visit', 'Book from available clinic times'], ['Stay informed', 'Practical digestive-health guides']].map(([title, detail]) => <article key={title} className="home-feature"><div><h2>{title}</h2><p>{detail}</p></div></article>)}
+        {[['Gastroenterology care', `Consultations with ${doctorName}`], ['Choose your visit', 'In-person and video consultation options'], ['Plan your visit', 'Request an appointment online'], ['Stay informed', 'Practical digestive-health guides']].map(([title, detail]) => <article key={title} className="home-feature"><div><h2>{title}</h2><p>{detail}</p></div></article>)}
       </section>
       <section className="container mx-auto my-12 max-w-4xl px-5 text-center">
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-700">Sood Clinic, Panchkula</p>
-        <h1 className="mt-3 text-3xl font-semibold md:text-5xl">Dr. Brig. A. K. Sood VSM (Retd)</h1>
+        <h1 className="mt-3 text-3xl font-semibold md:text-5xl">{doctorName}</h1>
         <p className="mt-3 text-lg text-slate-600">Gastroenterology consultations and follow-up care</p>
         <div className="mx-auto mt-7 max-w-xl rounded-2xl border bg-white p-6 text-center shadow-sm">
           <p className="mb-3 text-xs font-extrabold uppercase tracking-[0.16em] text-sky-700">Care that starts with a clear conversation</p>

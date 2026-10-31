@@ -15,28 +15,6 @@ export interface AppointmentEvent_Key {
   __typename?: 'AppointmentEvent_Key';
 }
 
-export interface AppointmentIntake_Key {
-  appointmentId: UUIDString;
-  questionId: string;
-  __typename?: 'AppointmentIntake_Key';
-}
-
-export interface AppointmentLegacySlot_Key {
-  appointmentId: UUIDString;
-  ordinal: number;
-  __typename?: 'AppointmentLegacySlot_Key';
-}
-
-export interface AppointmentPrivateDetails_Key {
-  appointmentId: UUIDString;
-  __typename?: 'AppointmentPrivateDetails_Key';
-}
-
-export interface AppointmentUnit_Key {
-  unitKey: string;
-  __typename?: 'AppointmentUnit_Key';
-}
-
 export interface Appointment_Key {
   id: UUIDString;
   __typename?: 'Appointment_Key';
@@ -52,16 +30,6 @@ export interface Branch_Key {
   __typename?: 'Branch_Key';
 }
 
-export interface CalendarBlock_Key {
-  id: UUIDString;
-  __typename?: 'CalendarBlock_Key';
-}
-
-export interface CalendarFeed_Key {
-  doctorId: UUIDString;
-  __typename?: 'CalendarFeed_Key';
-}
-
 export interface ClinicProfile_Key {
   id: string;
   __typename?: 'ClinicProfile_Key';
@@ -70,12 +38,6 @@ export interface ClinicProfile_Key {
 export interface ClinicSettings_Key {
   id: string;
   __typename?: 'ClinicSettings_Key';
-}
-
-export interface DayTokenCounter_Key {
-  doctorId: UUIDString;
-  dayKey: string;
-  __typename?: 'DayTokenCounter_Key';
 }
 
 export interface Department_Key {
@@ -87,11 +49,6 @@ export interface DoctorDepartment_Key {
   doctorId: UUIDString;
   departmentId: UUIDString;
   __typename?: 'DoctorDepartment_Key';
-}
-
-export interface DoctorScheduleState_Key {
-  doctorId: UUIDString;
-  __typename?: 'DoctorScheduleState_Key';
 }
 
 export interface DoctorSchedule_Key {
@@ -177,75 +134,6 @@ export interface GetPublicClinicData {
   } & Service_Key)[];
 }
 
-export interface GetPublicDoctorHoursData {
-  doctors: ({
-    legacyId?: string | null;
-    name: string;
-    branch: {
-      timezone: string;
-    };
-    state?: {
-      authority: string;
-      updatedAt?: TimestampString | null;
-    };
-    weekly: ({
-      startMinute: number;
-      endMinute: number;
-    })[];
-    exceptions: ({
-      date: DateString;
-      kind: string;
-      sessions: ({
-        startMinute: number;
-        endMinute: number;
-      })[];
-    })[];
-  })[];
-}
-
-export interface GetPublicDoctorHoursVariables {
-  doctorLegacyId: string;
-  date: DateString;
-  weekday: number;
-}
-
-export interface LegacyAuditRecord_Key {
-  id: UUIDString;
-  __typename?: 'LegacyAuditRecord_Key';
-}
-
-export interface LegacyBookingRequest_Key {
-  id: UUIDString;
-  __typename?: 'LegacyBookingRequest_Key';
-}
-
-export interface LegacyMedicalDocument_Key {
-  id: UUIDString;
-  __typename?: 'LegacyMedicalDocument_Key';
-}
-
-export interface LegacyMedicalHistory_Key {
-  id: UUIDString;
-  __typename?: 'LegacyMedicalHistory_Key';
-}
-
-export interface LegacyPatientFeedback_Key {
-  id: UUIDString;
-  __typename?: 'LegacyPatientFeedback_Key';
-}
-
-export interface LegacySourceInstant_Key {
-  entityType: string;
-  entityId: string;
-  field: string;
-  __typename?: 'LegacySourceInstant_Key';
-}
-
-export interface LegacyUhidCounter_Key {
-  id: UUIDString;
-  __typename?: 'LegacyUhidCounter_Key';
-}
-
 export interface Notification_Key {
   id: UUIDString;
   __typename?: 'Notification_Key';
@@ -267,11 +155,6 @@ export interface PatientLink_Key {
   patientId: UUIDString;
   userId: string;
   __typename?: 'PatientLink_Key';
-}
-
-export interface PatientReportedProfile_Key {
-  patientId: UUIDString;
-  __typename?: 'PatientReportedProfile_Key';
 }
 
 export interface Patient_Key {
@@ -315,11 +198,6 @@ export interface User_Key {
   __typename?: 'User_Key';
 }
 
-export interface WaitlistEntry_Key {
-  id: UUIDString;
-  __typename?: 'WaitlistEntry_Key';
-}
-
 interface GetPublicClinicRef {
   /* Allow users to create refs without passing in DataConnect */
   (): QueryRef<GetPublicClinicData, undefined>;
@@ -355,18 +233,6 @@ export const getPublicClinicContactRef: GetPublicClinicContactRef;
 
 export function getPublicClinicContact(options?: ExecuteQueryOptions): QueryPromise<GetPublicClinicContactData, undefined>;
 export function getPublicClinicContact(dc: DataConnect, options?: ExecuteQueryOptions): QueryPromise<GetPublicClinicContactData, undefined>;
-
-interface GetPublicDoctorHoursRef {
-  /* Allow users to create refs without passing in DataConnect */
-  (vars: GetPublicDoctorHoursVariables): QueryRef<GetPublicDoctorHoursData, GetPublicDoctorHoursVariables>;
-  /* Allow users to pass in custom DataConnect instances */
-  (dc: DataConnect, vars: GetPublicDoctorHoursVariables): QueryRef<GetPublicDoctorHoursData, GetPublicDoctorHoursVariables>;
-  operationName: string;
-}
-export const getPublicDoctorHoursRef: GetPublicDoctorHoursRef;
-
-export function getPublicDoctorHours(vars: GetPublicDoctorHoursVariables, options?: ExecuteQueryOptions): QueryPromise<GetPublicDoctorHoursData, GetPublicDoctorHoursVariables>;
-export function getPublicDoctorHours(dc: DataConnect, vars: GetPublicDoctorHoursVariables, options?: ExecuteQueryOptions): QueryPromise<GetPublicDoctorHoursData, GetPublicDoctorHoursVariables>;
 
 interface SaveOwnSqlProfileRef {
   /* Allow users to create refs without passing in DataConnect */

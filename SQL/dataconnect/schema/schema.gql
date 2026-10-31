@@ -1,4 +1,8 @@
-# Phase 1 structure only. All API access is defined in connector operations.
+# First-release schema: exactly the 22 deployed tables plus four additive columns.
+# Deferred local designs (legacy preservation, scheduler units, calendar, waitlist,
+# patient profile/health, guest-nullable appointments) are kept verbatim in
+# `SQL/dataconnect/deferred/schema.gql.deferred` and are NOT compiled or migrated.
+# All API access is defined in connector operations.
 type User @table(name: "clinic_users", key: "id") {
   id: String! @col(dataType: "varchar(128)")
   displayName: String! @col(dataType: "varchar(160)")
@@ -22,13 +26,6 @@ type Branch @table(name: "clinic_branches") {
   code: String! @unique
   name: String!
   address: String!
-  addressLine1: String
-  addressLine2: String
-  city: String
-  state: String
-  postalCode: String
-  country: String
-  legacyUpdatedBy: String
   timezone: String! @default(value: "Asia/Kolkata")
   active: Boolean! @default(value: true)
   createdAt: Timestamp! @default(expr: "request.time")
@@ -41,8 +38,6 @@ type Department @table(name: "clinic_departments") {
   code: String! @unique
   name: String!
   description: String
-  createdAt: Timestamp
-  legacyUpdatedBy: String
   active: Boolean! @default(value: true)
   publicBookingEnabled: Boolean! @default(value: false)
   sortOrder: Int! @default(value: 0)
@@ -57,8 +52,6 @@ type Doctor @table(name: "clinic_doctors") {
   registrationNumber: String! @unique
   bio: String
   photoPath: String
-  createdAt: Timestamp
-  legacyUpdatedBy: String
   active: Boolean! @default(value: true)
   bookingEnabled: Boolean! @default(value: false)
   updatedAt: Timestamp! @default(expr: "request.time")
@@ -93,63 +86,9 @@ type Patient @table(name: "clinic_patients") @index(fields: ["phone", "displayNa
   gender: String
   bloodGroup: String
   address: String
-  title: String
-  maritalStatus: String
-  addressLine1: String
-  city: String
-  state: String
-  postalCode: String
-  emergencyContactName: String
-  emergencyContactPhone: String
-  legacyRecordSource: String
-  legacyCreatedBy: String
-  legacyCreatedByUid: String
-  legacyCreatedByRole: String
-  legacyUpdatedBy: String
   archivedAt: Timestamp
   createdAt: Timestamp! @default(expr: "request.time")
   updatedAt: Timestamp! @default(expr: "request.time")
-}
-
-# Patient-reported health text is never part of manager demographic projections.
-# Local IAM health operations require current Auth and an accepted self-link;
-# no browser/callable access until the coordinated patient cutover.
-type PatientReportedProfile @table(name: "clinic_patient_reported_profiles", key: "patient") {
-  patient: Patient!
-  allergies: String
-  currentMedications: String
-  healthNotes: String
-}
-
-# Private preservation drafts, not finalized visits or download/access grants.
-# No connector operations expose these tables before scoped clinical cutover.
-type LegacyMedicalHistory @table(name: "clinic_legacy_medical_history") @index(fields: ["patientId", "createdAt"]) {
-  legacyId: String! @unique
-  patient: Patient!
-  doctor: Doctor
-  legacyDate: String
-  diagnosis: String
-  notes: String
-  details: String
-  createdAt: Timestamp
-  updatedAt: Timestamp
-}
-
-type LegacyMedicalDocument @table(name: "clinic_legacy_medical_documents") @index(fields: ["patientId", "createdAt"]) {
-  legacyId: String! @unique
-  patient: Patient!
-  doctor: Doctor
-  name: String
-  title: String
-  category: String
-  details: String
-  legacyUrl: String
-  storagePath: String
-  visibleToPatient: Boolean
-  contentType: String
-  sizeBytes: Int
-  createdAt: Timestamp
-  updatedAt: Timestamp
 }
 
 type PatientLink @table(name: "clinic_patient_links", key: ["patient", "user"]) @index(fields: ["userId"]) {
@@ -162,7 +101,7 @@ type PatientLink @table(name: "clinic_patient_links", key: ["patient", "user"]) 
 }
 
 # One pending clinic-verified grant per patient/account. Store only a hash, never
-# the one-time code. These operations are not wired into production patients yet.
+# the one-time code.
 type PatientLinkInvitation @table(name: "clinic_patient_link_invitations", key: ["patient", "user"]) {
   patient: Patient!
   user: User!
@@ -177,7 +116,6 @@ type PatientLinkInvitation @table(name: "clinic_patient_link_invitations", key: 
 type Service @table(name: "clinic_services") {
   legacyId: String @unique
   legacySortOrder: Int
-  legacyCreatedAt: Timestamp
   code: String! @unique
   name: String!
   durationMinutes: Int!
@@ -196,12 +134,9 @@ type DoctorService @table(name: "clinic_doctor_services", key: ["doctor", "servi
 # Private operational settings; never returned in public catalog operations.
 type ClinicSettings @table(name: "clinic_settings", key: "id") {
   id: String!
-  slotMinutes: Int
   intervalMinutes: Int
   bufferBeforeMinutes: Int
   bufferAfterMinutes: Int
-  createdAt: Timestamp
-  legacyUpdatedBy: String
   bookingWindowDays: Int! @default(value: 14)
   leadMinutes: Int! @default(value: 30)
   cancelCutoffMinutes: Int! @default(value: 120)
@@ -209,20 +144,7 @@ type ClinicSettings @table(name: "clinic_settings", key: "id") {
   updatedAt: Timestamp! @default(expr: "request.time")
 }
 
-# A row with zero windows means deliberately closed weekly hours, not fallback.
-# No connector exposes migration provenance or legacy exception text.
-type DoctorScheduleState @table(name: "clinic_doctor_schedule_states", key: "doctor") {
-  doctor: Doctor!
-  authority: String!
-  legacySourcePath: String @unique
-  legacyCreatedAt: Timestamp
-  legacyUpdatedBy: String
-  updatedAt: Timestamp
-}
-
 type DoctorSchedule @table(name: "clinic_doctor_schedules") @index(fields: ["doctorId", "weekday"]) {
-  legacyId: String @unique
-  sourceOrder: Int
   doctor: Doctor!
   weekday: Int!
   startMinute: Int!
@@ -231,12 +153,6 @@ type DoctorSchedule @table(name: "clinic_doctor_schedules") @index(fields: ["doc
 }
 
 type ScheduleException @table(name: "clinic_schedule_exceptions") @index(fields: ["doctorId", "date"]) {
-  legacyId: String @unique
-  legacyCreatedAt: Timestamp
-  legacyCreatedBy: String
-  legacyUpdatedBy: String
-  legacyNote: String
-  legacyReason: String
   doctor: Doctor!
   date: Date!
   kind: String!
@@ -245,24 +161,17 @@ type ScheduleException @table(name: "clinic_schedule_exceptions") @index(fields:
 }
 
 type ExceptionWindow @table(name: "clinic_exception_windows") {
-  legacyId: String @unique
-  sourceOrder: Int
   exception: ScheduleException!
   startMinute: Int!
   endMinute: Int!
 }
 
-# No booking API until atomic interval protection is implemented in Phase 6.
 type Appointment @table(name: "clinic_appointments") @index(fields: ["doctorId", "clinicDate", "startsAt"]) @index(fields: ["patientId", "startsAt"]) {
   legacyId: String @unique
-  department: Department
-  visitMode: String
-  legacyVisitType: String
-  createdByRole: String
   reference: String! @unique
-  # LOCAL draft: anonymous bookings have no patient; no contact-based ownership.
-  # Releasing this nullability change needs explicit non-additive diff review.
-  patient: Patient
+  # First release keeps the deployed required relation; the guest-nullable draft is
+  # deferred with its FK delete-behaviour review.
+  patient: Patient!
   doctor: Doctor!
   branch: Branch!
   service: Service!
@@ -271,16 +180,6 @@ type Appointment @table(name: "clinic_appointments") @index(fields: ["doctorId",
   clinicDate: Date!
   status: String!
   source: String!
-  # Phase 6 draft (LOCAL ONLY): guest booking contact and staff queue timestamps.
-  # intake answers live in AppointmentIntake; unit references are the FK on
-  # AppointmentUnit (no slotIds array on the patient-visible appointment).
-  contactEmail: String
-  contactEmailLower: String
-  contactPhoneKey: String
-  tokenNumber: Int
-  checkedInAt: Timestamp
-  startedAt: Timestamp
-  completedAt: Timestamp
   createdByUid: String
   consentVersion: String!
   consentAcceptedAt: Timestamp!
@@ -288,19 +187,7 @@ type Appointment @table(name: "clinic_appointments") @index(fields: ["doctorId",
   updatedAt: Timestamp! @default(expr: "request.time")
 }
 
-# Entirely private until explicit scoped projections exist; never select all fields
-# for manager history because legacyReason may contain clinical information.
 type AppointmentEvent @table(name: "clinic_appointment_events") @index(fields: ["appointmentId", "occurredAt"]) {
-  legacyId: String @unique
-  legacyReason: String
-  legacyCreatedAt: Timestamp
-  legacyUpdatedAt: Timestamp
-  legacyMetaSource: String
-  legacyMetaAction: String
-  legacyDate: Date
-  legacyFromDate: Date
-  legacyToDate: Date
-  legacyToTime: String
   appointment: Appointment!
   action: String!
   previousStatus: String
@@ -308,58 +195,6 @@ type AppointmentEvent @table(name: "clinic_appointment_events") @index(fields: [
   actorUid: String
   actorRole: String!
   occurredAt: Timestamp! @default(expr: "request.time")
-}
-
-# Sensitive source details, including health text and meeting-link capabilities.
-# No connector operation exposes this table before role-scoped module cutover.
-type AppointmentPrivateDetails @table(name: "clinic_appointment_private_details", key: "appointment") {
-  appointment: Appointment!
-  snapshotName: String
-  snapshotPhone: String
-  snapshotEmail: String
-  reason: String
-  phoneKey: String
-  legacySlotId: String
-  legacySlotListPresent: Boolean!
-  calendarProvider: String
-  calendarId: String
-  calendarEventId: String
-  calendarSyncStatus: String
-  calendarLastSyncedAt: Timestamp
-  calendarLastSyncError: String
-  videoStatus: String
-  videoJoinUrl: String
-  videoPreparedBy: String
-  videoPreparedAt: Timestamp
-  videoClearedBy: String
-  videoClearedAt: Timestamp
-  cancellationByUid: String
-  cancellationByRole: String
-  cancellationReason: String
-  cancellationAt: Timestamp
-  # Phase 6 draft (LOCAL ONLY): guest manage link; hash only, never the token.
-  manageTokenHash: String
-  manageCreatedAt: Timestamp
-  ipHash: String
-}
-
-# Historical lock references only, never used as SQL occupancy or access grants.
-type AppointmentLegacySlot @table(name: "clinic_appointment_legacy_slots", key: ["appointment", "ordinal"]) {
-  appointment: Appointment!
-  ordinal: Int!
-  legacySlotId: String!
-}
-
-# Immutable source-time evidence; SQL's microseconds do not retain nanoseconds.
-# A later importer must commit domain values and this evidence atomically.
-# This is private historical migration metadata, never current booking authority.
-type LegacySourceInstant @table(name: "clinic_legacy_source_instants", key: ["entityType", "entityId", "field"]) {
-  entityType: String!
-  entityId: String!
-  field: String!
-  sourcePath: String!
-  sqlValue: Timestamp!
-  exactValue: String!
 }
 
 type Notification @table(name: "clinic_notifications") @index(fields: ["status", "sendAfter"]) {
@@ -372,54 +207,6 @@ type Notification @table(name: "clinic_notifications") @index(fields: ["status",
   attempts: Int! @default(value: 0)
   sendAfter: Timestamp!
   createdAt: Timestamp! @default(expr: "request.time")
-}
-
-# Private retained history; never automatically publish or merge into live audit.
-type LegacyPatientFeedback @table(name: "clinic_legacy_patient_feedback") {
-  legacyId: String! @unique
-  patient: Patient!
-  appointment: Appointment! @unique
-  rating: Int!
-  comment: String
-  status: String!
-  reviewedBy: String
-  reviewedAt: Timestamp
-  publishedAt: Timestamp
-  createdAt: Timestamp
-  updatedAt: Timestamp
-}
-
-type LegacyAuditRecord @table(name: "clinic_legacy_audit_records") {
-  legacyId: String! @unique
-  actorUid: String
-  actorRole: String
-  action: String
-  resourceType: String
-  legacyResourceId: String
-  legacyMetadata: String
-  occurredAt: Timestamp
-  legacyCreatedAt: Timestamp
-  legacyUpdatedAt: Timestamp
-}
-
-# Private migration evidence, not a live allocator or caller-scoped retry receipt.
-type LegacyUhidCounter @table(name: "clinic_legacy_uhid_counters") {
-  legacyId: String! @unique
-  sourceValue: String!
-  observedSourceMax: String!
-  observedTargetMax: String
-  createdAt: Timestamp
-  updatedAt: Timestamp
-}
-
-type LegacyBookingRequest @table(name: "clinic_legacy_booking_requests") {
-  legacyId: String! @unique
-  legacyRequestKey: String!
-  appointment: Appointment!
-  reference: String!
-  status: String!
-  createdAt: Timestamp
-  updatedAt: Timestamp
 }
 
 # IDs and action codes only; clinical text is stored in later clinical tables.
@@ -448,95 +235,3 @@ type StaffAccessLock @table(name: "clinic_staff_access_locks", key: "id") {
   actorUid: String!
   createdAt: Timestamp! @default(expr: "request.time")
 }
-
-# Phase 6 scheduler drafts (LOCAL ONLY, 2026-10-20): no connector operation
-# exposes these before the coordinated scheduler slice; deployment stays behind
-# the guest/source/identity/backup release gates. Never model one row per start
-# time — occupancy is one row per aligned five-minute unit.
-type AppointmentUnit @table(name: "clinic_appointment_units", key: "unitKey") @index(fields: ["doctorId", "unitAt"]) @index(fields: ["appointmentId"]) {
-  # Units use a deterministic appointment-level status. The driver keeps each
-  # unit key in `{status}` designer slots so a single `ClaimAppointmentUnits`
-  # request can write the booked, confirmed, in_progress, completed, cancelled
-  # and expired states without ever rewriting over a held unit.
-  unitKey: String!
-  doctor: Doctor!
-  # Aligned to the five-minute grid (IST) by the handler, never client input.
-  unitAt: Timestamp!
-  kind: String!            # core | buffer | hold
-  appointment: Appointment # null while held; set when the hold converts
-  holdHash: String         # SHA-256 of the holdId; never the holdId itself
-  expiresAt: Timestamp     # hold rows only; expired holds are reclaimable
-  createdAt: Timestamp! @default(expr: "request.time")
-}
-
-# Staff-only availability removal; titles are never part of public projections.
-type CalendarBlock @table(name: "clinic_calendar_blocks") @index(fields: ["doctorId", "startsAt"]) {
-  doctor: Doctor!
-  kind: String!            # time_off | block
-  title: String!
-  startsAt: Timestamp!
-  endsAt: Timestamp!
-  allDay: Boolean!
-  dateKeyStart: String!
-  dateKeyEnd: String!
-  createdBy: String
-  createdAt: Timestamp! @default(expr: "request.time")
-  updatedAt: Timestamp! @default(expr: "request.time")
-}
-
-# Local design: waiter list design doc pass. No test or connector change belongs
-# in this block.
-
-# Local design: STATUS is the only schema change in this block; the rest is a doc pass to make
-# concurrency, retry and rollback targets precise. No scheduler callable is
-# exported and no release gate is changed until the scheduler slice passes locally.
-
-# Server-only waitlist; contact is written by callables and never browser-readable.
-type WaitlistEntry @table(name: "clinic_waitlist_entries") @index(fields: ["doctorId", "status"]) {
-  doctor: Doctor!
-  service: Service!
-  clinicDate: String       # IST YYYY-MM-DD; null/empty means any day
-  contactName: String!
-  contactPhoneKey: String!
-  contactEmail: String
-  status: String!          # waiting | offered | booked | expired | cancelled
-  offeredAt: Timestamp
-  createdAt: Timestamp! @default(expr: "request.time")
-  updatedAt: Timestamp! @default(expr: "request.time")
-}
-
-# Local design: waiter list design doc pass. No test or connector change belongs
-# in this block.
-
-# Feed tokens are stored hashed; the URL is returned once and never persisted.
-type CalendarFeed @table(name: "clinic_calendar_feeds", key: "doctor") {
-  doctor: Doctor!
-  tokenHash: String!
-  createdAt: Timestamp! @default(expr: "request.time")
-  rotatedAt: Timestamp
-}
-
-# Front-desk queue number per doctor/day (replaces Firestore counters/ token-*).
-type DayTokenCounter @table(name: "clinic_day_token_counters", key: ["doctor", "dayKey"]) {
-  doctor: Doctor!
-  dayKey: String!          # IST YYYY-MM-DD
-  nextNumber: Int!
-  updatedAt: Timestamp! @default(expr: "request.time")
-}
-
-# Booking intake answers; one bounded row per question, never free-form free JSON.
-type AppointmentIntake @table(name: "clinic_appointment_intake", key: ["appointment", "questionId"]) {
-  appointment: Appointment!
-  questionId: String!
-  answer: String!          # <= 500 chars, validated by the callable
-}
-
-# Local design: waiter list design doc pass. No test or connector change belongs
-# in this block.
-
-# Local design: waiter list design doc pass. No test or connector change belongs
-# in this block.
-
-# Local design: waiter list design doc pass. No test or connector change belongs
-# in this block.
-

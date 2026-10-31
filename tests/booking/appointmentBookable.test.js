@@ -100,7 +100,9 @@ beforeAll(async () => {
   // The foundation seed carries catalogue rows but no booking policy row, and the
   // settings projection requires one active format whose code matches its legacy id.
   await sql.query("DELETE FROM clinic_settings WHERE id='primary'");
-  await sql.query("INSERT INTO clinic_settings(id,booking_window_days,lead_minutes,slot_minutes,interval_minutes,buffer_before_minutes,buffer_after_minutes,cancel_cutoff_minutes,auto_confirm,updated_at) VALUES('primary',14,30,20,20,0,0,120,false,now())");
+  // slot_minutes is deferred from the first production migration with the legacy
+  // config mapper; only the three approved interval/buffer columns are seeded here.
+  await sql.query("INSERT INTO clinic_settings(id,booking_window_days,lead_minutes,interval_minutes,buffer_before_minutes,buffer_after_minutes,cancel_cutoff_minutes,auto_confirm,updated_at) VALUES('primary',14,30,20,0,0,120,false,now())");
   await sql.query("UPDATE clinic_services SET legacy_id='consultation',legacy_sort_order=0,updated_at=now() WHERE code='consultation'");
 
   openDay = istKey(3);

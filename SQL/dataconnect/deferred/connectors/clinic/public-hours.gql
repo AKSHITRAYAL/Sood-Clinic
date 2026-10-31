@@ -1,0 +1,20 @@
+# DEFERRED FROM THE FIRST PRODUCTION MIGRATION (2026-10-30): depends on
+# DoctorScheduleState / legacy ExceptionWindow fields and the unmounted
+# `Frontend/src/pages/SqlPublicDoctorHoursPage.jsx`. Not compiled.
+#
+# Read-only public hours projection. It exposes published clinic hours only;
+# appointments, patient data, legacy notes and schedule provenance stay private.
+query GetPublicDoctorHours($doctorLegacyId: String!, $date: Date!, $weekday: Int!)
+@auth(level: PUBLIC, insecureReason: "Published doctor hours only; no patient, appointment or private schedule fields.") {
+  doctors(where: {legacyId: {eq: $doctorLegacyId}, active: {eq: true}, bookingEnabled: {eq: true}}, limit: 2) {
+    legacyId name branch { timezone }
+    state: doctorScheduleState_on_doctor { authority updatedAt }
+    weekly: doctorSchedules_on_doctor(where: {weekday: {eq: $weekday}}, limit: 4, orderBy: [{startMinute: ASC}, {id: ASC}]) {
+      startMinute endMinute
+    }
+    exceptions: scheduleExceptions_on_doctor(where: {date: {eq: $date}}, limit: 2) {
+      date kind
+      sessions: exceptionWindows_on_exception(limit: 4, orderBy: [{startMinute: ASC}, {id: ASC}]) { startMinute endMinute }
+    }
+  }
+}

@@ -15,6 +15,7 @@ const AdminCatalogue = lazy(() => import('../pages/AdminCatalogue'));
 const AdminFeedback = lazy(() => import('../pages/AdminFeedback'));
 const AdminVisitTypes = lazy(() => import('../pages/AdminVisitTypes'));
 const VideoConsultations = lazy(() => import('../pages/VideoConsultations'));
+const ConsultationRequests = lazy(() => import('../pages/ConsultationRequests'));
 const StaffEntry = lazy(() => import('../pages/StaffEntry'));
 const StaffLogin = lazy(() => import('../pages/StaffLogin'));
 const RouteLoading = () => <main className="route-loading route-loading--staff" aria-live="polite">Loading secure workspace…</main>;
@@ -36,6 +37,7 @@ const StaffApp = () => <BrowserRouter><AppErrorBoundary staff><StaffSessionGuard
   <Route path="/staff/admin/visit-types" element={<AdminVisitTypes />} />
   </Route>
   <Route element={<StaffRoute />}><Route path="/staff/video" element={<VideoConsultations />} /></Route>
+  <Route element={<StaffRoute />}><Route path="/staff/requests" element={<ConsultationRequests />} /></Route>
   <Route element={<StaffRoute role="doctor" />}><Route path="/staff/doctor" element={<DoctorSchedule />} /></Route>
   <Route element={<StaffRoute role="manager" />}><Route path="/staff/manager" element={<ManagerWorkspace />} /></Route>
   <Route path="*" element={<Navigate to="/" replace />} />

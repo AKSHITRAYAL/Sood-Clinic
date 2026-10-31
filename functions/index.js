@@ -20,18 +20,16 @@ const { createClinicContact, sqlClinicContactStore } = require('./lib/clinicCont
 const { createSqlCatalogue, sqlCatalogueStore } = require('./lib/sqlCatalogue');
 const { createSqlPatientBackend, sqlPatientCallableOptions } = require('./lib/sqlPatientBackend');
 const { createSqlAuditLogBackend } = require('./lib/sqlAuditLog');
-const { createSqlClinicDayBackend } = require('./lib/sqlClinicDay');
-const { createSqlWeeklyHoursBackend } = require('./lib/sqlWeeklyHours');
-const { createSqlSpecialHoursBackend } = require('./lib/sqlSpecialHours');
 const { createBookingSettings, sqlBookingSettingsStore, selectVisitType } = require('./lib/bookingSettings');
 // TEMPORARY TECHNICAL DEBT (2026-10-25): see lib/bookingFallback.js. SQL stays the
 // authority; the Firestore read only covers an unusable SQL read until the reviewed
 // SQL seed + connector release ships.
 const { createBookingReads, firestoreCatalogue, firestoreConfig } = require('./lib/bookingFallback');
-const { createSchedulerHoldHandler } = require('./lib/schedulerHoldsCallable');
-const { createSqlSchedulerHolds } = require('./lib/sqlSchedulerHolds');
-const { createSqlSchedulerAvailability, sqlSchedulerAvailabilityStore } = require('./lib/sqlSchedulerAvailability');
-const { createSqlSchedulerClaims, sqlSchedulerClaimStore } = require('./lib/sqlSchedulerClaims');
+const { createConsultationWorkflow } = require('./lib/consultationRequests');
+// First production migration (2026-10-30): the clinic-day, weekly/special-hours,
+// patient profile/health/appointment, staff-patient and scheduler-unit callables are
+// deferred together with their SQL models and connector operations, so those libs
+// are intentionally not mounted here. See SQL/dataconnect/deferred/.
 
 admin.initializeApp();
 setGlobalOptions({ region: 'asia-south1', maxInstances: 10 });
@@ -572,37 +570,9 @@ const assertPhoneBookingCapacity = async (phoneKey, now = new Date()) => {
 };
 
 
-// Phase 6 hold path, exported for review with the rest of the scheduler slice.
-// The doctor's SQL UUID is resolved server-side here: the public catalogue exposes
-// only legacy ids, and `place` reads the schedule again for the claim itself, so one
-// bounded day read buys the identity. Two limits stand in for a rate limiter while
-// the Phase 6 throttling decision is open: App Check is enforced, and maxInstances
-// is capped at the same 1 used by the SQL patient backends.
-const schedulerDc = () => getDataConnect({ serviceId: 'ak-sood-clinic-service', location: 'asia-south1', connector: 'clinic-admin' });
-
-const schedulerDoctorIdentity = async ({ actorUid, doctorLegacyId, visitTypeId, dateKey }) => {
-  const rangeStart = istInstant(dateKey);
-  const rangeEnd = new Date(rangeStart.getTime() + 24 * 60 * 60 * 1000);
-  const source = await sqlSchedulerAvailabilityStore(schedulerDc()).read({ actorUid, doctorLegacyId, dateKey, rangeStart: rangeStart.toISOString(), rangeEnd: rangeEnd.toISOString() });
-  const doctors = Array.isArray(source?.doctors) ? source.doctors : [];
-  // Ambiguous or missing rows leave the UUID unset; the handler refuses rather than
-  // trusting a client-supplied identity.
-  const doctorId = doctors.length === 1 ? doctors[0].id : null;
-  return { doctorId, visitType: selectVisitType(await bookingReads().config(), visitTypeId) };
-};
-
-// Guest identity is still unresolved: the claim requires an active SQL user row, so
-// an anonymous hold fails closed until the guest-relation gate is reviewed. This
-// callable is not wired to any client yet.
-exports.holdAppointment = onCall({
-  ...bookingCallableOptions, enforceAppCheck: true, maxInstances: 1, timeoutSeconds: 30, memory: '256MiB',
-}, createSchedulerHoldHandler({
-  holds: createSqlSchedulerHolds({
-    availability: createSqlSchedulerAvailability({ store: sqlSchedulerAvailabilityStore(schedulerDc()) }),
-    claims: createSqlSchedulerClaims({ store: sqlSchedulerClaimStore(schedulerDc()) }),
-  }),
-  resolveDoctor: schedulerDoctorIdentity,
-}));
+// The Phase 6 scheduler hold callable (`holdAppointment`) is deferred with the unit,
+// calendar-block and schedule-state models; it has no client and no exported handler
+// in the first production migration.
 
 const slotBusyRanges = async (doctorId, dateKey) => {
   const snapshot = await db.collection('appointmentSlots').where('doctorId', '==', doctorId).where('dateKey', '==', dateKey).get();
@@ -1124,16 +1094,11 @@ exports.disconnectGoogleCalendar = onCall({ ...callableOptions }, async (request
 // and the durable link-attempt guard; the coordinated cutover (mounting the
 // staged pages, retiring legacy readers) stays behind the release gates.
 const sqlPatientHandler = name => request => createSqlPatientBackend({ auth: admin.auth(), dc: staffSql() })[name](request);
-exports.listSqlPatientProfiles = onCall(sqlPatientCallableOptions, sqlPatientHandler('listSqlPatientProfiles'));
-exports.getSqlPatientProfile = onCall(sqlPatientCallableOptions, sqlPatientHandler('getSqlPatientProfile'));
-exports.saveSqlPatientProfile = onCall(sqlPatientCallableOptions, sqlPatientHandler('saveSqlPatientProfile'));
-exports.getSqlPatientHealth = onCall(sqlPatientCallableOptions, sqlPatientHandler('getSqlPatientHealth'));
-exports.saveSqlPatientHealth = onCall(sqlPatientCallableOptions, sqlPatientHandler('saveSqlPatientHealth'));
-exports.listSqlPatientAppointments = onCall(sqlPatientCallableOptions, sqlPatientHandler('listSqlPatientAppointments'));
-exports.getSqlPatientAppointment = onCall(sqlPatientCallableOptions, sqlPatientHandler('getSqlPatientAppointment'));
-exports.searchSqlStaffPatients = onCall(sqlPatientCallableOptions, sqlPatientHandler('searchSqlStaffPatients'));
-exports.getSqlStaffPatientProfile = onCall(sqlPatientCallableOptions, sqlPatientHandler('getSqlStaffPatientProfile'));
-exports.saveSqlStaffPatientProfile = onCall(sqlPatientCallableOptions, sqlPatientHandler('saveSqlStaffPatientProfile'));
+// Deferred with the patient-profile/health/appointment/staff-patient models and
+// operations: listSqlPatientProfiles, getSqlPatientProfile, saveSqlPatientProfile,
+// getSqlPatientHealth, saveSqlPatientHealth, listSqlPatientAppointments,
+// getSqlPatientAppointment, searchSqlStaffPatients, getSqlStaffPatientProfile,
+// saveSqlStaffPatientProfile are not exported by this release.
 exports.issueSqlPatientLink = onCall(sqlPatientCallableOptions, sqlPatientHandler('issueSqlPatientLink'));
 exports.revokeSqlPatientLink = onCall(sqlPatientCallableOptions, sqlPatientHandler('revokeSqlPatientLink'));
 exports.acceptSqlPatientLink = onCall(sqlPatientCallableOptions, sqlPatientHandler('acceptSqlPatientLink'));
@@ -1142,11 +1107,54 @@ exports.acceptSqlPatientLink = onCall(sqlPatientCallableOptions, sqlPatientHandl
 // own audit event, and the unmounted UI keeps it off live staff routes.
 exports.listSqlAdminAuditLog = onCall(sqlPatientCallableOptions, request => createSqlAuditLogBackend({ auth: admin.auth(), dc: staffSql() }).listSqlAdminAuditLog(request));
 
-// Staff schedule slice (B011–B013): clinic-day reader and weekly/special-hours
-// editors under the same App-Check-enforced options; pages stay unmounted until
-// the coordinated release.
-exports.listSqlStaffClinicDay = onCall(sqlPatientCallableOptions, request => createSqlClinicDayBackend({ auth: admin.auth(), dc: staffSql() }).listSqlStaffClinicDay(request));
-exports.getSqlDoctorWeeklyHours = onCall(sqlPatientCallableOptions, request => createSqlWeeklyHoursBackend({ auth: admin.auth(), dc: staffSql() }).getSqlDoctorWeeklyHours(request));
-exports.saveSqlDoctorWeeklyHours = onCall(sqlPatientCallableOptions, request => createSqlWeeklyHoursBackend({ auth: admin.auth(), dc: staffSql() }).saveSqlDoctorWeeklyHours(request));
-exports.getSqlDoctorSpecialHours = onCall(sqlPatientCallableOptions, request => createSqlSpecialHoursBackend({ auth: admin.auth(), dc: staffSql() }).getSqlDoctorSpecialHours(request));
-exports.saveSqlDoctorSpecialHours = onCall(sqlPatientCallableOptions, request => createSqlSpecialHoursBackend({ auth: admin.auth(), dc: staffSql() }).saveSqlDoctorSpecialHours(request));
+// STAFF SCHEDULE SLICE DEFERRED (2026-10-30): listSqlStaffClinicDay,
+// get/saveSqlDoctorWeeklyHours and get/saveSqlDoctorSpecialHours need the
+// DoctorScheduleState/legacy-window models that are excluded from the first
+// production migration, so they are not exported by this release.
+
+// --- Consultation request workflow -----------------------------------------
+// Public booking now submits a request (in-person) or a video request; staff
+// approve or decline, and may hold a proposed time through an AppointmentProposal.
+// Approval/acceptance promotes the request to one confirmed appointment with the
+// shared 30-minute doctor-capacity units, event, audit and queued portal notice in
+// a single Firestore transaction. The SQL request/proposal draft is deferred.
+const removeAppointmentFromGoogle = async (appointmentId) => {
+  const ref = db.collection('appointments').doc(appointmentId);
+  const snapshot = await ref.get();
+  if (!snapshot.exists) return;
+  await deleteAppointmentFromGoogle({ ref, appointment: snapshot.data() });
+};
+
+const consultationWorkflow = () => createConsultationWorkflow({
+  db,
+  auth: admin.auth(),
+  FieldValue,
+  Timestamp,
+  requireLiveStaff,
+  loadConfig: () => bookingReads().config(),
+  loadCatalogue: () => bookingReads().catalogue(),
+  loadPolicy: async () => (await db.collection('clinic').doc('consultationPolicy').get()).data(),
+  enforceRateLimit: enforceBookingRateLimit,
+  externalBusy: async ({ doctorId, dateKey }) => (await externalBusyRanges({ doctorId, dateKey })).ranges,
+  syncAppointment: syncAppointmentToGoogle,
+  unsyncAppointment: removeAppointmentFromGoogle,
+});
+
+const consultationCallableOptions = { ...bookingCallableOptions, timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] };
+
+exports.getConsultationOptions = onCall(consultationCallableOptions, () => consultationWorkflow().getOptions());
+exports.getConsultationAvailability = onCall(consultationCallableOptions, request => consultationWorkflow().getAvailability(request));
+exports.submitConsultationRequest = onCall(consultationCallableOptions, request => consultationWorkflow().submitRequest(request));
+exports.getConsultationRequestStatus = onCall(consultationCallableOptions, request => consultationWorkflow().getRequestStatus(request));
+exports.cancelConsultationRequest = onCall(consultationCallableOptions, request => consultationWorkflow().cancelRequest(request));
+exports.respondToAppointmentProposal = onCall(consultationCallableOptions, request => consultationWorkflow().respondToProposal(request));
+
+exports.listConsultationRequests = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, request => consultationWorkflow().listRequests(request));
+exports.listConsultationProposals = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, request => consultationWorkflow().listProposals(request));
+exports.approveConsultationRequest = onCall({ ...callableOptions, timeoutSeconds: 60, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, request => consultationWorkflow().approveRequest(request));
+exports.declineConsultationRequest = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, request => consultationWorkflow().declineRequest(request));
+exports.bulkApproveConsultationRequests = onCall({ ...callableOptions, timeoutSeconds: 120, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, request => consultationWorkflow().bulkApprove(request));
+exports.offerAppointmentProposal = onCall({ ...callableOptions, timeoutSeconds: 60, memory: '256MiB' }, request => consultationWorkflow().offerProposal(request));
+exports.expireConsultationProposals = onCall({ ...callableOptions, timeoutSeconds: 120, memory: '256MiB' }, request => consultationWorkflow().expireProposals(request));
+exports.getConsultationPolicy = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, request => consultationWorkflow().getPolicy(request));
+exports.saveConsultationPolicy = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, request => consultationWorkflow().savePolicy(request));

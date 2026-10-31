@@ -1,10 +1,18 @@
 // @vitest-environment jsdom
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, expect, test, vi } from 'vitest';
 vi.mock('../lib/firebase', () => ({ auth: {}, functions: {} }));
 import { StaffRoute } from './StaffAccessProvider';
 import { StaffContext } from '../lib/staffSessionContext';
+
+// jsdom rewrites import.meta.url to an http URL, so resolve the entry points from disk.
+const sourceRoot = [resolve(globalThis.process.cwd(), 'src'), resolve(globalThis.process.cwd(), 'Frontend/src')].find((dir) => existsSync(resolve(dir, 'entry/staff.jsx')));
+if (!sourceRoot) throw new Error('Frontend sources were not found from the working directory.');
+const staffEntry = readFileSync(resolve(sourceRoot, 'entry/staff.jsx'), 'utf8');
+const publicEntry = readFileSync(resolve(sourceRoot, 'entry/public.jsx'), 'utf8');
 
 afterEach(cleanup);
 
@@ -50,4 +58,12 @@ test('a role mismatch is denied by default', () => {
 test('a matching staff role sees the workspace', () => {
   renderGuard(session({ role: 'doctor' }), 'doctor');
   expect(screen.getByText('protected workspace')).toBeTruthy();
+});
+
+// VideoConsultations relies on StaffRoute instead of gating itself, so the mount point
+// in the staff entry is the only thing standing between the page and an open route.
+test('the video page is mounted only through StaffRoute, never in the public bundle', () => {
+  expect(publicEntry).not.toContain('VideoConsultations');
+  expect(staffEntry.match(/import\('\.\.\/pages\/VideoConsultations'\)/g)).toHaveLength(1);
+  expect(staffEntry).toMatch(/<Route element=\{<StaffRoute\b[^>]*>\}>\s*<Route path="\/staff\/video" element=\{<VideoConsultations \/>\} \/>\s*<\/Route>/);
 });

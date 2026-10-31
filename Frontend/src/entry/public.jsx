@@ -5,6 +5,7 @@ import { staffUrl } from '../lib/portals';
 
 const About = lazy(() => import('../pages/About'));
 const Bookappointment = lazy(() => import('../pages/Bookappointment'));
+const ConsultationStatus = lazy(() => import('../pages/ConsultationStatus'));
 const Contact = lazy(() => import('../pages/Contact'));
 const Home = lazy(() => import('../pages/Home'));
 const HealthGuides = lazy(() => import('../pages/HealthGuides'));
@@ -24,6 +25,7 @@ const PublicApp = () => <BrowserRouter><AppErrorBoundary><Suspense fallback={<Ro
   <Route path="/guides" element={<HealthGuides />} />
   <Route path="/experience" element={<PatientExperience />} />
   <Route path="/book" element={<Bookappointment />} />
+  <Route path="/consultation-status" element={<ConsultationStatus />} />
   <Route path="/Booknow" element={<Navigate to="/book" replace />} />
   <Route path="/login" element={<Login />} />
   <Route path="/reset-password" element={<PasswordReset />} />
