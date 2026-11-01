@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
+import '../patient-portal-refinement.css';
 import { EmailAuthProvider, onAuthStateChanged, reauthenticateWithCredential, sendPasswordResetEmail, signOut, updatePassword } from 'firebase/auth';
 import { collection, doc, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
@@ -113,8 +114,13 @@ const PatientPortal = ({ view }) => {
   if (!user) return <Navigate to="/login" replace />;
 
   const name = profile.displayName || user.displayName || 'Patient';
+  const firstName = name
+    .replace(/^(mr|mrs|ms|miss|dr)\.?\s+/i, '')
+    .trim()
+    .split(/\s+/)[0] || 'there';
   const upcoming = appointments.filter(isUpcoming);
   const past = appointments.filter((item) => !isUpcoming(item));
+  const completedAppointments = appointments.filter((item) => item.status === 'completed');
   const doctorName = (appointment) => doctorNames[appointment.doctorId] || 'Your clinic provider';
   const navItems = [['overview', '/patient', 'Overview'], ['appointments', '/patient/appointments', 'Appointments'], ['video', '/patient/video', 'Online visits'], ['documents', '/patient/documents', 'Documents'], ['health', '/patient/health', 'Health profile'], ['profile', '/patient/account', 'Personal details'], ['security', '/patient/security', 'Account & security']];
   const titles = { appointments: 'Appointments', video: 'Online visits', documents: 'Documents', health: 'Health profile', profile: 'Personal details', security: 'Account & security' };
@@ -138,10 +144,163 @@ const PatientPortal = ({ view }) => {
   else if (view === 'health') content = healthForm;
   else if (view === 'profile') content = profileForm;
   else if (view === 'security') content = <section className="patient-security"><form className="patient-form" onSubmit={changePassword}><header><p className="section-kicker">Password</p><h2>Change password</h2><span>Confirm your current password before setting a new one.</span></header><div className="patient-form__stack"><label>Current password<input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" required /></label><label>New password<input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" minLength="8" required /></label><PasswordRequirements password={newPassword} /></div><button type="submit">Change password</button></form><section className="patient-page-card patient-security__reset"><p className="section-kicker">Reset by email</p><h2>Forgot your password?</h2><span>Send a time-limited reset link to {user.email}.</span><button type="button" onClick={sendReset}>Email reset link</button></section></section>;
-  else content = <><section className="patient-profile-hero"><article className="patient-profile-identity"><PatientAvatar name={name} photoUrl={user.photoURL} className="patient-avatar--large" /><div><p>Patient profile</p><h2>{name}</h2><span>{user.email}</span></div><Link to="/patient/account">Edit profile</Link></article><dl className="patient-profile-facts"><div><dt>Phone</dt><dd>{profile.phone || 'Not added'}</dd></div><div><dt>Date of birth</dt><dd>{profile.dateOfBirth || 'Not added'}</dd></div><div><dt>Blood group</dt><dd>{profile.bloodGroup || 'Not specified'}</dd></div><div><dt>Member since</dt><dd>{profile.createdAt ? new Date(profile.createdAt).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) : 'Recently joined'}</dd></div></dl></section><section className="patient-care-grid"><section className="patient-care-card patient-care-card--appointments"><div className="patient-card__head"><div><p className="section-kicker">Appointments</p><h2>Upcoming care</h2></div><Link to="/book">Book new</Link></div>{list(upcoming)}</section><section className="patient-care-card"><div className="patient-card__head"><div><p className="section-kicker">Documents</p><h2>From the clinic</h2></div><Link to="/patient/documents">View all</Link></div>{documents.length ? <ul className="health-record-list">{documents.slice(0, 3).map((entry) => <li key={entry.id}><strong>{entry.title} <em>{entry.category}</em></strong><span>{entry.details || 'Shared by Sood Clinic'}</span></li>)}</ul> : <div className="patient-empty-state"><strong>No documents yet</strong><span>Clinic-shared documents will appear here.</span></div>}</section><section className="patient-care-card patient-care-card--history"><div className="patient-card__head"><div><p className="section-kicker">Care history</p><h2>Past appointments</h2></div><Link to="/patient/appointments">View all</Link></div>{past.length ? <div className="patient-history-list">{past.slice(0, 4).map((item) => <article key={item.id}><div><strong>{formatWhen(item.startsAt)}</strong><span>{doctorName(item)}</span></div><span className={`appointment-status appointment-status--${item.status}`}>{item.status}</span></article>)}</div> : <p className="empty-state">Completed visits will appear here.</p>}</section></section></>;
+  else content = (
+    <>
+      <section className="patient-profile-hero" aria-label="Patient profile summary">
+        <article className="patient-profile-identity">
+          <PatientAvatar
+            name={name}
+            photoUrl={user.photoURL}
+            className="patient-avatar--large"
+          />
+          <div className="patient-profile-identity__details">
+            <p>Patient profile</p>
+            <h2>{name}</h2>
+            <span>{user.email}</span>
+            <Link to="/patient/account">
+              Edit profile <span aria-hidden="true">→</span>
+            </Link>
+          </div>
+        </article>
+
+        <dl className="patient-profile-facts">
+          <div>
+            <dt>Phone</dt>
+            <dd>{profile.phone || 'Not added'}</dd>
+          </div>
+          <div>
+            <dt>Date of birth</dt>
+            <dd>{profile.dateOfBirth || 'Not added'}</dd>
+          </div>
+          <div>
+            <dt>Blood group</dt>
+            <dd>{profile.bloodGroup || 'Not specified'}</dd>
+          </div>
+          <div>
+            <dt>Member since</dt>
+            <dd>
+              {profile.createdAt
+                ? new Date(profile.createdAt).toLocaleDateString('en-IN', {
+                    month: 'short',
+                    year: 'numeric',
+                  })
+                : 'Recently joined'}
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <section className="patient-care-grid" aria-label="Your care overview">
+        <section className="patient-care-card patient-care-card--appointments">
+          <div className="patient-card__head">
+            <div>
+              <p className="section-kicker">Appointments</p>
+              <h2>Upcoming care</h2>
+            </div>
+            <Link to="/book">Book appointment</Link>
+          </div>
+          {list(upcoming)}
+        </section>
+
+        <section className="patient-care-card">
+          <div className="patient-card__head">
+            <div>
+              <p className="section-kicker">Documents</p>
+              <h2>From the clinic</h2>
+            </div>
+            <Link to="/patient/documents">View all</Link>
+          </div>
+          {documents.length ? (
+            <ul className="health-record-list">
+              {documents.slice(0, 3).map((entry) => (
+                <li key={entry.id}>
+                  <strong>
+                    {entry.title} <em>{entry.category}</em>
+                  </strong>
+                  <span>{entry.details || 'Shared by Sood Clinic'}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="patient-empty-state">
+              <strong>No documents yet</strong>
+              <span>Clinic-shared documents will appear here.</span>
+            </div>
+          )}
+        </section>
+
+        <section className="patient-care-card patient-care-card--history">
+          <div className="patient-card__head">
+            <div>
+              <p className="section-kicker">Care history</p>
+              <h2>Past appointments</h2>
+            </div>
+            <Link to="/patient/appointments">View all</Link>
+          </div>
+          {past.length ? (
+            <div className="patient-history-list">
+              {past.slice(0, 4).map((item) => (
+                <article key={item.id}>
+                  <div>
+                    <strong>{formatWhen(item.startsAt)}</strong>
+                    <span>{doctorName(item)}</span>
+                  </div>
+                  <span className={`appointment-status appointment-status--${item.status}`}>
+                    {item.status}
+                  </span>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="patient-empty-state">
+              <strong>No previous visits yet</strong>
+              <span>Your completed and previous appointments will appear here.</span>
+            </div>
+          )}
+        </section>
+      </section>
+    </>
+  );
 
   const closePortalMenu = () => setPortalMenuOpen(false);
-  return <><main className={`patient-portal${portalMenuOpen ? ' patient-portal--menu-open' : ''}`}><button type="button" className="patient-sidebar__backdrop" aria-label="Close patient navigation" onClick={closePortalMenu} /><aside className={`patient-sidebar${portalMenuOpen ? ' patient-sidebar--open' : ''}`} aria-label="Patient portal navigation"><div className="patient-sidebar__mobile-head"><span>Menu</span><button type="button" onClick={closePortalMenu} aria-label="Close menu">×</button></div><Link to="/" className="patient-sidebar__brand" aria-label="Sood Clinic home" onClick={closePortalMenu}><SoodClinicMark /></Link><div className="patient-sidebar__person"><PatientAvatar name={name} photoUrl={user.photoURL} className="patient-avatar--large" /><strong>{name}</strong><span>Patient portal</span></div><nav>{navItems.map(([icon, href, label]) => <NavLink key={href} to={href} end={href === '/patient'} onClick={closePortalMenu} className={({ isActive }) => `patient-sidebar__link${isActive ? ' is-active' : ''}`}><PortalIcon name={icon} /><span>{label}</span></NavLink>)}</nav><Link className="patient-sidebar__book" to="/book" onClick={closePortalMenu}>Book appointment</Link><div className="patient-sidebar__bottom"><a href="/" onClick={closePortalMenu}>Public website</a><button type="button" onClick={() => signOut(auth)}>Sign out</button></div></aside><div className="patient-portal__content"><header className="patient-portal__topbar"><Link to="/" className="patient-topbar__brand" aria-label="Sood Clinic home"><SoodClinicMark /></Link><div className="patient-topbar__label"><p>SOOD CLINIC</p><span>Patient portal</span></div><nav><Link className="patient-topbar__book" to="/book">Book appointment</Link><Link className="patient-topbar__identity" to="/patient/account" aria-label="My profile"><PatientAvatar name={name} photoUrl={user.photoURL} /><span><strong>{name}</strong><small>My profile</small></span></Link><button type="button" className="patient-portal__menu-button" onClick={() => setPortalMenuOpen(true)} aria-label="Open patient navigation" aria-expanded={portalMenuOpen}><span /><span /><span /></button></nav></header><div className="patient-dashboard patient-dashboard--profile"><header className="patient-dashboard__heading"><p>{view === 'overview' ? 'YOUR CARE' : 'PATIENT PORTAL'}</p><h1>{view === 'overview' ? `Welcome back, ${name.split(' ')[0]}.` : titles[view]}</h1>{view === 'overview' && <span>Appointments, clinic documents and the personal details you choose to share.</span>}</header>{notice && <p className="admin-notice" role="status">{notice}</p>}{error && <p className="staff-login__error" role="alert">{error}</p>}{content}</div></div></main><ConfirmDialog open={Boolean(dialog)} title={dialog?.title || ""} message={dialog?.message || ""} confirmLabel={dialog?.confirmLabel || "Confirm"} requireReason={dialog?.requireReason} onCancel={() => setDialog(null)} onConfirm={(reason) => { const action = dialog?.onConfirm; setDialog(null); action?.(reason); }} /></>;
+  return <><main className={`patient-portal${portalMenuOpen ? ' patient-portal--menu-open' : ''}`}><button type="button" className="patient-sidebar__backdrop" aria-label="Close patient navigation" onClick={closePortalMenu} /><aside className={`patient-sidebar${portalMenuOpen ? ' patient-sidebar--open' : ''}`} aria-label="Patient portal navigation"><div className="patient-sidebar__mobile-head"><span>Menu</span><button type="button" onClick={closePortalMenu} aria-label="Close menu">×</button></div><Link to="/" className="patient-sidebar__brand" aria-label="Sood Clinic home" onClick={closePortalMenu}><SoodClinicMark /></Link><div className="patient-sidebar__person"><PatientAvatar name={name} photoUrl={user.photoURL} className="patient-avatar--large" /><strong>{name}</strong><span>Patient portal</span></div><nav aria-label="Patient portal sections">
+  <span className="patient-sidebar__nav-label">Your workspace</span>
+  {navItems.map(([icon, href, label]) => (
+    <NavLink
+      key={href}
+      to={href}
+      end={href === '/patient'}
+      onClick={closePortalMenu}
+      title={label}
+      aria-label={label}
+      className={({ isActive }) => `patient-sidebar__link${isActive ? ' is-active' : ''}`}
+    >
+      <PortalIcon name={icon} />
+      <span>{label}</span>
+    </NavLink>
+  ))}
+</nav><Link className="patient-sidebar__book" to="/book" onClick={closePortalMenu}>Book appointment</Link><div className="patient-sidebar__bottom"><a href="/" onClick={closePortalMenu}>Public website</a><button type="button" onClick={() => signOut(auth)}>Sign out</button></div></aside><div className="patient-portal__content"><header className="patient-portal__topbar"><Link to="/" className="patient-topbar__brand" aria-label="Sood Clinic home"><SoodClinicMark /></Link><div className="patient-topbar__label"><p>SOOD CLINIC</p><span>Patient portal</span></div><nav><Link className="patient-topbar__book" to="/book">Book appointment</Link><Link className="patient-topbar__identity" to="/patient/account" aria-label="My profile"><PatientAvatar name={name} photoUrl={user.photoURL} /><span><strong>{name}</strong><small>My profile</small></span></Link><button type="button" className="patient-portal__menu-button" onClick={() => setPortalMenuOpen(true)} aria-label="Open patient navigation" aria-expanded={portalMenuOpen}><span /><span /><span /></button></nav></header><div className="patient-dashboard patient-dashboard--profile"><header className="patient-dashboard__heading"><p>{view === 'overview' ? 'YOUR CARE' : 'PATIENT PORTAL'}</p><h1>{view === 'overview' ? `Welcome back, ${firstName}.` : titles[view]}</h1>{view === 'overview' && <span>Appointments, clinic documents and the personal details you choose to share.</span>}</header>{notice && <p className="admin-notice" role="status">{notice}</p>}
+      {error && <p className="staff-login__error" role="alert">{error}</p>}
+      {view === 'overview' && (
+        <section className="patient-overview-stats" aria-label="Your care summary">
+          <article className="patient-overview-stat">
+            <span>Upcoming visits</span>
+            <strong>{upcoming.length}</strong>
+            <small>Scheduled consultations</small>
+          </article>
+          <article className="patient-overview-stat">
+            <span>Clinic documents</span>
+            <strong>{documents.length}</strong>
+            <small>Documents shared with you</small>
+          </article>
+          <article className="patient-overview-stat">
+            <span>Completed visits</span>
+            <strong>{completedAppointments.length}</strong>
+            <small>Recorded completed appointments</small>
+          </article>
+        </section>
+      )}
+      {content}</div></div></main><ConfirmDialog open={Boolean(dialog)} title={dialog?.title || ""} message={dialog?.message || ""} confirmLabel={dialog?.confirmLabel || "Confirm"} requireReason={dialog?.requireReason} onCancel={() => setDialog(null)} onConfirm={(reason) => { const action = dialog?.onConfirm; setDialog(null); action?.(reason); }} /></>;
 };
 
 PatientPortal.propTypes = { view: PropTypes.oneOf(['overview', 'appointments', 'video', 'documents', 'health', 'profile', 'security']).isRequired };
