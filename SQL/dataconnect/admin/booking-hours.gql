@@ -1,0 +1,46 @@
+# IAM only. The published weekly hours and one date exception that public booking
+# reads. Authorization is the calling Function's; the browser never reaches these.
+query ReadDoctorBookingHours($doctorLegacyId: String!, $date: Date!, $weekday: Int!) @auth(level: NO_ACCESS) {
+  doctors(where: {legacyId: {eq: $doctorLegacyId}}, limit: 2) {
+    id legacyId name active bookingEnabled
+    branch { timezone }
+    state: doctorScheduleState_on_doctor { authority updatedAt }
+    weekly: doctorSchedules_on_doctor(where: {weekday: {eq: $weekday}}, limit: 15, orderBy: [{startMinute: ASC}, {id: ASC}]) {
+      startMinute endMinute
+    }
+    exceptions: scheduleExceptions_on_doctor(where: {date: {eq: $date}}, limit: 2) {
+      id date kind
+      windows: exceptionWindows_on_exception(limit: 10, orderBy: [{startMinute: ASC}, {id: ASC}]) { startMinute endMinute }
+    }
+  }
+}
+
+# closeDay writes the closure here first, so a date cannot stay bookable while its
+# affected appointments are being resolved in Firestore.
+mutation CloseDoctorDay(
+  $actorUid: String!, $actorRole: String!, $doctorId: UUID!, $doctorLegacyId: String!, $date: Date!,
+  $exceptionId: UUID!, $creating: Boolean!, $editing: Boolean!,
+  $expectedUpdatedAt: Timestamp!, $requestId: UUID!, $operation: String!, $resourceId: String!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: $actorUid, requestId: $requestId}) @check(expr: "this == null", message: "CLOSED_DAY_REQUEST_APPLIED") { operation }
+    others: scheduleExceptions(where: {doctorId: {eq: $doctorId}, date: {eq: $date}, id: {ne: $exceptionId}}, limit: 1)
+      @check(expr: "this.size() == 0", message: "CLOSED_DAY_DATE_CONFLICT") { id }
+  }
+  user_updateMany(where: {id: {eq: $actorUid}, active: {eq: true}}, data: {active: true})
+    @check(expr: "this == 1", message: "CLOSED_DAY_ACCOUNT_UNAVAILABLE")
+  doctor_updateMany(where: {id: {eq: $doctorId}, legacyId: {eq: $doctorLegacyId}, active: {eq: true}}, data: {active: true})
+    @check(expr: "this == 1", message: "CLOSED_DAY_DOCTOR_UNAVAILABLE")
+  doctorScheduleState_updateMany(
+    where: {doctorId: {eq: $doctorId}, authority: {eq: "doctor_schedule"}, updatedAt: {eq: $expectedUpdatedAt}},
+    data: {updatedAt_expr: "request.time"}
+  ) @check(expr: "this == 1", message: "CLOSED_DAY_VERSION_CHANGED")
+  scheduleException_insert(data: {id: $exceptionId, doctorId: $doctorId, date: $date, kind: "closed"}) @include(if: $creating)
+  scheduleException_updateMany(
+    where: {id: {eq: $exceptionId}, doctorId: {eq: $doctorId}, date: {eq: $date}, kind: {in: ["extra", "replace"]}},
+    data: {kind: "closed", updatedAt_expr: "request.time"}
+  ) @include(if: $editing) @check(expr: "this == 1", message: "CLOSED_DAY_EXCEPTION_UNAVAILABLE")
+  exceptionWindow_deleteMany(where: {exceptionId: {eq: $exceptionId}})
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: "clinic_day_closed", resourceType: "doctor_day", resourceId: $resourceId})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}

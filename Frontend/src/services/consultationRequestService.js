@@ -20,6 +20,7 @@ export const listConsultationRequests = (input = {}) => call('listConsultationRe
 export const listConsultationProposals = (requestId) => call('listConsultationProposals')({ requestId });
 export const approveConsultationRequest = (input) => call('approveConsultationRequest')(input);
 export const declineConsultationRequest = (input) => call('declineConsultationRequest')(input);
-export const bulkApproveConsultationRequests = (input) => call('bulkApproveConsultationRequests')(input);
+// The server permits a 120-second transaction/retry window for a bounded batch.
+export const bulkApproveConsultationRequests = (input) => httpsCallable(functions, 'bulkApproveConsultationRequests', { timeout: 130_000 })(input);
 export const offerAppointmentProposal = (input) => call('offerAppointmentProposal')(input);
 export const expireConsultationProposals = (limit) => call('expireConsultationProposals')({ limit });

@@ -49,9 +49,12 @@ function project(raw, doctorLegacyId, date) {
   }
   return { doctorId, doctorLegacyId, doctorName: doctor.name, date, timezone: 'Asia/Kolkata', updatedAt: version(doctor.state.updatedAt, incomplete), exception };
 }
-function createSqlSpecialHours({ auth, store }) {
+// See sqlWeeklyHours.js: the deployed schedule editor has no App Check site key, so
+// the exported backend keeps Auth/claims as the authority instead of rejecting every
+// browser call. `requireAppCheck` stays true for the guarded default.
+function createSqlSpecialHours({ auth, store, requireAppCheck = true }) {
   async function authority(request) {
-    if (typeof request?.app?.appId !== 'string' || !request.app.appId || request.app.alreadyConsumed === true) throw new HttpsError('failed-precondition', 'Reload the clinic website to verify this request.');
+    if (requireAppCheck && (typeof request?.app?.appId !== 'string' || !request.app.appId || request.app.alreadyConsumed === true)) throw new HttpsError('failed-precondition', 'Reload the clinic website to verify this request.');
     if (typeof request.data?.doctorId !== 'string' || !isDoctorId(request.data.doctorId) || typeof request.data.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(request.data.date)) throw invalid();
     try { istInstant(request.data.date); } catch { throw invalid(); }
     const actor = await requireLiveStaff(auth, request, { roles: ['admin', 'doctor'], doctorId: request.data.doctorId });
@@ -115,8 +118,8 @@ function sqlSpecialHoursStore(dc) {
     },
   };
 }
-function createSqlSpecialHoursBackend({ auth, dc }) {
-  const service = createSqlSpecialHours({ auth, store: sqlSpecialHoursStore(dc) });
+function createSqlSpecialHoursBackend({ auth, dc, requireAppCheck = true }) {
+  const service = createSqlSpecialHours({ auth, store: sqlSpecialHoursStore(dc), requireAppCheck });
   return Object.freeze({ getSqlDoctorSpecialHours: request => service.get(request), saveSqlDoctorSpecialHours: request => service.save(request) });
 }
 module.exports = { createSqlSpecialHours, sqlSpecialHoursStore, createSqlSpecialHoursBackend, sqlSpecialHoursCallableOptions };

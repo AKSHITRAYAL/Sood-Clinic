@@ -18,6 +18,18 @@ export function readAdminAuditLogAfter(dcOrVarsOrOptions, varsOrOptions, options
   return dcInstance.executeMutation('ReadAdminAuditLogAfter', inputVars, inputOpts);
 }
 
+export function readDoctorBookingHours(dcOrVarsOrOptions, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
+  dcInstance.useGen(true);
+  return dcInstance.executeQuery('ReadDoctorBookingHours', inputVars, inputOpts);
+}
+
+export function closeDoctorDay(dcOrVarsOrOptions, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
+  dcInstance.useGen(true);
+  return dcInstance.executeMutation('CloseDoctorDay', inputVars, inputOpts);
+}
+
 export function readBookingSettings(dcOrOptions, options) {
   const { dc: dcInstance, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrOptions, options, undefined);
   dcInstance.useGen(true);

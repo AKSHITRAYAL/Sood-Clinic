@@ -148,7 +148,7 @@ beforeAll(async () => {
     list: call('listConsultationRequests'),
     approve: call('approveConsultationRequest'),
     decline: call('declineConsultationRequest'),
-    bulk: call('bulkApproveConsultationRequests'),
+    bulk: httpsCallable(functions, 'bulkApproveConsultationRequests', { timeout: 130_000 }),
     propose: call('offerAppointmentProposal'),
     expire: call('expireConsultationProposals'),
   };
@@ -455,6 +455,38 @@ suite('appointment proposals', () => {
   }, 180_000);
 });
 
+suite('request queue privacy and pagination', () => {
+  it('keeps in-person and video clinical intake out of the manager projection', async () => {
+    await api.submit(inPerson({ reason: 'PRIVATE_CLINICAL_INTAKE' }));
+    await api.submit(video({ reason: 'PRIVATE_VIDEO_INTAKE' }));
+    await signInStaff('manager-intake', { role: 'manager' });
+    const { data } = await api.list({ status: 'pending' });
+    expect(data.requests).toHaveLength(2);
+    expect(data.requests.every(row => row.intake.restricted === true && !Object.hasOwn(row.intake, 'reason'))).toBe(true);
+    expect(JSON.stringify(data)).not.toContain('PRIVATE_');
+  }, 120_000);
+
+  it('pages through tied submission instants and binds cursors to filter and doctor scope', async () => {
+    const ids = [];
+    for (let index = 0; index < 3; index++) ids.push((await api.submit(inPerson())).data.requestId);
+    const at = new admin.firestore.Timestamp(2051497800, 123456789);
+    for (const id of ids) await db.collection('consultationRequests').doc(id).update({ createdAt: at });
+    await signInStaff('manager-request-pages', { role: 'manager' });
+    const first = (await api.list({ status: 'pending', limit: 2 })).data;
+    expect(first.requests).toHaveLength(2);
+    const storedAt = (await db.collection('consultationRequests').doc(ids[0]).get()).get('createdAt');
+    expect(storedAt.nanoseconds).toBe(123456000);
+    expect(first.nextCursor.nanoseconds).toBe(storedAt.nanoseconds);
+    const second = (await api.list({ status: 'pending', limit: 2, cursor: first.nextCursor })).data;
+    expect([...first.requests, ...second.requests].map(row => row.requestId)).toEqual(ids.sort());
+    expect(second.nextCursor).toBeNull();
+    await expect(api.list({ status: 'all', cursor: first.nextCursor })).rejects.toMatchObject({ code: 'functions/invalid-argument' });
+    await expect(api.list({ status: 'pending', limit: 101 })).rejects.toMatchObject({ code: 'functions/invalid-argument' });
+    await signInStaff('doctor-request-pages', { role: 'doctor', doctorId: DOCTOR });
+    await expect(api.list({ status: 'pending', cursor: first.nextCursor })).rejects.toMatchObject({ code: 'functions/invalid-argument' });
+  }, 120_000);
+});
+
 suite('bulk approval', () => {
   it('approves a deterministic bounded batch, records conflicts and keeps eligible rows', async () => {
     const first = (await api.submit(inPerson({ time: '10:00' }))).data;
@@ -473,20 +505,23 @@ suite('bulk approval', () => {
     // Deliberately shuffled ids: the server orders by submission time, then id.
     const { data } = await api.bulk({ requestIds: [later.requestId, conflict.requestId, first.requestId] });
     expect(data.confirmed).toBe(2);
-    expect(data.declined).toBe(1);
+    expect(data.declined).toBe(0);
+    expect(data.pending).toBe(1);
     expect(data.outcomes.map((row) => row.requestId)).toEqual([first.requestId, conflict.requestId, later.requestId]);
     expect(data.outcomes[0]).toMatchObject({ status: 'confirmed' });
-    expect(data.outcomes[1]).toMatchObject({ status: 'declined', code: 'SLOT_TAKEN' });
+    expect(data.outcomes[1]).toMatchObject({ status: 'pending', code: 'SLOT_TAKEN' });
     expect(data.outcomes[2]).toMatchObject({ status: 'confirmed' });
     expect((await db.collection('consultationRequests').doc(conflict.requestId).get()).data())
-      .toMatchObject({ status: 'declined', declineCode: 'SLOT_TAKEN' });
-    expect((await db.collection('auditLogs').where('action', '==', 'consultation_request_declined').get()).size).toBe(1);
+      .toMatchObject({ status: 'pending', declineCode: null, declineReason: null, version: 1 });
+    expect((await db.collection('auditLogs').where('action', '==', 'consultation_request_declined').get()).size).toBe(0);
+    expect((await db.collection('consultationRequests').doc(conflict.requestId).collection('events').where('action', '==', 'consultation_request_declined').get()).size).toBe(0);
+    expect((await db.collection('notifications').where('template', '==', 'consultation_declined').get()).size).toBe(0);
     expect(await count('appointments')).toBe(2);
     expect((await db.collection('appointmentSlots').get()).size).toBe(2);
 
     // Replaying the batch returns the same confirmed appointments without new writes.
     const replay = await api.bulk({ requestIds: [first.requestId, conflict.requestId, later.requestId] });
-    expect(replay.data.outcomes.map((row) => row.status)).toEqual(['confirmed', 'skipped', 'confirmed']);
+    expect(replay.data.outcomes.map((row) => row.status)).toEqual(['confirmed', 'pending', 'confirmed']);
     expect(replay.data.outcomes.filter((row) => row.status === 'confirmed').every((row) => row.idempotent)).toBe(true);
     expect(await count('appointments')).toBe(2);
   }, 240_000);
@@ -498,6 +533,20 @@ suite('bulk approval', () => {
     await expect(api.bulk({ requestIds: ['not-a-real-request'] }))
       .rejects.toMatchObject({ code: 'functions/not-found' });
   }, 120_000);
+
+  it('returns exactly one outcome per request after concurrent batch retries', async () => {
+    const first = (await api.submit(inPerson({ time: '09:30' }))).data;
+    const second = (await api.submit(inPerson({ time: '10:00' }))).data;
+    await signInStaff('admin-bulk-retry', { role: 'admin' });
+    const ids = [first.requestId, second.requestId];
+    const results = await Promise.all([api.bulk({ requestIds: ids }), api.bulk({ requestIds: ids })]);
+    for (const { data } of results) {
+      expect(data.outcomes).toHaveLength(2);
+      expect(new Set(data.outcomes.map(row => row.requestId)).size).toBe(2);
+      expect(data.confirmed).toBe(2);
+    }
+    expect(await count('appointments')).toBe(2);
+  }, 180_000);
 });
 
 suite('request status and cancellation link', () => {

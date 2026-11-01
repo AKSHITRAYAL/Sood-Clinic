@@ -38,9 +38,12 @@ function project(raw, doctorLegacyId) {
     || typeof row.name !== 'string' || !row.name.trim() || row.name.length > 160 || /[\x00-\x1f\x7f]/.test(row.name)) throw incomplete();
   return { doctorId, doctorLegacyId, doctorName: row.name, timezone: 'Asia/Kolkata', updatedAt: timestamp(row.state.updatedAt, incomplete), sessions: sessions(row.sessions, incomplete) };
 }
-function createSqlWeeklyHours({ auth, store }) {
+// `requireAppCheck` mirrors the deployed schedule editor, which has never required an
+// App Check proof because no site key is configured. Staff Auth + live claims remain
+// the authority; flip this on only with a configured App Check provider.
+function createSqlWeeklyHours({ auth, store, requireAppCheck = true }) {
   async function authority(request) {
-    if (typeof request?.app?.appId !== 'string' || !request.app.appId || request.app.alreadyConsumed === true) throw new HttpsError('failed-precondition', 'Reload the clinic website to verify this request.');
+    if (requireAppCheck && (typeof request?.app?.appId !== 'string' || !request.app.appId || request.app.alreadyConsumed === true)) throw new HttpsError('failed-precondition', 'Reload the clinic website to verify this request.');
     if (typeof request.data?.doctorId !== 'string' || !isDoctorId(request.data.doctorId)) throw invalid();
     const actor = await requireLiveStaff(auth, request, { roles: ['admin', 'doctor'], doctorId: request.data.doctorId });
     if (request.auth.token.auth_time > Date.now() / 1000 + 60) throw new HttpsError('permission-denied', 'Sign in again to verify staff access.');
@@ -100,8 +103,8 @@ function sqlWeeklyHoursStore(dc) {
     },
   };
 }
-function createSqlWeeklyHoursBackend({ auth, dc }) {
-  const service = createSqlWeeklyHours({ auth, store: sqlWeeklyHoursStore(dc) });
+function createSqlWeeklyHoursBackend({ auth, dc, requireAppCheck = true }) {
+  const service = createSqlWeeklyHours({ auth, store: sqlWeeklyHoursStore(dc), requireAppCheck });
   return Object.freeze({ getSqlDoctorWeeklyHours: request => service.get(request), saveSqlDoctorWeeklyHours: request => service.save(request) });
 }
 module.exports = { createSqlWeeklyHours, sqlWeeklyHoursStore, createSqlWeeklyHoursBackend, sqlWeeklyHoursCallableOptions };

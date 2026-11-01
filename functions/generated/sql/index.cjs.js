@@ -21,6 +21,20 @@ function readAdminAuditLogAfter(dcOrVarsOrOptions, varsOrOptions, options) {
 }
 exports.readAdminAuditLogAfter = readAdminAuditLogAfter;
 
+function readDoctorBookingHours(dcOrVarsOrOptions, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
+  dcInstance.useGen(true);
+  return dcInstance.executeQuery('ReadDoctorBookingHours', inputVars, inputOpts);
+}
+exports.readDoctorBookingHours = readDoctorBookingHours;
+
+function closeDoctorDay(dcOrVarsOrOptions, varsOrOptions, options) {
+  const { dc: dcInstance, vars: inputVars, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrVarsOrOptions, varsOrOptions, options, true, true);
+  dcInstance.useGen(true);
+  return dcInstance.executeMutation('CloseDoctorDay', inputVars, inputOpts);
+}
+exports.closeDoctorDay = closeDoctorDay;
+
 function readBookingSettings(dcOrOptions, options) {
   const { dc: dcInstance, options: inputOpts} = validateAdminArgs(connectorConfig, dcOrOptions, options, undefined);
   dcInstance.useGen(true);

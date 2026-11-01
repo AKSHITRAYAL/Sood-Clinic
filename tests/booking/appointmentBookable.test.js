@@ -21,6 +21,7 @@ const PROJECT = 'demo-sood-clinic';
 const BRANCH = 'sood-clinic';
 const DEPARTMENT = 'gastroenterology';
 const DOCTOR = 'brig-ak-sood';
+const DOCTOR_ID = '00000000-0000-4000-8000-000000000003';
 const VISIT_TYPE = 'consultation';
 const PASSWORD = 'Synthetic-pass-1';
 
@@ -72,6 +73,11 @@ const submission = (overrides = {}) => ({
 });
 
 const appointmentCount = async () => (await db.collection('appointments').get()).size;
+const closeClinicDay = async (dateKey) => {
+  await sql.query('DELETE FROM clinic_exception_windows WHERE exception_id IN (SELECT id FROM clinic_schedule_exceptions WHERE date=$1)', [dateKey]);
+  await sql.query('DELETE FROM clinic_schedule_exceptions WHERE date=$1', [dateKey]);
+  await sql.query("INSERT INTO clinic_schedule_exceptions(doctor_id,date,kind,updated_at) VALUES($1,$2,'closed',now())", [DOCTOR_ID, dateKey]);
+};
 const slotDoc = (dateKey, time) => db.collection('appointmentSlots')
   .doc(`${DOCTOR}_${dateKey.replaceAll('-', '')}_${time.replace(':', '')}`);
 
@@ -106,11 +112,16 @@ beforeAll(async () => {
   await sql.query("UPDATE clinic_services SET legacy_id='consultation',legacy_sort_order=0,updated_at=now() WHERE code='consultation'");
 
   openDay = istKey(3);
-  // Recurring weekly hours are a Firestore-era scheduling source, not catalogue authority.
-  await db.collection('doctorSchedules').doc(DOCTOR).set({
-    sessions: Array.from({ length: 7 }, (_, weekday) => ({ weekday, start: '09:00', end: '12:00' })),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
+  // Weekly hours live in SQL only: one 09:00–12:00 session on every weekday plus the
+  // explicit schedule-authority marker the booking reader requires.
+  await sql.query('DELETE FROM clinic_exception_windows');
+  await sql.query('DELETE FROM clinic_schedule_exceptions');
+  await sql.query('DELETE FROM clinic_doctor_schedules');
+  await sql.query('DELETE FROM clinic_doctor_schedule_states');
+  await sql.query("INSERT INTO clinic_doctor_schedule_states(doctor_id,authority,updated_at) VALUES($1,'doctor_schedule',now())", [DOCTOR_ID]);
+  for (let weekday = 0; weekday < 7; weekday += 1) {
+    await sql.query('INSERT INTO clinic_doctor_schedules(doctor_id,weekday,start_minute,end_minute,source_order,updated_at) VALUES($1,$2,540,720,$3,now())', [DOCTOR_ID, weekday, weekday]);
+  }
 
   const app = initializeApp({ projectId: PROJECT, apiKey: 'demo-api-key' }, 'booking-harness');
   const auth = getAuth(app);
@@ -126,9 +137,11 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   if (!emulators) return;
-  for (const name of ['appointments', 'appointmentSlots', 'bookingRequests', 'auditLogs', 'rateLimits', 'scheduleExceptions']) {
+  for (const name of ['appointments', 'appointmentSlots', 'bookingRequests', 'auditLogs', 'rateLimits']) {
     await db.recursiveDelete(db.collection(name));
   }
+  await sql.query('DELETE FROM clinic_exception_windows');
+  await sql.query('DELETE FROM clinic_schedule_exceptions');
   if (createdUsers.length) {
     await Promise.all(createdUsers.splice(0).map((uid) => config.authAdmin.deleteUser(uid).catch(() => {})));
   }
@@ -139,6 +152,10 @@ afterAll(async () => {
   await Promise.all(createdUsers.map((uid) => config.authAdmin.deleteUser(uid).catch(() => {})));
   await sql?.query("DELETE FROM clinic_settings WHERE id='primary'");
   await sql?.query("UPDATE clinic_services SET legacy_id=NULL,legacy_sort_order=NULL,updated_at=now() WHERE code='consultation'");
+  await sql?.query('DELETE FROM clinic_exception_windows');
+  await sql?.query('DELETE FROM clinic_schedule_exceptions');
+  await sql?.query('DELETE FROM clinic_doctor_schedules');
+  await sql?.query('DELETE FROM clinic_doctor_schedule_states');
   await sql?.end();
 }, 60_000);
 
@@ -159,7 +176,7 @@ suite('getAvailability', () => {
   }, 60_000);
 
   it('returns no slots for a closed exception day or a date outside the booking window', async () => {
-    await db.collection('scheduleExceptions').doc(`${DOCTOR}_${openDay}`).set({ type: 'closed', sessions: [] });
+    await closeClinicDay(openDay);
     expect((await getAvailability({ doctorId: DOCTOR, dateKey: openDay })).data.slots).toEqual([]);
     expect((await getAvailability({ doctorId: DOCTOR, dateKey: istKey(40) })).data.slots).toEqual([]);
   }, 60_000);
@@ -261,7 +278,7 @@ suite('createBooking', () => {
   }, 120_000);
 
   it('refuses a closed clinic day that is closed after the availability read', async () => {
-    await db.collection('scheduleExceptions').doc(`${DOCTOR}_${openDay}`).set({ type: 'closed', sessions: [] });
+    await closeClinicDay(openDay);
     await expect(createBooking(submission({ time: '09:00' }))).rejects.toMatchObject({ code: 'functions/failed-precondition' });
     expect(await appointmentCount()).toBe(0);
   }, 60_000);
@@ -299,7 +316,7 @@ suite('createBooking', () => {
   }, 60_000);
 
   it('throttles repeated attempts from one client after ten in the window', async () => {
-    await db.collection('scheduleExceptions').doc(`${DOCTOR}_${openDay}`).set({ type: 'closed', sessions: [] });
+    await closeClinicDay(openDay);
     for (let attempt = 1; attempt <= 10; attempt += 1) {
       await expect(createBooking(submission({ time: '09:00' }))).rejects.toMatchObject({ code: 'functions/failed-precondition' });
     }

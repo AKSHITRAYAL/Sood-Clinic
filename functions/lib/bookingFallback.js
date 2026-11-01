@@ -9,12 +9,11 @@
 //
 // Production path today: reads (`getBookingCatalog`, `getAvailability`) try SQL
 // `ReadSqlCatalogue`/`ReadBookingSettings` first and land here only when that read
-// throws unavailable/failed-precondition/internal. `getAvailability` still reads
-// Firestore `doctors` (embedded weeklySchedule), `doctorSchedules`,
-// `scheduleExceptions` and `appointmentSlots` for occupancy. Every booking write
-// (`createBooking`, `transitionAppointment`, `reschedule*`, `cancel*`, `closeDay`) is a
-// Firestore transaction plus Google Calendar; only `holdAppointment` writes SQL, and
-// no client calls it.
+// throws unavailable/failed-precondition/internal. Weekly hours and date exceptions
+// come from SQL (`ReadDoctorBookingHours`); Firestore `appointmentSlots` still supplies
+// occupancy, and every booking write (`createBooking`, `transitionAppointment`,
+// `reschedule*`, `cancel*`, `closeDay`) is a Firestore transaction plus Google
+// Calendar. No SQL appointment/occupancy writer is exported.
 // Removal needs all of: a reviewed seed for `clinic_settings` and
 // `clinic_services.legacy_id`; a released connector exposing those two reads; verified
 // backup/PITR plus a rehearsed rollback; the guest-relation DDL/API review closed; and

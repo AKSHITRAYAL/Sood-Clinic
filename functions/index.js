@@ -2,7 +2,7 @@ const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https')
 const { setGlobalOptions } = require('firebase-functions/v2');
 const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
-const { FieldValue, Timestamp } = require('firebase-admin/firestore');
+const { FieldValue, Timestamp, FieldPath } = require('firebase-admin/firestore');
 const crypto = require('crypto');
 const { istDateKey, istInstant, toIstParts, weekdayIst } = require('./lib/ist');
 const { buildAvailability, makeSlotId } = require('./lib/availability');
@@ -24,15 +24,20 @@ const { createBookingSettings, sqlBookingSettingsStore, selectVisitType } = requ
 // Catalogue and booking policy now have one SQL authority after verified import.
 const { createBookingReads } = require('./lib/bookingFallback');
 const { createConsultationWorkflow } = require('./lib/consultationRequests');
-// First production migration (2026-10-30): the clinic-day, weekly/special-hours,
-// patient profile/health/appointment, staff-patient and scheduler-unit callables are
-// deferred together with their SQL models and connector operations, so those libs
-// are intentionally not mounted here. See SQL/dataconnect/deferred/.
+const { createStaffAppointmentReader, firestoreStaffAppointmentStore } = require('./lib/staffAppointments');
+const { createSqlWeeklyHoursBackend } = require('./lib/sqlWeeklyHours');
+const { createSqlSpecialHoursBackend } = require('./lib/sqlSpecialHours');
+const { createSqlBookingHours, createSqlClosedDay } = require('./lib/sqlBookingHours');
+// Schedules and date exceptions have one authority: SQL. The public booking reader and
+// both staff editors use the same connector operations. Appointment, occupancy,
+// request and Calendar writes remain Firestore (see README remaining runtime domains).
 
 admin.initializeApp();
 setGlobalOptions({ region: 'asia-south1', maxInstances: 10 });
 
 const db = admin.firestore();
+exports.listStaffAppointments = onCall({ region: 'asia-south1', invoker: 'public', timeoutSeconds: 30, memory: '256MiB', maxInstances: 1 },
+  request => createStaffAppointmentReader({ auth: admin.auth(), store: firestoreStaffAppointmentStore(db, { Timestamp, FieldPath }) })(request));
 const GOOGLE_CALENDAR_CLIENT_ID = defineSecret('GOOGLE_CALENDAR_CLIENT_ID');
 const GOOGLE_CALENDAR_CLIENT_SECRET = defineSecret('GOOGLE_CALENDAR_CLIENT_SECRET');
 const GOOGLE_CALENDAR_TOKEN_KEY = defineSecret('GOOGLE_CALENDAR_TOKEN_KEY');
@@ -55,57 +60,10 @@ const auditStaffAccess = async ({ actorUid, actorRole = 'admin', action, targetU
 });
 
 
-const isClinicTime = (value) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || ''));
-const timeToMinutes = (value) => {
-  const [hour, minute] = String(value).split(':').map(Number);
-  return hour * 60 + minute;
-};
-const scheduleAuthority = async (request, doctorId) => {
-  const user = await requireLiveStaff(admin.auth(), request, { roles: ['admin', 'doctor'], doctorId });
-  return user.customClaims.role;
-};
-const normaliseScheduleSessions = (value) => {
-  if (!Array.isArray(value) || value.length > 14) throw new HttpsError('invalid-argument', 'Provide at most fourteen weekly clinic hours.');
-  const sessions = value.map((session) => ({ weekday: Number(session?.weekday), start: String(session?.start || ''), end: String(session?.end || '') }));
-  if (sessions.some((session) => !Number.isInteger(session.weekday) || session.weekday < 0 || session.weekday > 6 || !isClinicTime(session.start) || !isClinicTime(session.end) || timeToMinutes(session.start) >= timeToMinutes(session.end))) throw new HttpsError('invalid-argument', 'Each weekly session needs a valid weekday and start/end time.');
-  sessions.sort((left, right) => left.weekday - right.weekday || timeToMinutes(left.start) - timeToMinutes(right.start));
-  if (sessions.some((session, index) => index > 0 && session.weekday === sessions[index - 1].weekday && timeToMinutes(session.start) < timeToMinutes(sessions[index - 1].end))) throw new HttpsError('invalid-argument', 'Weekly clinic sessions cannot overlap.');
-  return sessions;
-};
-const normaliseExceptionSessions = (value) => {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 4) throw new HttpsError('invalid-argument', 'Provide between one and four special-hours sessions.');
-  const sessions = value.map((session) => ({ start: String(session?.start || ''), end: String(session?.end || '') }));
-  if (sessions.some((session) => !isClinicTime(session.start) || !isClinicTime(session.end) || timeToMinutes(session.start) >= timeToMinutes(session.end))) throw new HttpsError('invalid-argument', 'Each special-hours session needs a valid start and end time.');
-  sessions.sort((left, right) => timeToMinutes(left.start) - timeToMinutes(right.start));
-  if (sessions.some((session, index) => index > 0 && timeToMinutes(session.start) < timeToMinutes(sessions[index - 1].end))) throw new HttpsError('invalid-argument', 'Special clinic sessions cannot overlap.');
-  return sessions;
-};
-
-// Scheduling writes are server-owned so browser-supplied audit fields and
-// closed-day safeguards cannot be bypassed. A closure always goes through
-// closeDay, which previews and resolves affected appointments first.
-exports.saveDoctorSchedule = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
-  const doctorId = trimmed(request.data?.doctorId, 120);
-  if (!isDoctorId(doctorId)) throw new HttpsError('invalid-argument', 'Choose a valid doctor.');
-  const role = await scheduleAuthority(request, doctorId);
-  const sessions = normaliseScheduleSessions(request.data?.sessions);
-  await db.collection('doctorSchedules').doc(doctorId).set({ doctorId, sessions, updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid }, { merge: true });
-  await db.collection('auditLogs').add({ at: FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role }, action: 'doctor_schedule_saved', resource: { type: 'doctor_schedule', id: doctorId }, meta: { sessionCount: sessions.length } });
-  return { message: 'Regular clinic hours saved.' };
-});
-
-exports.saveScheduleException = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
-  const doctorId = trimmed(request.data?.doctorId, 120);
-  const dateKey = trimmed(request.data?.dateKey, 10);
-  const type = request.data?.type;
-  if (!isDoctorId(doctorId) || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !['extra', 'replace'].includes(type)) throw new HttpsError('invalid-argument', 'Choose valid special clinic hours.');
-  const role = await scheduleAuthority(request, doctorId);
-  const sessions = normaliseExceptionSessions(request.data?.sessions);
-  const ref = db.collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`);
-  await ref.set({ doctorId, dateKey, type, sessions, updatedAt: FieldValue.serverTimestamp(), updatedBy: request.auth.uid, createdBy: request.auth.uid, createdAt: FieldValue.serverTimestamp() }, { merge: true });
-  await db.collection('auditLogs').add({ at: FieldValue.serverTimestamp(), actor: { uid: request.auth.uid, role }, action: 'schedule_exception_saved', resource: { type: 'schedule_exception', id: ref.id }, meta: { doctorId, dateKey, type, sessionCount: sessions.length } });
-  return { message: 'Special clinic hours saved.' };
-});
+// Scheduling writes are server-owned SQL operations (see lib/sqlWeeklyHours.js and
+// lib/sqlSpecialHours.js): each save carries the schedule revision, an idempotency
+// receipt and an audit row, and a closure always goes through closeDay, which
+// previews and resolves affected appointments first.
 
 // Patient identifiers are indexed on the trusted server. The browser never gets
 // permission to enumerate the patients collection, which prevents an accidental
@@ -604,30 +562,31 @@ const externalBusyRanges = async ({ doctorId, dateKey }) => {
   }
 };
 
+const bookingSchedule = () => createSqlBookingHours({ dc: staffSql() });
+
 const availabilityContext = async ({ doctorId, dateKey, visitTypeId }) => {
   const reads = bookingReads();
-  const [doctor, legacySchedule, scheduleSnapshot, exceptionSnapshot, config] = await Promise.all([
+  const [doctor, schedule, config] = await Promise.all([
     reads.doctor(doctorId),
-    // Legacy embedded hours remain a scheduling source, never catalogue authority.
-    db.collection('doctors').doc(doctorId).get(),
-    db.collection('doctorSchedules').doc(doctorId).get(),
-    db.collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`).get(),
+    // Published weekly hours and the one date exception, from their single authority.
+    bookingSchedule().read({ doctorLegacyId: doctorId, dateKey }),
     reads.config(),
   ]);
   const visitType = selectVisitType(config, visitTypeId);
   const [slots, external] = await Promise.all([slotBusyRanges(doctorId, dateKey), externalBusyRanges({ doctorId, dateKey })]);
+  // An unreconciled schedule offers no times instead of invented default hours.
+  if (schedule.configured !== true) {
+    return { doctor, weeklySessions: [], exception: null, config, visitType, busyRanges: [], externalCalendar: external.calendar, scheduleConfigured: false };
+  }
   return {
     doctor,
-    weeklySessions: (scheduleSnapshot.get('sessions') || legacySchedule.get('weeklySchedule') || []).map((session) => ({
-      weekday: session.weekday,
-      start: session.start || session.startTime,
-      end: session.end || session.endTime,
-    })),
-    exception: exceptionSnapshot.exists ? exceptionSnapshot.data() : null,
+    weeklySessions: schedule.weeklySessions,
+    exception: schedule.exception,
     config,
     visitType,
     busyRanges: [...slots, ...external.ranges],
     externalCalendar: external.calendar,
+    scheduleConfigured: true,
   };
 };
 
@@ -636,7 +595,7 @@ exports.getAvailability = onCall({ ...bookingCallableOptions, timeoutSeconds: 30
   if (!doctorId || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || ''))) throw publicError('invalid-argument', 'Choose a doctor and appointment date.');
   const context = await availabilityContext({ doctorId, dateKey, visitTypeId });
   const slots = buildAvailability({ doctorId, dateKey, weeklySessions: context.weeklySessions, exception: context.exception, durationMinutes: context.visitType.minutes, intervalMinutes: context.config.intervalMinutes, bufferBeforeMinutes: context.config.bufferBeforeMinutes, bufferAfterMinutes: context.config.bufferAfterMinutes, leadMinutes: context.config.leadMinutes, bookingWindowDays: context.config.bookingWindowDays, busyRanges: context.busyRanges });
-  return { timezone: context.config.timezone, visitType: { id: context.visitType.id, label: context.visitType.label, minutes: context.visitType.minutes, mode: context.visitType.mode }, calendar: context.externalCalendar, slots: slots.map((slot) => ({ slotId: slot.slotId, startsAt: slot.startsAt.toISOString(), endsAt: slot.endsAt.toISOString(), time: slot.time })) };
+  return { timezone: context.config.timezone, scheduleConfigured: context.scheduleConfigured, visitType: { id: context.visitType.id, label: context.visitType.label, minutes: context.visitType.minutes, mode: context.visitType.mode }, calendar: context.externalCalendar, slots: slots.map((slot) => ({ slotId: slot.slotId, startsAt: slot.startsAt.toISOString(), endsAt: slot.endsAt.toISOString(), time: slot.time })) };
 });
 
 const syncAppointmentToGoogle = async (appointmentId) => {
@@ -653,6 +612,22 @@ const syncAppointmentToGoogle = async (appointmentId) => {
   } catch (_error) {
     await appointmentRef.set({ externalCalendar: { provider: 'google', syncStatus: 'pending', lastSyncError: 'Calendar event could not be synced.' }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   }
+};
+
+// Used only by booking's own post-commit closure check: the appointment it just
+// created is withdrawn with an event and audit row, and its slot is released.
+const withdrawBooking = async ({ appointmentId, reason }) => {
+  const appointmentRef = db.collection('appointments').doc(appointmentId);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(appointmentRef);
+    if (!snapshot.exists || !isActiveAppointment(snapshot.get('status'))) return;
+    const now = FieldValue.serverTimestamp();
+    const slotIds = Array.isArray(snapshot.get('slotIds')) ? snapshot.get('slotIds') : [];
+    transaction.update(appointmentRef, { status: 'cancelled', cancellation: { byUid: null, byRole: 'system', reason, at: now }, updatedAt: now });
+    slotIds.forEach((slotId) => transaction.delete(db.collection('appointmentSlots').doc(slotId)));
+    transaction.set(appointmentRef.collection('events').doc(), { from: snapshot.get('status'), to: 'cancelled', byUid: null, byRole: 'system', reason, at: now, meta: { source: 'schedule_closure' } });
+    transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: null, role: 'system' }, action: 'appointment_withdrawn', resource: { type: 'appointment', id: appointmentId }, meta: { reason } });
+  });
 };
 
 const deleteAppointmentFromGoogle = async ({ ref, appointment }) => {
@@ -707,7 +682,6 @@ exports.createBooking = onCall({ ...bookingCallableOptions, timeoutSeconds: 30, 
   // this request, so one booking reads the catalogue once.
   if (context.doctor.branchId !== branchId || !context.doctor.departmentIds.includes(departmentId)) throw publicError('failed-precondition', 'The selected clinic service is not available.');
 
-  const exceptionRef = db.collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`);
   const appointmentRef = db.collection('appointments').doc();
   const reference = appointmentReference();
   const role = roleFor(request.auth);
@@ -717,7 +691,7 @@ exports.createBooking = onCall({ ...bookingCallableOptions, timeoutSeconds: 30, 
   let result;
   try {
     await db.runTransaction(async (transaction) => {
-      const [prior, slot, currentException] = await Promise.all([transaction.get(requestRef), transaction.get(slotRef), transaction.get(exceptionRef)]);
+      const [prior, slot] = await Promise.all([transaction.get(requestRef), transaction.get(slotRef)]);
       if (prior.exists) {
         result = { appointmentId: prior.get('appointmentId'), reference: prior.get('reference'), status: prior.get('status'), idempotent: true };
         return;
@@ -726,7 +700,6 @@ exports.createBooking = onCall({ ...bookingCallableOptions, timeoutSeconds: 30, 
         if (slot.get('status') === 'booked') throw publicError('already-exists', 'That time has just been booked. Please choose another slot.');
         throw publicError('failed-precondition', 'That time is no longer available. Please choose another slot.');
       }
-      if (currentException.exists && currentException.get('type') === 'closed') throw publicError('failed-precondition', 'This clinic day has just been closed. Please choose another time.');
       const status = context.config.autoConfirm ? 'confirmed' : 'scheduled';
       const createdBy = request.auth ? { uid: request.auth.uid, role } : { uid: null, role: 'public' };
       transaction.set(slotRef, { doctorId, dateKey, startsAt: Timestamp.fromDate(requested.startsAt), endsAt: Timestamp.fromDate(requested.endsAt), appointmentId: appointmentRef.id, status: 'booked', createdAt: FieldValue.serverTimestamp() });
@@ -747,7 +720,16 @@ exports.createBooking = onCall({ ...bookingCallableOptions, timeoutSeconds: 30, 
     if (error instanceof HttpsError) throw error;
     throw publicError('internal', 'We could not reserve this time. Please try again.');
   }
-  if (!result.idempotent) await syncAppointmentToGoogle(result.appointmentId);
+  if (!result.idempotent) {
+    // A closure can land between the availability read and the commit. The booking
+    // withdraws itself rather than leaving a live slot on a closed clinic day.
+    const after = await bookingSchedule().read({ doctorLegacyId: doctorId, dateKey }).catch(() => null);
+    if (after?.exception?.type === 'closed') {
+      await withdrawBooking({ appointmentId: result.appointmentId, reason: 'clinic_day_closed' });
+      throw publicError('failed-precondition', 'This clinic day has just been closed. Please choose another time.');
+    }
+    await syncAppointmentToGoogle(result.appointmentId);
+  }
   return result;
 });
 
@@ -780,7 +762,15 @@ exports.getVideoConsultationQueue = onCall({ ...callableOptions, timeoutSeconds:
   const snapshot = await query.orderBy('startsAt', 'asc').limit(50).get();
   return {
     appointments: snapshot.docs
-      .map((item) => ({ id: item.id, reference: item.get('reference'), doctorId: item.get('doctorId'), startsAt: asDate(item.get('startsAt'))?.toISOString() || null, status: item.get('status'), patient: item.get('patientSnapshot') || {}, videoConsultation: item.get('videoConsultation') || { status: 'awaiting_link' } }))
+      .map((item) => ({
+        id: item.id, reference: item.get('reference'), doctorId: item.get('doctorId'),
+        startsAt: asDate(item.get('startsAt'))?.toISOString() || null, status: item.get('status'),
+        // Link coordination is allowed; raw snapshots and clinical metadata are not.
+        patient: { name: trimmed(item.get('patientSnapshot.name'), 160), phone: trimmed(item.get('patientSnapshot.phone'), 32) },
+        videoConsultation: item.get('videoConsultation.status') === 'ready'
+          ? { status: 'ready', joinUrl: item.get('videoConsultation.joinUrl') || '' }
+          : { status: 'awaiting_link' },
+      }))
       .filter((item) => isActiveAppointment(item.status)),
   };
 });
@@ -997,20 +987,25 @@ exports.closeDay = onCall({ ...callableOptions, timeoutSeconds: 60, memory: '256
   if (role === 'doctor' && request.auth.token.doctorId !== doctorId) throw publicError('permission-denied', 'You can only close your own clinic day.');
   const closeReason = trimmed(reason, 300);
   if (mode === 'apply' && action === 'cancel' && !closeReason) throw publicError('invalid-argument', 'A cancellation reason is required.');
-  const appointments = (await db.collection('appointments').where('doctorId', '==', doctorId).where('dateKey', '==', dateKey).get()).docs
+  const activeAppointmentsForDay = async () => (await db.collection('appointments').where('doctorId', '==', doctorId).where('dateKey', '==', dateKey).get()).docs
     .map((snapshot) => ({ ref: snapshot.ref, id: snapshot.id, ...snapshot.data() }))
     .filter((appointment) => isActiveAppointment(appointment.status));
+  let appointments = await activeAppointmentsForDay();
   const summary = appointments.map((appointment) => ({ id: appointment.id, reference: appointment.reference || null, status: appointment.status, startsAt: asDate(appointment.startsAt)?.toISOString() || null, canCancel: canTransition(appointment.status, 'cancelled', role) }));
   if (mode === 'preview') return { doctorId, dateKey, appointments: summary };
   if (appointments.length > 100) throw publicError('failed-precondition', 'This day has too many appointments to close at once. Please contact clinic support.');
   if (action === 'cancel' && appointments.some((appointment) => !canTransition(appointment.status, 'cancelled', role))) throw publicError('failed-precondition', 'Some appointments cannot be cancelled by your role. Keep them or ask an administrator to close the day.');
-  const exceptionRef = db.collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`);
+  // Close the date in SQL first: new bookings stop before any appointment work runs,
+  // and a failed cancellation can be retried while the day stays closed.
+  await createSqlClosedDay({ dc: staffSql() }).close({ actorUid: request.auth.uid, actorRole: role, doctorLegacyId: doctorId, dateKey });
+  // Re-read after the closure so a booking that committed during the race is cancelled.
+  appointments = await activeAppointmentsForDay();
+  if (appointments.length > 100) throw publicError('failed-precondition', 'This day has too many appointments to close at once. Please contact clinic support.');
+  if (action === 'cancel' && appointments.some((appointment) => !canTransition(appointment.status, 'cancelled', role))) throw publicError('failed-precondition', 'Some appointments cannot be cancelled by your role. Keep them or ask an administrator to close the day.');
   const cancelledAppointments = [];
   await db.runTransaction(async (transaction) => {
     const currentAppointments = await Promise.all(appointments.map((appointment) => transaction.get(appointment.ref)));
-    await transaction.get(exceptionRef);
     const now = FieldValue.serverTimestamp();
-    transaction.set(exceptionRef, { doctorId, dateKey, type: 'closed', sessions: [], note: 'Clinic closed', updatedAt: now, updatedBy: request.auth.uid }, { merge: true });
     currentAppointments.forEach((snapshot) => {
       if (!snapshot.exists) return;
       const appointment = snapshot.data();
@@ -1025,7 +1020,7 @@ exports.closeDay = onCall({ ...callableOptions, timeoutSeconds: 60, memory: '256
         transaction.set(snapshot.ref.collection('events').doc(), { from: appointment.status, to: 'cancelled', byUid: request.auth.uid, byRole: role, reason: closeReason, at: now, meta: { source: 'close_day', dateKey } });
       }
     });
-    transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: request.auth.uid, role }, action: 'clinic_day_closed', resource: { type: 'schedule_exception', id: exceptionRef.id }, meta: { doctorId, dateKey, action, affectedAppointments: appointments.length } });
+    transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: request.auth.uid, role }, action: 'clinic_day_closed', resource: { type: 'schedule_exception', id: `${doctorId}_${dateKey}` }, meta: { doctorId, dateKey, action, affectedAppointments: appointments.length } });
   });
   await Promise.all(cancelledAppointments.map((item) => deleteAppointmentFromGoogle(item)));
   return { ok: true, doctorId, dateKey, action, affectedAppointments: appointments.length };
@@ -1097,10 +1092,19 @@ exports.acceptSqlPatientLink = onCall(sqlPatientCallableOptions, sqlPatientHandl
 // own audit event, and the unmounted UI keeps it off live staff routes.
 exports.listSqlAdminAuditLog = onCall(sqlPatientCallableOptions, request => createSqlAuditLogBackend({ auth: admin.auth(), dc: staffSql() }).listSqlAdminAuditLog(request));
 
-// STAFF SCHEDULE SLICE DEFERRED (2026-10-30): listSqlStaffClinicDay,
-// get/saveSqlDoctorWeeklyHours and get/saveSqlDoctorSpecialHours need the
-// DoctorScheduleState/legacy-window models that are excluded from the first
-// production migration, so they are not exported by this release.
+// Staff schedule editors over the SQL schedule authority. App Check parity: the
+// deployed schedule editor never required an App Check proof (no site key is
+// configured), so these handlers rely on live staff Auth/claims plus the SQL
+// revision, receipt and audit checks instead of rejecting every browser call.
+const sqlScheduleOptions = { ...callableOptions, timeoutSeconds: 30, memory: '256MiB', maxInstances: 1 };
+const sqlScheduleBackends = () => ({
+  weekly: createSqlWeeklyHoursBackend({ auth: admin.auth(), dc: staffSql(), requireAppCheck: false }),
+  special: createSqlSpecialHoursBackend({ auth: admin.auth(), dc: staffSql(), requireAppCheck: false }),
+});
+exports.getSqlDoctorWeeklyHours = onCall(sqlScheduleOptions, request => sqlScheduleBackends().weekly.getSqlDoctorWeeklyHours(request));
+exports.saveSqlDoctorWeeklyHours = onCall(sqlScheduleOptions, request => sqlScheduleBackends().weekly.saveSqlDoctorWeeklyHours(request));
+exports.getSqlDoctorSpecialHours = onCall(sqlScheduleOptions, request => sqlScheduleBackends().special.getSqlDoctorSpecialHours(request));
+exports.saveSqlDoctorSpecialHours = onCall(sqlScheduleOptions, request => sqlScheduleBackends().special.saveSqlDoctorSpecialHours(request));
 
 // --- Consultation request workflow -----------------------------------------
 // Public booking now submits a request (in-person) or a video request; staff
@@ -1126,6 +1130,7 @@ const consultationWorkflow = () => createConsultationWorkflow({
   loadPolicy: async () => (await db.collection('clinic').doc('consultationPolicy').get()).data(),
   enforceRateLimit: enforceBookingRateLimit,
   externalBusy: async ({ doctorId, dateKey }) => (await externalBusyRanges({ doctorId, dateKey })).ranges,
+  dayClosed: async ({ doctorId, dateKey }) => (await bookingSchedule().read({ doctorLegacyId: doctorId, dateKey })).exception?.type === 'closed',
   syncAppointment: syncAppointmentToGoogle,
   unsyncAppointment: removeAppointmentFromGoogle,
 });

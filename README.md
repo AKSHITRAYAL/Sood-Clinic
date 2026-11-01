@@ -48,7 +48,7 @@ npm run test:staff-access
 npm run sql:compile      # compile Data Connect source → CJS/ESM/types
 npm run sql:test         # SQL foundation tests
 npm run test:migration   # local migration/reconciliation tests
-npm run sql:release-check # MUST exit 1 today — see "Release gates"
+npm run sql:release-check # source validation; not production certification
 npm --prefix functions run lint
 ```
 
@@ -92,28 +92,53 @@ cases in those runs. Both frontend bundles linted/built and functions lint passe
 `tests/run-emulator-tests.cjs` isolates callable tests in a temporary project with
 dummy Calendar secrets so tests do not fetch real production credentials.
 
+Staff privacy/workflow update, 2026-11-01: deployed `listStaffAppointments`,
+`listConsultationRequests`, `bulkApproveConsultationRequests`,
+`getVideoConsultationQueue`, staff Hosting, rules and the request pagination index.
+Managers use a server-projected operational queue; raw appointment reads are denied.
+They can coordinate video links, but neither appointment nor request responses expose
+clinical intake. Conflicting batch requests remain pending with no decline event or
+notification. Queues have scoped timestamp/document-ID pagination; Requests is linked
+from each role dashboard. Verification: booking 39/39, callables 17/17, rules 16/16,
+focused unit/service tests 9/9; no skips. Frontend lint/build and functions lint passed.
+Live anonymous staff calls denied access; served staff bundles match the local build.
+An authenticated production browser walkthrough has not been performed.
+
+Schedule cutover, 2026-11-01: weekly hours and date exceptions now have one SQL
+authority. Two admin operations were added (`ReadDoctorBookingHours`,
+`CloseDoctorDay`), both connectors were redeployed, and the published schedule was
+imported with `npm run sql:import-schedule -- --apply` (1 schedule state, 12 weekly
+windows, 1 closed date). `getAvailability`, the `createBooking` preflight,
+reschedule and `closeDay` read/write SQL; `closeDay` closes the date in SQL before
+it resolves affected appointments, and a booking that commits during that race
+withdraws itself. `get/saveSqlDoctorWeeklyHours` and `get/saveSqlDoctorSpecialHours`
+are live for the doctor and admin schedule editors; `saveDoctorSchedule`,
+`saveScheduleException` and the Firestore schedule readers are retired. App Check is
+not enforced on these four callables because no site key is configured (matching the
+editor they replace); live staff Auth/claims, the SQL revision check, receipt and
+audit row remain the authority. Verified live: catalogue 200, `getAvailability` 200
+with `scheduleConfigured: true` and 10 SQL slots, anonymous schedule/request calls
+403, the retired callable 404. Backup `1793552400000` succeeded and PITR is on.
+
 Full runtime migration remains incomplete: patient records, appointments, occupancy,
-consultation requests/proposals, schedule exceptions and Calendar still use
-Firestore. The observed source census was 1 patient, 3 appointments, 2 requests and
+consultation requests/proposals and Calendar still use Firestore. The observed source census was 1 patient, 3 appointments, 2 requests and
 1 exception, with no proposals, histories, documents or feedback. Recount before
 importing. Schema deployment does not justify deleting these records or switching
-their readers independently of writers. The older gate descriptions below describe
-the pre-release state; explicit approval and verification remain required for new
-production changes.
+their readers independently of writers. Explicit approval and verification remain
+required for new production changes.
 
-- `npm run sql:release-check` currently exits 1 **by design**
-  (`SYNTHETIC_REHEARSAL_OPERATIONS_PRESENT`, `SYNTHETIC_REHEARSAL_SDK_PRESENT`,
-  `GUEST_RELATION_RELEASE_REVIEW_REQUIRED`). It is a safety stop, not a failing test.
-  Never silence it to make a deployment green.
-- The local SQL schema is ahead of the deployed one. The catalogue, patient, schedule,
-  appointment and scheduler-hold additions are local-only until the guest-relation
-  DDL/API review, a verified backup, and a real import path exist.
+- `npm run sql:release-check` validates deployable connectors and the recorded guest
+  policy. The approved source currently passes; never silence new blockers to ship.
+  It does not certify deployed state or data migration.
+- The full schema and production connectors are deployed. Patient, appointment/occupancy
+  and consultation-request runtime cutovers still require a reviewed import and matching
+  readers/writers; schedules and date exceptions are already SQL.
 - Guest booking is enabled on the Firestore booking path only: `createBooking` requires a
   validated name plus phone or email, keeps `appointments.patientId` null, and records
   consent, per-caller throttling, idempotency and an audit row. No SQL guest write
-  operation exists, and this does not clear `GUEST_RELATION_RELEASE_REVIEW_REQUIRED`.
-- `Appointment.patient` is nullable locally but not in production, so the SQL migration is
-  **not** purely additive. Do not apply it under an additive-only rule.
+  operation is connected to the public booking workflow yet.
+- `Appointment.patient` is nullable locally and in production after the reviewed
+  non-additive migration. Future DDL still requires diff and backup review.
 - A newly created callable needs `roles/run.invoker` for `allUsers`. The CLI honours
   `invoker: 'public'` when it creates a service but ignores it on update, so re-check the
   binding after any redeploy that recreates a service.

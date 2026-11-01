@@ -87,9 +87,10 @@ service cloud.firestore {
     // Appointment writes—including staff transitions—are callable/Admin-SDK only.
     // Rules cannot safely enforce a state machine or cross-document lock by themselves.
     match /appointments/{appointmentId} {
-      allow read: if isClinicAdmin() || isManager()
+      allow read: if isClinicAdmin()
         || (isDoctor() && resource.data.get('doctorId', '') == request.auth.token.doctorId)
-        || (request.auth != null && resource.data.patientId == request.auth.uid);
+        || (request.auth != null && request.auth.token.get('role', '') != 'manager'
+          && resource.data.patientId == request.auth.uid);
       allow create, update, delete: if false;
     }
     // Administrative audit and notification/outbox data are server-owned. Their

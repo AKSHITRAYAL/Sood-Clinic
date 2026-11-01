@@ -115,6 +115,14 @@
       "collectionGroup": "consultationRequests",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "doctorId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "consultationRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "phoneKey", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" }
       ]

@@ -36,9 +36,10 @@ async function call(name, token, data = {}) {
 test('current doctor may save own hours; mismatched or changed scope is rejected', async () => {
   const token = await tokenFor('scope-doctor', 'doctor', 'doctor-a');
   assert.equal((await call('getStaffSession', token)).body.result.role, 'doctor');
-  const hours = { doctorId: 'doctor-a', sessions: [{ weekday: 1, start: '09:00', end: '10:00' }] };
-  assert.equal((await call('saveDoctorSchedule', token, hours)).status, 200);
-  assert.equal((await call('saveDoctorSchedule', token, { ...hours, doctorId: 'doctor-b' })).status, 403);
+  // Schedule saves now go to SQL, so the live SQL round-trip is covered by
+  // `npm run test:booking`; this suite pins the authorization refusals.
+  const hours = { doctorId: 'doctor-a', sessions: [], expectedUpdatedAt: '2026-01-01T00:00:00.000000Z', requestId: '00000000-0000-4000-8000-000000000010' };
+  assert.equal((await call('saveSqlDoctorWeeklyHours', token, { ...hours, doctorId: 'doctor-b' })).status, 403);
   const { getFirestore } = functionsRequire('firebase-admin/firestore');
   const appointments = getFirestore(app).collection('appointments');
   await appointments.doc('video-own').set({ doctorId: 'doctor-a', visitMode: 'video', status: 'scheduled', startsAt: new Date(Date.now() + 3600000) });
@@ -48,7 +49,7 @@ test('current doctor may save own hours; mismatched or changed scope is rejected
   assert.equal((await appointments.doc('video-other').get()).get('videoConsultation'), undefined);
   await auth.setCustomUserClaims('scope-doctor', { role: 'doctor', doctorId: 'doctor-b' });
   assert.equal((await call('getStaffSession', token)).status, 403);
-  assert.equal((await call('saveDoctorSchedule', token, hours)).status, 403);
+  assert.equal((await call('saveSqlDoctorWeeklyHours', token, hours)).status, 403);
   assert.equal((await call('getVideoConsultationQueue', token)).status, 403);
 });
 

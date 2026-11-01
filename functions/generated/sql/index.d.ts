@@ -335,6 +335,32 @@ export interface ClinicSettings_Key {
   __typename?: 'ClinicSettings_Key';
 }
 
+export interface CloseDoctorDayData {
+  user_updateMany: number;
+  doctor_updateMany: number;
+  doctorScheduleState_updateMany: number;
+  scheduleException_insert: ScheduleException_Key;
+  scheduleException_updateMany: number;
+  exceptionWindow_deleteMany: number;
+  auditLog_insert: AuditLog_Key;
+  operationReceipt_insert: OperationReceipt_Key;
+}
+
+export interface CloseDoctorDayVariables {
+  actorUid: string;
+  actorRole: string;
+  doctorId: UUIDString;
+  doctorLegacyId: string;
+  date: DateString;
+  exceptionId: UUIDString;
+  creating: boolean;
+  editing: boolean;
+  expectedUpdatedAt: TimestampString;
+  requestId: UUIDString;
+  operation: string;
+  resourceId: string;
+}
+
 export interface ConsumePatientLinkAttemptData {
   user_updateMany: number;
   auditLog_insert: AuditLog_Key;
@@ -921,6 +947,42 @@ export interface ReadBookingSettingsData {
     legacySortOrder?: number | null;
     updatedAt: TimestampString;
   } & Service_Key)[];
+}
+
+export interface ReadDoctorBookingHoursData {
+  doctors: ({
+    id: UUIDString;
+    legacyId?: string | null;
+    name: string;
+    active: boolean;
+    bookingEnabled: boolean;
+    branch: {
+      timezone: string;
+    };
+    state?: {
+      authority: string;
+      updatedAt?: TimestampString | null;
+    };
+    weekly: ({
+      startMinute: number;
+      endMinute: number;
+    })[];
+    exceptions: ({
+      id: UUIDString;
+      date: DateString;
+      kind: string;
+      windows: ({
+        startMinute: number;
+        endMinute: number;
+      })[];
+    } & ScheduleException_Key)[];
+  } & Doctor_Key)[];
+}
+
+export interface ReadDoctorBookingHoursVariables {
+  doctorLegacyId: string;
+  date: DateString;
+  weekday: number;
 }
 
 export interface ReadDoctorSpecialHoursData {
@@ -1786,6 +1848,16 @@ export function readAdminAuditLog(vars: ReadAdminAuditLogVariables, options?: Op
 export function readAdminAuditLogAfter(dc: DataConnect, vars: ReadAdminAuditLogAfterVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<ReadAdminAuditLogAfterData>>;
 /** Generated Node Admin SDK operation action function for the 'ReadAdminAuditLogAfter' Mutation. Allow users to pass in custom DataConnect instances. */
 export function readAdminAuditLogAfter(vars: ReadAdminAuditLogAfterVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<ReadAdminAuditLogAfterData>>;
+
+/** Generated Node Admin SDK operation action function for the 'ReadDoctorBookingHours' Query. Allow users to execute without passing in DataConnect. */
+export function readDoctorBookingHours(dc: DataConnect, vars: ReadDoctorBookingHoursVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<ReadDoctorBookingHoursData>>;
+/** Generated Node Admin SDK operation action function for the 'ReadDoctorBookingHours' Query. Allow users to pass in custom DataConnect instances. */
+export function readDoctorBookingHours(vars: ReadDoctorBookingHoursVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<ReadDoctorBookingHoursData>>;
+
+/** Generated Node Admin SDK operation action function for the 'CloseDoctorDay' Mutation. Allow users to execute without passing in DataConnect. */
+export function closeDoctorDay(dc: DataConnect, vars: CloseDoctorDayVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<CloseDoctorDayData>>;
+/** Generated Node Admin SDK operation action function for the 'CloseDoctorDay' Mutation. Allow users to pass in custom DataConnect instances. */
+export function closeDoctorDay(vars: CloseDoctorDayVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<CloseDoctorDayData>>;
 
 /** Generated Node Admin SDK operation action function for the 'ReadBookingSettings' Query. Allow users to execute without passing in DataConnect. */
 export function readBookingSettings(dc: DataConnect, options?: OperationOptions): Promise<ExecuteOperationResponse<ReadBookingSettingsData>>;

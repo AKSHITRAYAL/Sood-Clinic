@@ -127,12 +127,15 @@ describe('Firestore default-deny boundary', () => {
     await assertFails(getDoc(doc(manager, 'appointments', 'appointment-one')));
   });
 
-  it('allows a manager without a mandatory password change to read appointments', async () => {
+  it('denies raw appointment reads and enumeration even to an active manager', async () => {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       await setDoc(doc(context.firestore(), 'appointments', 'appointment-one'), { patientId: 'patient-one', status: 'scheduled' });
     });
     const manager = testEnv.authenticatedContext('manager-ready', { role: 'manager', forcePasswordChange: false }).firestore();
-    await assertSucceeds(getDoc(doc(manager, 'appointments', 'appointment-one')));
+    await assertFails(getDoc(doc(manager, 'appointments', 'appointment-one')));
+    await assertFails(getDocs(collection(manager, 'appointments')));
+    const managerWithSameUid = testEnv.authenticatedContext('patient-one', { role: 'manager' }).firestore();
+    await assertFails(getDoc(doc(managerWithSameUid, 'appointments', 'appointment-one')));
   });
 
   it('keeps a guest appointment (null patientId) unreadable to visitors and other patients, but visible to staff', async () => {
@@ -151,7 +154,7 @@ describe('Firestore default-deny boundary', () => {
     await assertFails(getDoc(doc(anonymous, 'appointments', 'guest-one')));
     await assertFails(getDoc(doc(patient, 'appointments', 'guest-one')));
     await assertSucceeds(getDoc(doc(doctor, 'appointments', 'guest-one')));
-    await assertSucceeds(getDoc(doc(manager, 'appointments', 'guest-one')));
+    await assertFails(getDoc(doc(manager, 'appointments', 'guest-one')));
     await assertSucceeds(getDoc(doc(admin, 'appointments', 'guest-one')));
   });
 

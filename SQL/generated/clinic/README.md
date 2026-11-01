@@ -477,9 +477,9 @@ import { connectorConfig, getPublicDoctorHours, GetPublicDoctorHoursVariables } 
 
 // The `GetPublicDoctorHours` query requires an argument of type `GetPublicDoctorHoursVariables`:
 const getPublicDoctorHoursVars: GetPublicDoctorHoursVariables = {
-  doctorLegacyId: ...,
-  date: ...,
-  weekday: ...,
+  doctorLegacyId: ..., 
+  date: ..., 
+  weekday: ..., 
 };
 
 // Call the `getPublicDoctorHours()` function to execute the query.
@@ -509,9 +509,9 @@ import { connectorConfig, getPublicDoctorHoursRef, GetPublicDoctorHoursVariables
 
 // The `GetPublicDoctorHours` query requires an argument of type `GetPublicDoctorHoursVariables`:
 const getPublicDoctorHoursVars: GetPublicDoctorHoursVariables = {
-  doctorLegacyId: ...,
-  date: ...,
-  weekday: ...,
+  doctorLegacyId: ..., 
+  date: ..., 
+  weekday: ..., 
 };
 
 // Call the `getPublicDoctorHoursRef()` function to get a reference to the query.
@@ -608,8 +608,8 @@ import { connectorConfig, saveOwnSqlProfile, SaveOwnSqlProfileVariables } from '
 
 // The `SaveOwnSqlProfile` mutation requires an argument of type `SaveOwnSqlProfileVariables`:
 const saveOwnSqlProfileVars: SaveOwnSqlProfileVariables = {
-  displayName: ...,
-  requestId: ...,
+  displayName: ..., 
+  requestId: ..., 
 };
 
 // Call the `saveOwnSqlProfile()` function to execute the mutation.
@@ -643,8 +643,8 @@ import { connectorConfig, saveOwnSqlProfileRef, SaveOwnSqlProfileVariables } fro
 
 // The `SaveOwnSqlProfile` mutation requires an argument of type `SaveOwnSqlProfileVariables`:
 const saveOwnSqlProfileVars: SaveOwnSqlProfileVariables = {
-  displayName: ...,
-  requestId: ...,
+  displayName: ..., 
+  requestId: ..., 
 };
 
 // Call the `saveOwnSqlProfileRef()` function to get a reference to the mutation.

@@ -27,13 +27,17 @@ const claimsUser = (uid, claims) => ({ uid, getIdTokenResult: vi.fn(async () => 
 const lastProps = () => [captured.day.at(-1), captured.weekly.at(-1), captured.special.at(-1)];
 afterEach(() => { cleanup(); listeners.length = 0; captured.day.length = 0; captured.weekly.length = 0; captured.special.length = 0; });
 
-test('the five schedule exports use the frozen callable options and their own backends', async () => {
+// SQL now owns weekly hours and date exceptions, so those four callables are live and
+// the legacy Firestore schedule writers are retired. Clinic-day reads stay deferred
+// because appointment rows are still written to Firestore.
+test('the schedule exports are live on the SQL authority and the Firestore writers are gone', async () => {
   const source = await readFile(`${await repoRoot()}/functions/index.js`, 'utf8');
-  const names = ['listSqlStaffClinicDay', 'getSqlDoctorWeeklyHours', 'saveSqlDoctorWeeklyHours', 'getSqlDoctorSpecialHours', 'saveSqlDoctorSpecialHours'];
+  const names = ['getSqlDoctorWeeklyHours', 'saveSqlDoctorWeeklyHours', 'getSqlDoctorSpecialHours', 'saveSqlDoctorSpecialHours'];
   for (const name of names) {
-    expect(source).toMatch(new RegExp(`exports\\.${name} = onCall\\(sqlPatientCallableOptions, request => createSql\\w+Backend\\(`));
-    expect(source).not.toMatch(new RegExp(`exports\\.${name} = [^\\n]*\\bcallableOptions\\b`));
+    expect(source).toMatch(new RegExp(`exports\\.${name} = onCall\\(sqlScheduleOptions, request => sqlScheduleBackends\\(\\)\\.\\w+\\.${name}\\(request\\)\\)`));
   }
+  expect(source).not.toMatch(/^exports\.(saveDoctorSchedule|saveScheduleException) =/m);
+  expect(source).not.toMatch(/^exports\.listSqlStaffClinicDay =/m);
   const scheduleExports = [...source.matchAll(/^exports\.(listSqlStaffClinicDay|getSqlDoctor\w+|saveSqlDoctor\w+) =/gm)].map(match => match[1]);
   expect(scheduleExports.sort()).toEqual([...names].sort());
 });

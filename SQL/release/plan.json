@@ -46,5 +46,15 @@
       "changes": "Additive tables/columns/indexes plus approved Appointment.patient DROP NOT NULL and replacement foreign key ON DELETE SET NULL. No tables, columns or rows are deleted."
     },
     "note": "Owner explicitly approved the full schema expansion, nullable guest appointment relation and IAM-only patient/staff/scheduler operations on 2026-11-01. No browser SQL appointment writer is released. The actual DDL was inspected; backups/PITR and three successful backups were independently verified before application."
+  },
+  "scheduleCutover": {
+    "date": "2026-11-01",
+    "additions": ["admin/booking-hours.gql: ReadDoctorBookingHours", "admin/booking-hours.gql: CloseDoctorDay"],
+    "deployedConnectors": ["clinic", "clinic-admin"],
+    "backupVerified": "1793552400000",
+    "pointInTimeRecovery": true,
+    "import": "1 doctor schedule state, 12 weekly windows, 1 closed date exception",
+    "runtime": "getAvailability, createBooking preflight, reschedule and closeDay read/write the SQL schedule; get/saveSqlDoctorWeeklyHours and get/saveSqlDoctorSpecialHours are live. Firestore schedule readers and the legacy saveDoctorSchedule/saveScheduleException writers are retired.",
+    "note": "No schema change was required: the deploy reported the database schema compatible with the SQL Connect schema. Appointment, occupancy, request and Calendar writes remain Firestore."
   }
 }

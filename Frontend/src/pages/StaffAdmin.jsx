@@ -13,6 +13,9 @@ import { publicUrl } from '../lib/portals';
 import ConfirmDialog from '../components/ConfirmDialog';
 import RescheduleDialog from '../components/RescheduleDialog';
 import { getSqlStaffDirectory } from '../services/staffDirectoryService';
+import { sqlSpecialHoursService } from '../services/sqlSpecialHoursService';
+
+const toMinutes = (value) => { const [hour, minute] = String(value || '').split(':').map(Number); return hour * 60 + minute; };
 
 const dateKey = (date = new Date()) => istDateKey(date);
 const greeting = () => { const { hour } = toIstParts(new Date()); return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'; };
@@ -119,11 +122,17 @@ const StaffAdmin = () => {
       return;
     }
     try {
-      await httpsCallable(functions, 'saveScheduleException')({
-        doctorId: selectedDoctorId, dateKey: override.date, type: 'extra', sessions: [{ start: override.start, end: override.end }],
+      // The SQL schedule authority owns date exceptions; a closure must go through the
+      // day-closure review above instead of overwriting it here.
+      const current = await sqlSpecialHoursService.get(selectedDoctorId, override.date);
+      if (current.exception?.kind === 'closed') { setNotice('This date is closed. Review the closure before adding special hours.'); return; }
+      await sqlSpecialHoursService.save({
+        doctorId: selectedDoctorId, date: override.date, kind: 'extra',
+        sessions: [{ startMinute: toMinutes(override.start), endMinute: toMinutes(override.end) }],
+        expectedUpdatedAt: current.updatedAt, requestId: globalThis.crypto.randomUUID(),
       });
       setNotice(override.status === 'available' ? `Special clinic hours saved for ${override.date}.` : `Clinic marked unavailable for ${override.date}.`);
-    } catch { setNotice('Unable to save clinic availability.'); }
+    } catch (error) { setNotice(error?.message || 'Unable to save clinic availability.'); }
   };
 
   const applyDayClosure = async (action) => {
@@ -173,8 +182,8 @@ const StaffAdmin = () => {
   return <>
   <main className="staff-shell">
     <header className="staff-topbar">
-      <Link to="/" className="staff-wordmark">SOOD CLINIC</Link>
-      <nav><Link to="/staff/admin" className="is-active">Overview</Link><Link to="/staff/admin/patients">Patients</Link><Link to="/staff/admin/catalogue">Booking setup</Link><Link to="/staff/admin/visit-types">Visit formats</Link><Link to="/staff/video">Video visits</Link><Link to="/staff/admin/feedback">Feedback</Link><Link to="/staff/admin/access">Staff access</Link><Link to="/staff/admin/audit">Activity</Link><Link to="/staff/account">My account</Link><a href={publicUrl('/')}>View public site</a><button type="button" onClick={() => signOut(auth)}>Sign out</button></nav>
+      <Link to="/staff/admin" className="staff-wordmark">SOOD CLINIC</Link>
+      <nav><Link to="/staff/admin" className="is-active">Overview</Link><Link to="/staff/admin/patients">Patients</Link><Link to="/staff/admin/catalogue">Booking setup</Link><Link to="/staff/admin/visit-types">Visit formats</Link><Link to="/staff/requests">Requests</Link><Link to="/staff/video">Video visits</Link><Link to="/staff/admin/feedback">Feedback</Link><Link to="/staff/admin/access">Staff access</Link><Link to="/staff/admin/audit">Activity</Link><Link to="/staff/account">My account</Link><a href={publicUrl('/')}>View public site</a><button type="button" onClick={() => signOut(auth)}>Sign out</button></nav>
     </header>
     <div className="staff-admin">
       <header className="staff-admin__heading"><div><p className="section-kicker">Clinic operations</p><h1>{greeting()}, {auth.currentUser?.displayName || 'Administrator'}</h1><span>Monitor appointments, manage clinic availability, and maintain the internal staff directory.</span></div><div className="staff-admin__identity"><strong>{auth.currentUser?.displayName || 'Administrator'}</strong><span>Clinic administrator</span></div></header>

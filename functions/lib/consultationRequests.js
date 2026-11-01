@@ -10,6 +10,7 @@
 // The SQL request/proposal draft lives in `SQL/dataconnect/deferred/` and is not
 // part of the reduced first release.
 const { HttpsError, } = require('firebase-functions/v2/https');
+const { FieldPath } = require('firebase-admin/firestore');
 const { addIstDays, istDateKey, istInstant, weekdayIst } = require('./ist');
 const { toE164 } = require('./phone');
 const {
@@ -85,6 +86,8 @@ function createConsultationWorkflow({
   loadPolicy,
   enforceRateLimit = async () => {},
   externalBusy = async () => [],
+  // SQL schedule authority: whether the doctor's clinic day is closed.
+  dayClosed = async () => false,
   syncAppointment = async () => {},
   unsyncAppointment = async () => {},
   now = () => new Date(),
@@ -139,13 +142,13 @@ function createConsultationWorkflow({
   const daySlotQuery = (doctorId, dateKey) => collection('appointmentSlots').where('doctorId', '==', doctorId).where('dateKey', '==', dateKey);
 
   const dayBusy = async (doctorId, dateKey) => {
-    const [rows, exception, outside] = await Promise.all([
+    const [rows, closed, outside] = await Promise.all([
       readSlotRows(daySlotQuery(doctorId, dateKey)),
-      collection('scheduleExceptions').doc(`${doctorId}_${dateKey}`).get(),
+      dayClosed({ doctorId, dateKey }),
       externalBusy({ doctorId, dateKey }).catch(() => []),
     ]);
     return {
-      closed: exception.exists && exception.get('type') === 'closed',
+      closed: closed === true,
       ranges: [...busyRangesFor(rows), ...(Array.isArray(outside) ? outside : [])],
       slots: rows,
     };
@@ -387,7 +390,7 @@ function createConsultationWorkflow({
   }
 
   function staffRequestView(request, actor) {
-    const videoIntakeRestricted = request.mode === 'video' && actor.role === 'manager';
+    const intakeRestricted = actor.role === 'manager';
     return {
       requestId: request.id,
       reference: request.reference,
@@ -400,9 +403,8 @@ function createConsultationWorkflow({
       requested: request.requested || null,
       status: request.status,
       patient: { name: request.patient?.name || '', phone: request.patient?.phone || '', email: request.patient?.email || '' },
-      // Video clinical intake is restricted to the treating doctor and admins until
-      // a reviewed policy grants managers access.
-      intake: videoIntakeRestricted ? { restricted: true } : { restricted: false, reason: request.reason || null },
+      // Managers coordinate visits and links; clinical intake is never operational data.
+      intake: intakeRestricted ? { restricted: true } : { restricted: false, reason: request.reason || null },
       declineReason: request.declineReason || null,
       appointmentId: request.appointmentId || null,
       createdAt: iso(request.createdAt),
@@ -412,14 +414,34 @@ function createConsultationWorkflow({
 
   async function listRequests(request) {
     const actor = await staffActor(request);
-    const status = text(request.data?.status, 40) || 'pending';
+    const input = request.data ?? {};
+    if (typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['status', 'limit', 'cursor'].includes(key))
+      || (input.status !== undefined && typeof input.status !== 'string')) throw fail('invalid-argument', 'Choose a valid request page.');
+    const status = text(input.status, 40) || 'pending';
     if (!['pending', 'proposal_pending', 'confirmed', 'declined', 'cancelled', 'all'].includes(status)) throw fail('invalid-argument', 'Choose a valid request status.');
+    const limit = input.limit ?? 100;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw fail('invalid-argument', 'Choose a page size between 1 and 100.');
+    const doctorId = actor.role === 'doctor' ? actor.doctorId : null;
+    const cursor = input.cursor ?? null;
+    if (cursor !== null && (typeof cursor !== 'object' || Array.isArray(cursor)
+      || Object.keys(cursor).sort().join(',') !== 'doctorId,id,nanoseconds,seconds,status'
+      || cursor.status !== status || cursor.doctorId !== doctorId || typeof cursor.id !== 'string' || !DOC_ID.test(cursor.id)
+      || !Number.isSafeInteger(cursor.seconds) || cursor.seconds < -62135596800 || cursor.seconds > 253402300799
+      || !Number.isInteger(cursor.nanoseconds) || cursor.nanoseconds < 0 || cursor.nanoseconds >= 1e9)) throw fail('invalid-argument', 'Reload the queue before selecting another page.');
     let query = collection(REQUESTS);
     if (status !== 'all') query = query.where('status', '==', status);
     if (actor.role === 'doctor') query = query.where('doctorId', '==', actor.doctorId);
-    const snapshot = await query.orderBy('createdAt', 'asc').limit(100).get();
-    const rows = orderRequests(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-    return { requests: rows.map((row) => staffRequestView(row, actor)), status };
+    query = query.orderBy('createdAt', 'asc').orderBy(FieldPath.documentId(), 'asc');
+    if (cursor) query = query.startAfter(new Timestamp(cursor.seconds, cursor.nanoseconds), cursor.id);
+    const snapshot = await query.limit(limit + 1).get();
+    // Keep database order: JS Date would collapse sub-millisecond cursor ties.
+    const page = snapshot.docs.slice(0, limit);
+    const last = page.at(-1);
+    const at = last?.get('createdAt');
+    return {
+      requests: page.map(doc => staffRequestView({ ...doc.data(), id: doc.id }, actor)), status,
+      nextCursor: snapshot.docs.length > limit ? { status, doctorId, id: last.id, seconds: at.seconds, nanoseconds: at.nanoseconds } : null,
+    };
   }
 
   async function listProposals(request) {
@@ -707,7 +729,7 @@ function createConsultationWorkflow({
     // Selected ids are returned with their own outcome (so a retry is idempotent);
     // an automatic batch only ever contains pending requests.
     const candidates = orderRequests(source.filter((row) => actor.role !== 'doctor' || row.doctorId === actor.doctorId)).slice(0, limit);
-    if (!candidates.length) return { outcomes: [], confirmed: 0, declined: 0 };
+    if (!candidates.length) return { outcomes: [], confirmed: 0, declined: 0, pending: 0 };
 
     const assignments = request.data?.assignments || {};
     const dateKeys = [...new Set(candidates.map((row) => text(assignments[row.id]?.dateKey, 10) || row.requested?.dateKey).filter((dateKey) => DATE_KEY.test(dateKey || '')))];
@@ -716,6 +738,9 @@ function createConsultationWorkflow({
     const outcomes = [];
     const confirmations = [];
     await db.runTransaction(async (transaction) => {
+      // Firestore may rerun this callback after contention; only committed outcomes survive.
+      outcomes.length = 0;
+      confirmations.length = 0;
       // Every read (requests, shared capacity, contact caps) happens before the
       // first write, so the whole batch rechecks live state and rolls back as one
       // unit instead of committing partial decisions.
@@ -765,16 +790,7 @@ function createConsultationWorkflow({
           phoneBlocked: row.phoneKey ? (phoneActive.get(row.phoneKey) || 0) >= 2 : false,
         });
         if (!plan.ok) {
-          const at = FieldValue.serverTimestamp();
-          transaction.update(row.ref, {
-            status: 'declined', declineCode: plan.code, declineReason: plan.reason,
-            decidedBy: actor.uid, decidedByRole: actor.role, declinedAt: at, updatedAt: at,
-            version: FieldValue.increment(1),
-          });
-          transaction.set(row.ref.collection('events').doc(), { action: 'consultation_request_declined', from: 'pending', to: 'declined', byUid: actor.uid, byRole: actor.role, at, reason: plan.reason, meta: { code: plan.code, batch: true } });
-          transaction.set(collection('auditLogs').doc(), { at, actor: { uid: actor.uid, role: actor.role }, action: 'consultation_request_declined', resource: { type: 'consultation_request', id: row.id }, meta: { code: plan.code, batch: true } });
-          writeNotification(transaction, { channel: row.accountUid ? 'portal' : 'clinic_console', template: 'consultation_declined', recipient: row.accountUid || null, reference: row.reference, email: row.patient?.email || null, at });
-          outcomes.push({ requestId: row.id, status: 'declined', code: plan.code, reason: plan.reason });
+          outcomes.push({ requestId: row.id, status: 'pending', code: plan.code, reason: plan.reason });
           return;
         }
         claimed.push({
@@ -797,6 +813,7 @@ function createConsultationWorkflow({
       outcomes,
       confirmed: outcomes.filter((row) => row.status === 'confirmed').length,
       declined: outcomes.filter((row) => row.status === 'declined').length,
+      pending: outcomes.filter((row) => row.status === 'pending').length,
       idempotent: outcomes.every((row) => row.idempotent === true),
     };
   }

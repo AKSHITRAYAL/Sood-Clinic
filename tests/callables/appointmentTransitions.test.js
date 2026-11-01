@@ -30,6 +30,9 @@ let authAdmin;
 let db;
 let clientAuth;
 let callable;
+let listAppointments;
+let videoQueue;
+let setVideoAccess;
 const created = [];
 
 const signIn = async (uid, claims) => {
@@ -77,6 +80,9 @@ beforeAll(async () => {
   const functions = getFunctions(app, 'asia-south1');
   connectFunctionsEmulator(functions, '127.0.0.1', 5001);
   callable = httpsCallable(functions, 'transitionAppointment');
+  listAppointments = httpsCallable(functions, 'listStaffAppointments');
+  videoQueue = httpsCallable(functions, 'getVideoConsultationQueue');
+  setVideoAccess = httpsCallable(functions, 'setVideoConsultationAccess');
 }, 60_000);
 
 afterAll(async () => {
@@ -86,6 +92,25 @@ afterAll(async () => {
 });
 
 suite('transitionAppointment executes the live callable', () => {
+  it('lets managers coordinate video links without exposing clinical snapshot or meeting metadata', async () => {
+    await signIn('manager-video-harness', { role: 'manager' });
+    const id = await seedAppointment({ visitMode: 'video',
+      patientSnapshot: { name: 'Synthetic patient', phone: '+919000000001', email: 'private@synthetic.test', reason: 'private intake' },
+      reason: 'private clinical reason',
+      videoConsultation: { status: 'ready', joinUrl: 'https://meet.example.test/visit', preparedBy: 'private-staff-id' },
+    });
+    const rows = (await videoQueue()).data.appointments;
+    const row = rows.find(item => item.id === id);
+    expect(row.patient).toEqual({ name: 'Synthetic patient', phone: '+919000000001' });
+    expect(row.videoConsultation).toEqual({ status: 'ready', joinUrl: 'https://meet.example.test/visit' });
+    expect(JSON.stringify(row)).not.toContain('private');
+    await setVideoAccess({ appointmentId: id, joinUrl: 'https://meet.example.test/coordinated' });
+    expect((await appointment(id)).videoConsultation.joinUrl).toBe('https://meet.example.test/coordinated');
+    expect((await appointment(id)).reason).toBe('private clinical reason');
+    await authAdmin.setCustomUserClaims('manager-video-harness', {});
+    await expect(videoQueue()).rejects.toMatchObject({ code: 'functions/permission-denied' });
+    await expect(setVideoAccess({ appointmentId: id, joinUrl: '' })).rejects.toMatchObject({ code: 'functions/permission-denied' });
+  }, 30_000);
   it('denies an anonymous caller before touching the appointment', async () => {
     const id = await seedAppointment({ startsAt: admin.firestore.Timestamp.fromDate(minutesFromNow(-30)) });
     await expect(call({ appointmentId: id, to: 'no_show' })).rejects.toMatchObject({ code: 'functions/permission-denied' });
@@ -171,5 +196,48 @@ suite('transitionAppointment executes the live callable', () => {
     const id = await seedAppointment();
     await expect(call({ appointmentId: id, to: 'completed' })).rejects.toMatchObject({ code: 'functions/failed-precondition' });
     expect((await appointment(id)).status).toBe('scheduled');
+  }, 30_000);
+});
+
+suite('staff appointment operational projection', () => {
+  it('lets a manager coordinate appointments without returning clinical or meeting payloads', async () => {
+    const dateKey = '2035-01-02';
+    const startsAt = admin.firestore.Timestamp.fromDate(new Date('2035-01-02T04:30:00Z'));
+    const id = await seedAppointment({ dateKey, startsAt, endsAt: admin.firestore.Timestamp.fromMillis(startsAt.toMillis() + 1_800_000), reason: 'PRIVATE_INTAKE', patientSnapshot: { name: 'Synthetic Patient', phone: '+919000000001', email: 'PRIVATE_EMAIL' }, videoConsultation: { joinUrl: 'https://example.test/PRIVATE_LINK' }, manageTokenHash: 'PRIVATE_TOKEN' });
+    await signIn('manager-projection', { role: 'manager' });
+    const { data } = await listAppointments({ dateKey });
+    expect(data.appointments.map(row => row.id)).toEqual([id]);
+    expect(data.appointments[0].patientSnapshot).toEqual({ name: 'Synthetic Patient', phone: '+919000000001' });
+    expect(JSON.stringify(data)).not.toContain('PRIVATE_');
+    await authAdmin.setCustomUserClaims('manager-projection', { role: 'none' });
+    await expect(listAppointments({ dateKey })).rejects.toMatchObject({ code: 'functions/permission-denied' });
+  }, 30_000);
+
+  it('uses doctor scope from current Auth and refuses a browser-supplied override', async () => {
+    const dateKey = '2035-01-03';
+    const startsAt = admin.firestore.Timestamp.fromDate(new Date('2035-01-03T04:30:00Z'));
+    const endsAt = admin.firestore.Timestamp.fromMillis(startsAt.toMillis() + 1_800_000);
+    const own = await seedAppointment({ dateKey, startsAt, endsAt, doctorId: 'doc-harness' });
+    await seedAppointment({ dateKey, startsAt, endsAt, doctorId: 'another-doctor' });
+    await signIn('doctor-projection', { role: 'doctor', doctorId: 'doc-harness' });
+    expect((await listAppointments({ dateKey })).data.appointments.map(row => row.id)).toEqual([own]);
+    await expect(listAppointments({ dateKey, doctorId: 'another-doctor' })).rejects.toMatchObject({ code: 'functions/invalid-argument' });
+  }, 30_000);
+
+  it('paginates tied instants without missing or duplicating appointments', async () => {
+    const dateKey = '2035-01-04';
+    const startsAt = new admin.firestore.Timestamp(2051497800, 123456789);
+    const endsAt = admin.firestore.Timestamp.fromMillis(startsAt.toMillis() + 1_800_000);
+    const ids = [];
+    for (let index = 0; index < 3; index++) ids.push(await seedAppointment({ dateKey, startsAt, endsAt }));
+    await signIn('admin-projection', { role: 'admin' });
+    const first = (await listAppointments({ dateKey, limit: 2 })).data;
+    expect(first.appointments).toHaveLength(2);
+    const storedAt = (await db.collection('appointments').doc(ids[0]).get()).get('startsAt');
+    expect(storedAt.nanoseconds).toBe(123456000);
+    expect(first.nextCursor.nanoseconds).toBe(storedAt.nanoseconds);
+    const second = (await listAppointments({ dateKey, limit: 2, cursor: first.nextCursor })).data;
+    expect([...first.appointments, ...second.appointments].map(row => row.id)).toEqual(ids.sort());
+    expect(second.nextCursor).toBeNull();
   }, 30_000);
 });

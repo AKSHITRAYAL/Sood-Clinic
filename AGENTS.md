@@ -20,7 +20,7 @@ portal) and a staff website (admin, doctor, manager), both served from one Fireb
 | Path | What |
 |---|---|
 | `Frontend/` | React 18 + Vite + Tailwind SPA. Two entries build separate bundles: `src/entry/public.jsx` → `dist/public`, `src/entry/staff.jsx` → `dist/staff`. All CSS is hand-written in `src/index.css`. |
-| `functions/` | Firebase Functions (Node 22, `asia-south1`) exported from `functions/index.js`: booking/availability, staff lifecycle, catalogue/contact/policy, calendar, feedback, video, SQL staff directory, and the scheduler hold backend. Shared code in `functions/lib`. |
+| `functions/` | Firebase Functions (Node 22, `asia-south1`) exported from `functions/index.js`: booking/availability, staff lifecycle, catalogue/contact/policy, calendar, feedback, video and SQL staff directory. Scheduler hold adapters are staged, not exported. Shared code in `functions/lib`. |
 | `firestore.rules`, `firestore.indexes.json` | Access control and indexes. |
 | `firebase.json`, `.firebaserc` | Hosting (two sites: targets `public` and `staff`), Firestore, Functions, Data Connect, emulators. |
 | `SQL/dataconnect/` | SQL Connect schema, connectors and admin operations. |
@@ -46,7 +46,7 @@ npm run test:time         # IST helper tests
 npm run sql:compile       # Data Connect → generated SDKs
 npm run sql:test          # SQL foundation tests
 npm run test:migration    # local migration/reconciliation tests
-npm run sql:release-check # MUST exit 1 today — expected hold, see §6
+npm run sql:release-check # source validation; not production certification, see §6
 npm --prefix functions run lint
 ```
 
@@ -99,25 +99,25 @@ Verified release-state note (2026-11-01): the owner explicitly approved and this
 session deployed the full 39-table schema and the two production connectors.
 The reviewed public catalogue/settings import succeeded. `SQL/release/plan.json`
 contains the DDL/backup evidence; `README.md` records the remaining Firestore
-runtime domains. The exit-1/local-only statements below describe the earlier
-pre-release state. They must not be used to report the completed release as still
-pending. All authorization, backup, testing and new-release approval requirements
+runtime domains. All authorization, backup, testing and new-release approval requirements
 continue to apply. A source-check pass still does not certify production readiness.
 
-- `npm run sql:release-check` **exits 1 today by design**
-  (`SYNTHETIC_REHEARSAL_OPERATIONS_PRESENT`, `SYNTHETIC_REHEARSAL_SDK_PRESENT`,
-  `GUEST_RELATION_RELEASE_REVIEW_REQUIRED`). It reads local sources only and makes no cloud
-  calls. Never exclude a guard, regenerate around it or silence it to ship. A source-check
-  pass is not release approval.
+- `npm run sql:release-check` validates local sources only. The approved source currently
+  passes; never exclude a guard or silence new blockers to ship. A source-check pass
+  is not release approval or proof of deployed state.
 - Do not deploy any SQL/Data Connect addition until the guest-relation DDL/API review, a
   verified backup/restore path, the clinic evidence gates and a reviewed real import exist.
   Never deploy just an editor or writer, and never deploy a new scheduler backend alone.
-- `Appointment.patient` is nullable locally and non-nullable in production, so the SQL
-  migration is **not** purely additive. Do not apply it under an additive-only rule.
-- The scheduler hold backend (`holdAppointment`) is deployed and App Check-enforced, but no
-  App Check site key is configured (`VITE_RECAPTCHA_SITE_KEY` unset), so the browser cannot
-  reach it; guest holds also fail closed at SQL. There is no per-caller rate limiter yet
-  (`maxInstances: 1` only).
+- `Appointment.patient` is nullable locally and in production after the reviewed
+  non-additive migration. Future DDL still requires diff and backup review.
+- Weekly hours and date exceptions are SQL-only (2026-11-01): `ReadDoctorBookingHours`
+  and `CloseDoctorDay` back `getAvailability`, `createBooking`, `closeDay` and the live
+  `get/saveSqlDoctorWeeklyHours` / `get/saveSqlDoctorSpecialHours` callables. The legacy
+  `saveDoctorSchedule`/`saveScheduleException` writers are deleted; do not reintroduce a
+  Firestore schedule reader or writer. Appointments, occupancy, requests and Calendar
+  writes are still Firestore.
+- `holdAppointment` was deleted with the other undeclared callables. Its adapter modules
+  are staged; do not claim a live SQL booking/occupancy workflow from them.
 - A newly created callable gets no `allUsers` invoker binding on **update**. The CLI honours
   `invoker: 'public'` on create only, so re-check the IAM binding after any redeploy that
   recreates a service.
