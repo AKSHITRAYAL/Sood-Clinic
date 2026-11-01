@@ -74,6 +74,33 @@ Never commit service-account keys, Firebase CLI credentials, or `.env` files.
 
 ## Release gates
 
+Verified production update, 2026-11-01: after explicit owner approval, the full
+39-table SQL schema (including the nullable guest relation), `clinic` and
+`clinic-admin` connectors were deployed. Automated backups and 7-day PITR were
+verified enabled; backup 1793466000000 succeeded. This is not a restore rehearsal.
+The public catalogue/settings import committed and verified 15 rows; its captured
+source and before-image are in ignored `.local/sql-migration/`. The source release
+check now exits 0 with no blockers and `productionApproved:false`.
+
+The 20 booking/request functions using catalogue/settings were updated successfully
+to SQL-only reads. Live public catalogue, consultation options and next-day slots
+were verified; the staff request queue returned 403/PERMISSION_DENIED with no data
+to an anonymous caller. This read cutover does not move appointment/request writes.
+Verification in this session: SQL emulator suite 204 passed, migration suite 157
+passed, booking/request suite 36 passed, callable suite 13 passed, with no skipped
+cases in those runs. Both frontend bundles linted/built and functions lint passed.
+`tests/run-emulator-tests.cjs` isolates callable tests in a temporary project with
+dummy Calendar secrets so tests do not fetch real production credentials.
+
+Full runtime migration remains incomplete: patient records, appointments, occupancy,
+consultation requests/proposals, schedule exceptions and Calendar still use
+Firestore. The observed source census was 1 patient, 3 appointments, 2 requests and
+1 exception, with no proposals, histories, documents or feedback. Recount before
+importing. Schema deployment does not justify deleting these records or switching
+their readers independently of writers. The older gate descriptions below describe
+the pre-release state; explicit approval and verification remain required for new
+production changes.
+
 - `npm run sql:release-check` currently exits 1 **by design**
   (`SYNTHETIC_REHEARSAL_OPERATIONS_PRESENT`, `SYNTHETIC_REHEARSAL_SDK_PRESENT`,
   `GUEST_RELATION_RELEASE_REVIEW_REQUIRED`). It is a safety stop, not a failing test.

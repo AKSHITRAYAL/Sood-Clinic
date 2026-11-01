@@ -1,0 +1,52 @@
+# IAM only. Call through current verified-patient Auth; never forward browser actorUid.
+# Nest reads beneath the explicit link, not a phone/email/reference or legacy UID.
+query ListLinkedPatientAppointments($actorUid: String!, $patientId: UUID!) @auth(level: NO_ACCESS) {
+  user(key: {id: $actorUid}) { active }
+  patientLink(key: {patientId: $patientId, userId: $actorUid}) {
+    relationship verifiedBy verifiedAt
+    patient {
+      id archivedAt
+      appointments: appointments_on_patient(limit: 21, orderBy: [{startsAt: DESC}, {reference: DESC}]) {
+        id patientId reference startsAt endsAt clinicDate status visitMode updatedAt
+        doctor { name }
+        branch { name address timezone }
+        service { name }
+      }
+    }
+  }
+}
+
+query ListLinkedPatientAppointmentsBefore($actorUid: String!, $patientId: UUID!, $beforeStartsAt: Timestamp!, $beforeReference: String!) @auth(level: NO_ACCESS) {
+  user(key: {id: $actorUid}) { active }
+  patientLink(key: {patientId: $patientId, userId: $actorUid}) {
+    relationship verifiedBy verifiedAt
+    patient {
+      id archivedAt
+      appointments: appointments_on_patient(
+        where: {_or: [{startsAt: {lt: $beforeStartsAt}}, {startsAt: {eq: $beforeStartsAt}, reference: {lt: $beforeReference}}]},
+        limit: 21, orderBy: [{startsAt: DESC}, {reference: DESC}]
+      ) {
+        id patientId reference startsAt endsAt clinicDate status visitMode updatedAt
+        doctor { name }
+        branch { name address timezone }
+        service { name }
+      }
+    }
+  }
+}
+
+query ReadLinkedPatientAppointment($actorUid: String!, $patientId: UUID!, $appointmentId: UUID!) @auth(level: NO_ACCESS) {
+  user(key: {id: $actorUid}) { active }
+  patientLink(key: {patientId: $patientId, userId: $actorUid}) {
+    relationship verifiedBy verifiedAt
+    patient {
+      id archivedAt
+      appointments: appointments_on_patient(where: {id: {eq: $appointmentId}}, limit: 1) {
+        id patientId reference startsAt endsAt clinicDate status visitMode updatedAt
+        doctor { name }
+        branch { name address timezone }
+        service { name }
+      }
+    }
+  }
+}

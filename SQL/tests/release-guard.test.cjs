@@ -54,14 +54,22 @@ test('release source guard refuses synthetic operations, rehearsal SDK exports a
 test('the current tree is release-ready in source and keeps the apply decision open', () => {
   const { blockers, plan: record, dirs } = checkLocalReleaseSources();
   assert.deepEqual(blockers, []);
-  assert.deepEqual(dirs, ['clinic', 'admin', 'rehearsal']);
+  // Rehearsal is served only by the isolated test configuration, never production.
+  assert.deepEqual(dirs, ['clinic', 'admin']);
   assert.deepEqual(record.deployableConnectors, ['clinic', 'admin']);
   assert.deepEqual(Object.keys(record.excludedConnectors), ['rehearsal']);
   assert.equal(record.guestRelation.status, 'approved');
   assert.equal(record.guestRelation.guestsAllowed, true);
-  assert.equal(record.guestRelation.appointmentPatientNullable, true);
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const schema = fs.readFileSync(path.join(__dirname, '../dataconnect/schema/schema.gql'), 'utf8');
+  const appointment = /^type Appointment\b[^\{]*\{([\s\S]*?)^\}/m.exec(schema)[1];
+  assert.match(appointment, /patient:\s*Patient\s/);
+  assert.equal(record.guestRelation.appointmentPatientNullable, !/patient:\s*Patient!/.test(appointment));
   assert.equal(record.guestRelation.guestDataInPrivateDetails, true);
   assert.equal(record.guestRelation.publicSqlAppointmentWriterReleased, false);
-  // The source check never approves a production schema apply or deployment.
-  assert.equal(record.guestRelation.productionSchemaTransitionReviewed, false);
+  // A reviewed DDL record does not change the local source check into release approval.
+  assert.equal(record.guestRelation.productionSchemaTransitionReviewed, true);
+  assert.equal(record.guestRelation.ddlReview.pointInTimeRecovery, true);
+  assert.match(record.guestRelation.ddlReview.diffSha256, /^[a-f0-9]{64}$/);
 });

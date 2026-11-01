@@ -11,8 +11,8 @@
     "rehearsal": "DEFERRED (2026-10-30): the synthetic rehearsal connector depends on clinic_legacy_source_instants and is removed from dataconnect.yaml; its operations are kept in SQL/dataconnect/deferred/connectors/rehearsal and it is never deployed"
   },
   "deferredConnectorOperations": {
-    "admin": ["patient-profiles.gql", "patient-health.gql", "patient-appointments.gql", "staff-patients.gql", "clinic-day.gql", "weekly-hours.gql", "special-hours.gql", "scheduler-units.gql"],
-    "clinic": ["GetPublicDoctorHours (public-hours.gql)"],
+    "admin": [],
+    "clinic": [],
     "rehearsal": ["operations.gql"]
   },
   "firstMigration": {
@@ -25,17 +25,26 @@
       "clinic_departments.description",
       "clinic_doctor_departments.sort_order default 0"
     ],
-    "guestNullableAppointmentDeferred": true
+    "guestNullableAppointmentDeferred": false
   },
   "guestRelation": {
     "status": "approved",
-    "approvedOn": "2026-10-30",
+    "approvedOn": "2026-11-01",
     "approvedBy": "owner",
     "guestsAllowed": true,
-    "appointmentPatientNullable": false,
+    "appointmentPatientNullable": true,
     "guestDataInPrivateDetails": true,
     "publicSqlAppointmentWriterReleased": false,
-    "productionSchemaTransitionReviewed": false,
-    "note": "Owner confirmed 2026-10-30 that guest appointments are allowed. The first production SQL migration keeps Appointment.patient REQUIRED: the NOT NULL -> nullable DDL and its ON DELETE SET NULL foreign key are deferred with the guest write path, and no public SQL appointment writer is released (Firestore createBooking remains the only live booking path). Reintroducing the nullable relation requires its own reviewed migration and re-approval with appointmentPatientNullable=true."
+    "productionSchemaTransitionReviewed": true,
+    "ddlReview": {
+      "date": "2026-11-01",
+      "diffSha256": "f4d1c6c082b9a31d8d3daa1e5d9f9f05603a457e79d31240a9d11916ef742f98",
+      "newTables": 17,
+      "existingSqlAppointments": 0,
+      "latestSuccessfulBackup": "1793466000000",
+      "pointInTimeRecovery": true,
+      "changes": "Additive tables/columns/indexes plus approved Appointment.patient DROP NOT NULL and replacement foreign key ON DELETE SET NULL. No tables, columns or rows are deleted."
+    },
+    "note": "Owner explicitly approved the full schema expansion, nullable guest appointment relation and IAM-only patient/staff/scheduler operations on 2026-11-01. No browser SQL appointment writer is released. The actual DDL was inspected; backups/PITR and three successful backups were independently verified before application."
   }
 }

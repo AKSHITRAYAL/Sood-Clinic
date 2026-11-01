@@ -90,6 +90,7 @@ async function readWithFallback(sqlRead, fallbackRead) {
   try {
     return await sqlRead();
   } catch (error) {
+    if (typeof fallbackRead !== 'function') throw error;
     if (error instanceof HttpsError && !FALLBACK_CODES.has(error.code)) throw error;
     // Silent masking would hide the SQL outage this fallback exists to survive; the
     // code carries no patient data.
@@ -103,10 +104,10 @@ async function readWithFallback(sqlRead, fallbackRead) {
 }
 
 function createBookingReads({ sql, firestore }) {
-  const catalogue = () => readWithFallback(sql.catalogue, firestore.catalogue);
+  const catalogue = () => readWithFallback(sql.catalogue, firestore?.catalogue);
   return {
     catalogue,
-    config: () => readWithFallback(sql.config, firestore.config),
+    config: () => readWithFallback(sql.config, firestore?.config),
     async doctor(doctorId) {
       const doctor = (await catalogue()).doctors.find((row) => row.id === doctorId);
       if (!doctor) throw new HttpsError('not-found', 'This doctor is not currently available for online bookings.');

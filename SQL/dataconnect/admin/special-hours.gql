@@ -1,0 +1,49 @@
+# IAM only; closing/reopening a closed day belongs to the appointment-impact flow.
+query ReadDoctorSpecialHours($actorUid: String!, $doctorId: String!, $date: Date!) @auth(level: NO_ACCESS) {
+  user(key: {id: $actorUid}) { active }
+  doctors(where: {legacyId: {eq: $doctorId}}, limit: 2) {
+    id legacyId name active
+    branch { timezone }
+    state: doctorScheduleState_on_doctor { authority updatedAt }
+    exceptions: scheduleExceptions_on_doctor(where: {date: {eq: $date}}, limit: 2) {
+      id doctorId date kind
+      sessions: exceptionWindows_on_exception(limit: 5, orderBy: [{startMinute: ASC}, {id: ASC}]) { startMinute endMinute }
+    }
+  }
+}
+query ReadDoctorSpecialHoursReceipt($actorUid: String!, $requestId: UUID!) @auth(level: NO_ACCESS) {
+  operationReceipt(key: {actorUid: $actorUid, requestId: $requestId}) { operation }
+}
+mutation SaveDoctorSpecialHours(
+  $actorUid: String!, $actorRole: String!, $doctorId: UUID!, $doctorLegacyId: String!, $date: Date!,
+  $exceptionId: UUID!, $creating: Boolean!, $editing: Boolean!, $kind: String!,
+  $expectedUpdatedAt: Timestamp!, $requestId: UUID!, $operation: String!, $resourceId: String!,
+  $starts: [Int!]!, $ends: [Int!]!, $row0: Boolean!, $row1: Boolean!, $row2: Boolean!, $row3: Boolean!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: $actorUid, requestId: $requestId}) @check(expr: "this == null", message: "SPECIAL_HOURS_REQUEST_APPLIED") { operation }
+    others: scheduleExceptions(where: {doctorId: {eq: $doctorId}, date: {eq: $date}, id: {ne: $exceptionId}}, limit: 1)
+      @check(expr: "this.size() == 0", message: "SPECIAL_HOURS_DATE_CONFLICT") { id }
+  }
+  user_updateMany(where: {id: {eq: $actorUid}, active: {eq: true}}, data: {active: true})
+    @check(expr: "this == 1", message: "SPECIAL_HOURS_ACCOUNT_UNAVAILABLE")
+  doctor_updateMany(where: {id: {eq: $doctorId}, legacyId: {eq: $doctorLegacyId}, active: {eq: true}}, data: {active: true})
+    @check(expr: "this == 1", message: "SPECIAL_HOURS_DOCTOR_UNAVAILABLE")
+  # Same revision/lock order as weekly hours, including creation on an empty date.
+  doctorScheduleState_updateMany(
+    where: {doctorId: {eq: $doctorId}, authority: {eq: "doctor_schedule"}, updatedAt: {eq: $expectedUpdatedAt}},
+    data: {updatedAt_expr: "request.time"}
+  ) @check(expr: "this == 1", message: "SPECIAL_HOURS_VERSION_CHANGED")
+  scheduleException_insert(data: {id: $exceptionId, doctorId: $doctorId, date: $date, kind: $kind}) @include(if: $creating)
+  scheduleException_updateMany(
+    where: {id: {eq: $exceptionId}, doctorId: {eq: $doctorId}, date: {eq: $date}, kind: {in: ["extra", "replace"]}},
+    data: {kind: $kind, updatedAt_expr: "request.time"}
+  ) @include(if: $editing) @check(expr: "this == 1", message: "SPECIAL_HOURS_EXCEPTION_UNAVAILABLE")
+  exceptionWindow_deleteMany(where: {exceptionId: {eq: $exceptionId}})
+  w0: exceptionWindow_insert(data: {exceptionId: $exceptionId, startMinute_expr: "vars.starts[0]", endMinute_expr: "vars.ends[0]", sourceOrder: 0}) @include(if: $row0)
+  w1: exceptionWindow_insert(data: {exceptionId: $exceptionId, startMinute_expr: "vars.starts[1]", endMinute_expr: "vars.ends[1]", sourceOrder: 1}) @include(if: $row1)
+  w2: exceptionWindow_insert(data: {exceptionId: $exceptionId, startMinute_expr: "vars.starts[2]", endMinute_expr: "vars.ends[2]", sourceOrder: 2}) @include(if: $row2)
+  w3: exceptionWindow_insert(data: {exceptionId: $exceptionId, startMinute_expr: "vars.starts[3]", endMinute_expr: "vars.ends[3]", sourceOrder: 3}) @include(if: $row3)
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: "doctor_special_hours_saved", resourceType: "doctor_day", resourceId: $resourceId})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}

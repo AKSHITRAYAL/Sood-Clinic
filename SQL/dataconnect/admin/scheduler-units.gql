@@ -1,0 +1,184 @@
+# Phase 6 draft (LOCAL ONLY): occupancy unit read/claim/release IAM operations.
+# Callable wrappers arrive with the staged scheduler backends; no browser or
+# public connector access before the coordinated release. Claims follow the
+# protocol in SQL/phase 6.md: combined receipt + live-conflict query checks,
+# then expired/own-hold cleanup, then bounded conditional inserts.
+
+# One IST range pre-read for the claim handler: schedule state, sessions, the
+# day's exception, overlapping blocks and every unit already in the range.
+query ReadDoctorUnitRange($actorUid: String!, $doctorLegacyId: String!, $rangeStart: Timestamp!, $rangeEnd: Timestamp!, $exceptionDate: Date!)
+@auth(level: NO_ACCESS) {
+  user(key: {id: $actorUid}) { active }
+  doctors(where: {legacyId: {eq: $doctorLegacyId}}, limit: 2) {
+    id legacyId name active
+    branch { timezone }
+    state: doctorScheduleState_on_doctor { authority updatedAt }
+    sessions: doctorSchedules_on_doctor(limit: 15, orderBy: [{weekday: ASC}, {startMinute: ASC}, {id: ASC}]) { weekday startMinute endMinute }
+    exceptions: scheduleExceptions_on_doctor(where: {date: {eq: $exceptionDate}}, limit: 2) {
+      id kind date updatedAt
+      windows: exceptionWindows_on_exception(limit: 10, orderBy: [{startMinute: ASC}, {id: ASC}]) { startMinute endMinute }
+    }
+    blocks: calendarBlocks_on_doctor(where: {_and: [{startsAt: {lt: $rangeEnd}}, {endsAt: {gt: $rangeStart}}]}, orderBy: [{startsAt: ASC}], limit: 50) {
+      id kind title startsAt endsAt allDay dateKeyStart dateKeyEnd
+    }
+    units: appointmentUnits_on_doctor(where: {_and: [{unitAt: {ge: $rangeStart}}, {unitAt: {lt: $rangeEnd}}]}, orderBy: [{unitAt: ASC}, {unitKey: ASC}], limit: 600) {
+      unitKey unitAt kind appointmentId holdHash expiresAt
+    }
+  }
+}
+
+# Atomically claim aligned units for one hold or booking. $unitKeys/$unitAts/$kinds
+# are handler-computed (never client input); $ownHoldHash excludes this caller's
+# live hold so a hold converts without releasing first; $slot0..$slot95
+# enable exactly the rows in the claimed range (bound documented in SQL/phase 6.md).
+mutation ClaimAppointmentUnits(
+  $actorUid: String!, $actorRole: String!, $doctorId: UUID!, $doctorLegacyId: String!,
+  $requestId: UUID!, $operation: String!, $auditAction: String!,
+  $now: Timestamp!, $ownHoldHash: String!,
+  $unitKeys: [String!]!, $unitAts: [Timestamp!]!, $kinds: [String!]!,
+  $appointmentId: UUID, $holdHash: String, $expiresAt: Timestamp,
+  $slot0: Boolean!, $slot1: Boolean!, $slot2: Boolean!, $slot3: Boolean!, $slot4: Boolean!, $slot5: Boolean!, $slot6: Boolean!, $slot7: Boolean!, $slot8: Boolean!, $slot9: Boolean!, $slot10: Boolean!, $slot11: Boolean!, $slot12: Boolean!, $slot13: Boolean!, $slot14: Boolean!, $slot15: Boolean!, $slot16: Boolean!, $slot17: Boolean!, $slot18: Boolean!, $slot19: Boolean!, $slot20: Boolean!, $slot21: Boolean!, $slot22: Boolean!, $slot23: Boolean!, $slot24: Boolean!, $slot25: Boolean!, $slot26: Boolean!, $slot27: Boolean!, $slot28: Boolean!, $slot29: Boolean!, $slot30: Boolean!, $slot31: Boolean!, $slot32: Boolean!, $slot33: Boolean!, $slot34: Boolean!, $slot35: Boolean!, $slot36: Boolean!, $slot37: Boolean!, $slot38: Boolean!, $slot39: Boolean!, $slot40: Boolean!, $slot41: Boolean!, $slot42: Boolean!, $slot43: Boolean!, $slot44: Boolean!, $slot45: Boolean!, $slot46: Boolean!, $slot47: Boolean!, $slot48: Boolean!, $slot49: Boolean!, $slot50: Boolean!, $slot51: Boolean!, $slot52: Boolean!, $slot53: Boolean!, $slot54: Boolean!, $slot55: Boolean!, $slot56: Boolean!, $slot57: Boolean!, $slot58: Boolean!, $slot59: Boolean!, $slot60: Boolean!, $slot61: Boolean!, $slot62: Boolean!, $slot63: Boolean!, $slot64: Boolean!, $slot65: Boolean!, $slot66: Boolean!, $slot67: Boolean!, $slot68: Boolean!, $slot69: Boolean!, $slot70: Boolean!, $slot71: Boolean!, $slot72: Boolean!, $slot73: Boolean!, $slot74: Boolean!, $slot75: Boolean!, $slot76: Boolean!, $slot77: Boolean!, $slot78: Boolean!, $slot79: Boolean!, $slot80: Boolean!, $slot81: Boolean!, $slot82: Boolean!, $slot83: Boolean!, $slot84: Boolean!, $slot85: Boolean!, $slot86: Boolean!, $slot87: Boolean!, $slot88: Boolean!, $slot89: Boolean!, $slot90: Boolean!, $slot91: Boolean!, $slot92: Boolean!, $slot93: Boolean!, $slot94: Boolean!, $slot95: Boolean!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    receipt: operationReceipt(key: {actorUid: $actorUid, requestId: $requestId})
+      @check(expr: "this == null", message: "SCHEDULER_REQUEST_APPLIED") { operation }
+    conflicts: appointmentUnits(
+      where: {_and: [{unitKey: {in: $unitKeys}}, {_or: [{kind: {ne: "hold"}}, {_and: [{expiresAt: {ge: $now}}, {holdHash: {ne: $ownHoldHash}}]}]}]}
+    ) @check(expr: "this.size() == 0", message: "SCHEDULER_SLOT_TAKEN") { unitKey }
+  }
+  user_updateMany(where: {id: {eq: $actorUid}, active: {eq: true}}, data: {active: true})
+    @check(expr: "this == 1", message: "SCHEDULER_ACCOUNT_UNAVAILABLE")
+  # Reclaim expired holds and drop this caller's own hold rows in one statement
+  # (the compiler rejects selecting the same mutation field twice).
+  appointmentUnit_deleteMany(where: {_and: [{unitKey: {in: $unitKeys}}, {kind: {eq: "hold"}}, {_or: [{expiresAt: {lt: $now}}, {holdHash: {eq: $ownHoldHash}}]}]})
+  u0: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[0]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[0]", kind_expr: "vars.kinds[0]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot0)
+  u1: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[1]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[1]", kind_expr: "vars.kinds[1]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot1)
+  u2: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[2]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[2]", kind_expr: "vars.kinds[2]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot2)
+  u3: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[3]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[3]", kind_expr: "vars.kinds[3]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot3)
+  u4: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[4]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[4]", kind_expr: "vars.kinds[4]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot4)
+  u5: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[5]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[5]", kind_expr: "vars.kinds[5]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot5)
+  u6: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[6]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[6]", kind_expr: "vars.kinds[6]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot6)
+  u7: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[7]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[7]", kind_expr: "vars.kinds[7]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot7)
+  u8: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[8]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[8]", kind_expr: "vars.kinds[8]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot8)
+  u9: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[9]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[9]", kind_expr: "vars.kinds[9]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot9)
+  u10: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[10]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[10]", kind_expr: "vars.kinds[10]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot10)
+  u11: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[11]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[11]", kind_expr: "vars.kinds[11]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot11)
+  u12: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[12]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[12]", kind_expr: "vars.kinds[12]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot12)
+  u13: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[13]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[13]", kind_expr: "vars.kinds[13]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot13)
+  u14: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[14]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[14]", kind_expr: "vars.kinds[14]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot14)
+  u15: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[15]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[15]", kind_expr: "vars.kinds[15]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot15)
+  u16: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[16]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[16]", kind_expr: "vars.kinds[16]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot16)
+  u17: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[17]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[17]", kind_expr: "vars.kinds[17]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot17)
+  u18: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[18]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[18]", kind_expr: "vars.kinds[18]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot18)
+  u19: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[19]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[19]", kind_expr: "vars.kinds[19]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot19)
+  u20: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[20]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[20]", kind_expr: "vars.kinds[20]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot20)
+  u21: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[21]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[21]", kind_expr: "vars.kinds[21]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot21)
+  u22: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[22]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[22]", kind_expr: "vars.kinds[22]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot22)
+  u23: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[23]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[23]", kind_expr: "vars.kinds[23]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot23)
+  u24: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[24]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[24]", kind_expr: "vars.kinds[24]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot24)
+  u25: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[25]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[25]", kind_expr: "vars.kinds[25]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot25)
+  u26: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[26]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[26]", kind_expr: "vars.kinds[26]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot26)
+  u27: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[27]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[27]", kind_expr: "vars.kinds[27]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot27)
+  u28: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[28]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[28]", kind_expr: "vars.kinds[28]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot28)
+  u29: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[29]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[29]", kind_expr: "vars.kinds[29]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot29)
+  u30: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[30]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[30]", kind_expr: "vars.kinds[30]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot30)
+  u31: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[31]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[31]", kind_expr: "vars.kinds[31]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot31)
+  u32: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[32]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[32]", kind_expr: "vars.kinds[32]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot32)
+  u33: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[33]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[33]", kind_expr: "vars.kinds[33]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot33)
+  u34: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[34]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[34]", kind_expr: "vars.kinds[34]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot34)
+  u35: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[35]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[35]", kind_expr: "vars.kinds[35]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot35)
+  u36: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[36]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[36]", kind_expr: "vars.kinds[36]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot36)
+  u37: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[37]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[37]", kind_expr: "vars.kinds[37]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot37)
+  u38: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[38]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[38]", kind_expr: "vars.kinds[38]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot38)
+  u39: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[39]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[39]", kind_expr: "vars.kinds[39]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot39)
+  u40: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[40]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[40]", kind_expr: "vars.kinds[40]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot40)
+  u41: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[41]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[41]", kind_expr: "vars.kinds[41]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot41)
+  u42: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[42]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[42]", kind_expr: "vars.kinds[42]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot42)
+  u43: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[43]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[43]", kind_expr: "vars.kinds[43]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot43)
+  u44: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[44]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[44]", kind_expr: "vars.kinds[44]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot44)
+  u45: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[45]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[45]", kind_expr: "vars.kinds[45]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot45)
+  u46: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[46]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[46]", kind_expr: "vars.kinds[46]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot46)
+  u47: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[47]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[47]", kind_expr: "vars.kinds[47]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot47)
+  u48: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[48]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[48]", kind_expr: "vars.kinds[48]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot48)
+  u49: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[49]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[49]", kind_expr: "vars.kinds[49]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot49)
+  u50: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[50]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[50]", kind_expr: "vars.kinds[50]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot50)
+  u51: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[51]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[51]", kind_expr: "vars.kinds[51]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot51)
+  u52: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[52]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[52]", kind_expr: "vars.kinds[52]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot52)
+  u53: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[53]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[53]", kind_expr: "vars.kinds[53]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot53)
+  u54: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[54]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[54]", kind_expr: "vars.kinds[54]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot54)
+  u55: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[55]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[55]", kind_expr: "vars.kinds[55]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot55)
+  u56: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[56]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[56]", kind_expr: "vars.kinds[56]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot56)
+  u57: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[57]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[57]", kind_expr: "vars.kinds[57]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot57)
+  u58: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[58]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[58]", kind_expr: "vars.kinds[58]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot58)
+  u59: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[59]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[59]", kind_expr: "vars.kinds[59]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot59)
+  u60: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[60]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[60]", kind_expr: "vars.kinds[60]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot60)
+  u61: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[61]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[61]", kind_expr: "vars.kinds[61]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot61)
+  u62: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[62]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[62]", kind_expr: "vars.kinds[62]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot62)
+  u63: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[63]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[63]", kind_expr: "vars.kinds[63]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot63)
+  u64: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[64]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[64]", kind_expr: "vars.kinds[64]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot64)
+  u65: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[65]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[65]", kind_expr: "vars.kinds[65]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot65)
+  u66: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[66]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[66]", kind_expr: "vars.kinds[66]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot66)
+  u67: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[67]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[67]", kind_expr: "vars.kinds[67]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot67)
+  u68: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[68]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[68]", kind_expr: "vars.kinds[68]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot68)
+  u69: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[69]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[69]", kind_expr: "vars.kinds[69]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot69)
+  u70: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[70]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[70]", kind_expr: "vars.kinds[70]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot70)
+  u71: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[71]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[71]", kind_expr: "vars.kinds[71]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot71)
+  u72: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[72]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[72]", kind_expr: "vars.kinds[72]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot72)
+  u73: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[73]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[73]", kind_expr: "vars.kinds[73]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot73)
+  u74: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[74]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[74]", kind_expr: "vars.kinds[74]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot74)
+  u75: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[75]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[75]", kind_expr: "vars.kinds[75]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot75)
+  u76: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[76]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[76]", kind_expr: "vars.kinds[76]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot76)
+  u77: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[77]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[77]", kind_expr: "vars.kinds[77]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot77)
+  u78: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[78]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[78]", kind_expr: "vars.kinds[78]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot78)
+  u79: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[79]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[79]", kind_expr: "vars.kinds[79]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot79)
+  u80: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[80]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[80]", kind_expr: "vars.kinds[80]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot80)
+  u81: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[81]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[81]", kind_expr: "vars.kinds[81]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot81)
+  u82: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[82]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[82]", kind_expr: "vars.kinds[82]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot82)
+  u83: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[83]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[83]", kind_expr: "vars.kinds[83]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot83)
+  u84: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[84]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[84]", kind_expr: "vars.kinds[84]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot84)
+  u85: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[85]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[85]", kind_expr: "vars.kinds[85]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot85)
+  u86: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[86]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[86]", kind_expr: "vars.kinds[86]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot86)
+  u87: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[87]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[87]", kind_expr: "vars.kinds[87]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot87)
+  u88: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[88]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[88]", kind_expr: "vars.kinds[88]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot88)
+  u89: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[89]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[89]", kind_expr: "vars.kinds[89]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot89)
+  u90: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[90]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[90]", kind_expr: "vars.kinds[90]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot90)
+  u91: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[91]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[91]", kind_expr: "vars.kinds[91]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot91)
+  u92: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[92]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[92]", kind_expr: "vars.kinds[92]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot92)
+  u93: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[93]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[93]", kind_expr: "vars.kinds[93]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot93)
+  u94: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[94]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[94]", kind_expr: "vars.kinds[94]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot94)
+  u95: appointmentUnit_insert(data: {unitKey_expr: "vars.unitKeys[95]", doctorId: $doctorId, unitAt_expr: "vars.unitAts[95]", kind_expr: "vars.kinds[95]", appointmentId: $appointmentId, holdHash: $holdHash, expiresAt: $expiresAt}) @include(if: $slot95)
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: $auditAction, resourceType: "appointment_unit", resourceId: $doctorLegacyId})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}
+
+# Release every unit held by one appointment (cancel/reschedule/move paths).
+mutation ReleaseAppointmentUnits(
+  $actorUid: String!, $actorRole: String!, $appointmentId: UUID!, $doctorLegacyId: String!,
+  $requestId: UUID!, $operation: String!, $auditAction: String!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    receipt: operationReceipt(key: {actorUid: $actorUid, requestId: $requestId})
+      @check(expr: "this == null", message: "SCHEDULER_REQUEST_APPLIED") { operation }
+  }
+  user_updateMany(where: {id: {eq: $actorUid}, active: {eq: true}}, data: {active: true})
+    @check(expr: "this == 1", message: "SCHEDULER_ACCOUNT_UNAVAILABLE")
+  appointmentUnit_deleteMany(where: {appointmentId: {eq: $appointmentId}})
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: $auditAction, resourceType: "appointment_unit", resourceId: $doctorLegacyId})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}
+
+# releaseHold deletes only this doctor's units carrying this hold hash.
+mutation ReleaseHoldUnits(
+  $actorUid: String!, $actorRole: String!, $doctorId: UUID!, $doctorLegacyId: String!,
+  $holdHash: String!, $requestId: UUID!, $operation: String!
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    receipt: operationReceipt(key: {actorUid: $actorUid, requestId: $requestId})
+      @check(expr: "this == null", message: "SCHEDULER_REQUEST_APPLIED") { operation }
+  }
+  user_updateMany(where: {id: {eq: $actorUid}, active: {eq: true}}, data: {active: true})
+    @check(expr: "this == 1", message: "SCHEDULER_ACCOUNT_UNAVAILABLE")
+  appointmentUnit_deleteMany(where: {_and: [{doctorId: {eq: $doctorId}}, {kind: {eq: "hold"}}, {holdHash: {eq: $holdHash}}]})
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: "hold_released", resourceType: "appointment_unit", resourceId: $doctorLegacyId})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}

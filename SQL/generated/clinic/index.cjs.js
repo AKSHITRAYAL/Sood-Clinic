@@ -16,7 +16,7 @@ getPublicClinicRef.operationName = 'GetPublicClinic';
 exports.getPublicClinicRef = getPublicClinicRef;
 
 exports.getPublicClinic = function getPublicClinic(dcOrOptions, options) {
-  
+
   const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrOptions, options, undefined,false, false);
   return executeQuery(getPublicClinicRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
@@ -31,7 +31,7 @@ getOwnSqlProfileRef.operationName = 'GetOwnSqlProfile';
 exports.getOwnSqlProfileRef = getOwnSqlProfileRef;
 
 exports.getOwnSqlProfile = function getOwnSqlProfile(dcOrOptions, options) {
-  
+
   const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrOptions, options, undefined,false, false);
   return executeQuery(getOwnSqlProfileRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
@@ -46,9 +46,24 @@ getPublicClinicContactRef.operationName = 'GetPublicClinicContact';
 exports.getPublicClinicContactRef = getPublicClinicContactRef;
 
 exports.getPublicClinicContact = function getPublicClinicContact(dcOrOptions, options) {
-  
+
   const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrOptions, options, undefined,false, false);
   return executeQuery(getPublicClinicContactRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
+}
+;
+
+const getPublicDoctorHoursRef = (dcOrVars, vars) => {
+  const { dc: dcInstance, vars: inputVars} = validateArgs(connectorConfig, dcOrVars, vars, true);
+  dcInstance._useGeneratedSdk();
+  return queryRef(dcInstance, 'GetPublicDoctorHours', inputVars);
+}
+getPublicDoctorHoursRef.operationName = 'GetPublicDoctorHours';
+exports.getPublicDoctorHoursRef = getPublicDoctorHoursRef;
+
+exports.getPublicDoctorHours = function getPublicDoctorHours(dcOrVars, varsOrOptions, options) {
+
+  const { dc: dcInstance, vars: inputVars, options: inputOpts } = validateArgsWithOptions(connectorConfig, dcOrVars, varsOrOptions, options, true, true);
+  return executeQuery(getPublicDoctorHoursRef(dcInstance, inputVars), inputOpts && { fetchPolicy: inputOpts.fetchPolicy });
 }
 ;
 

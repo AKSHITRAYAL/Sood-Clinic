@@ -1,0 +1,39 @@
+# Audited IAM reads, not a public availability API or booking writer.
+mutation ReadStaffClinicDay($actorUid: String!, $actorRole: String!, $doctorId: String!, $date: Date!, $resourceId: String!)
+@auth(level: NO_ACCESS) @transaction {
+  user_updateMany(where: {id: {eq: $actorUid}, active: {eq: true}}, data: {active: true})
+    @check(expr: "this == 1", message: "CLINIC_DAY_ACCOUNT_UNAVAILABLE")
+  query {
+    doctors(where: {legacyId: {eq: $doctorId}}, limit: 2) {
+      id legacyId name
+      appointments: appointments_on_doctor(
+        where: {clinicDate: {eq: $date}}, limit: 21, orderBy: [{startsAt: ASC}, {reference: ASC}]
+      ) {
+        id doctorId reference startsAt endsAt clinicDate status visitMode updatedAt
+        branch { name timezone }
+        service { name }
+      }
+    }
+  }
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: "clinic_day_viewed", resourceType: "doctor_day", resourceId: $resourceId})
+}
+
+mutation ReadStaffClinicDayAfter($actorUid: String!, $actorRole: String!, $doctorId: String!, $date: Date!, $resourceId: String!, $afterStartsAt: Timestamp!, $afterReference: String!)
+@auth(level: NO_ACCESS) @transaction {
+  user_updateMany(where: {id: {eq: $actorUid}, active: {eq: true}}, data: {active: true})
+    @check(expr: "this == 1", message: "CLINIC_DAY_ACCOUNT_UNAVAILABLE")
+  query {
+    doctors(where: {legacyId: {eq: $doctorId}}, limit: 2) {
+      id legacyId name
+      appointments: appointments_on_doctor(
+        where: {_and: [{clinicDate: {eq: $date}}, {_or: [{startsAt: {gt: $afterStartsAt}}, {startsAt: {eq: $afterStartsAt}, reference: {gt: $afterReference}}]}]},
+        limit: 21, orderBy: [{startsAt: ASC}, {reference: ASC}]
+      ) {
+        id doctorId reference startsAt endsAt clinicDate status visitMode updatedAt
+        branch { name timezone }
+        service { name }
+      }
+    }
+  }
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: "clinic_day_viewed", resourceType: "doctor_day", resourceId: $resourceId})
+}

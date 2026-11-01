@@ -95,6 +95,15 @@ it and need explicit approval.
 
 ## 6. Release gates (binding)
 
+Verified release-state note (2026-11-01): the owner explicitly approved and this
+session deployed the full 39-table schema and the two production connectors.
+The reviewed public catalogue/settings import succeeded. `SQL/release/plan.json`
+contains the DDL/backup evidence; `README.md` records the remaining Firestore
+runtime domains. The exit-1/local-only statements below describe the earlier
+pre-release state. They must not be used to report the completed release as still
+pending. All authorization, backup, testing and new-release approval requirements
+continue to apply. A source-check pass still does not certify production readiness.
+
 - `npm run sql:release-check` **exits 1 today by design**
   (`SYNTHETIC_REHEARSAL_OPERATIONS_PRESENT`, `SYNTHETIC_REHEARSAL_SDK_PRESENT`,
   `GUEST_RELATION_RELEASE_REVIEW_REQUIRED`). It reads local sources only and makes no cloud

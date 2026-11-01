@@ -65,6 +65,9 @@ function validateContentSnapshot(snapshot) {
   for (const name of fs.readdirSync(schemaDir).filter(name => name.endsWith('.gql'))) {
     for (const match of fs.readFileSync(path.join(schemaDir, name), 'utf8').matchAll(/^type (\w+) @table\b/gm)) entities.add(match[1]);
   }
+  // Historical snapshots also retain the deferred migration models; accepting an
+  // encrypted snapshot does not deploy its tables or authorize an import.
+  for (const match of fs.readFileSync(path.join(root, 'SQL/dataconnect/deferred/schema.gql.deferred'), 'utf8').matchAll(/^type (\w+) @table\b/gm)) entities.add(match[1]);
   if (snapshot.tables.length > entities.size || new Set(snapshot.tables).size !== snapshot.tables.length || snapshot.tables.some(table => !entities.has(table))) throw new Error();
   const seen = new Set();
   for (const row of snapshot.rows) {

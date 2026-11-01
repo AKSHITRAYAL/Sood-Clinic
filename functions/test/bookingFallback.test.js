@@ -25,6 +25,13 @@ test('a healthy SQL read is used and Firestore is never touched', async () => {
   expect(firestore.config).not.toHaveBeenCalled();
 });
 
+test('the migrated composition refuses SQL outages without selecting another store', async () => {
+  const error = failure('unavailable');
+  const reads = createBookingReads({ sql: { catalogue: async () => { throw error; }, config: async () => { throw error; } } });
+  await expect(reads.catalogue()).rejects.toBe(error);
+  await expect(reads.config()).rejects.toBe(error);
+});
+
 test('an unusable SQL read falls back to the legacy Firestore catalogue and published defaults', async () => {
   // Both failures production currently produces: the connector lacks the query and
   // `clinic_settings` is unseeded.

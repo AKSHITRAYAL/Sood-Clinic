@@ -21,10 +21,8 @@ const { createSqlCatalogue, sqlCatalogueStore } = require('./lib/sqlCatalogue');
 const { createSqlPatientBackend, sqlPatientCallableOptions } = require('./lib/sqlPatientBackend');
 const { createSqlAuditLogBackend } = require('./lib/sqlAuditLog');
 const { createBookingSettings, sqlBookingSettingsStore, selectVisitType } = require('./lib/bookingSettings');
-// TEMPORARY TECHNICAL DEBT (2026-10-25): see lib/bookingFallback.js. SQL stays the
-// authority; the Firestore read only covers an unusable SQL read until the reviewed
-// SQL seed + connector release ships.
-const { createBookingReads, firestoreCatalogue, firestoreConfig } = require('./lib/bookingFallback');
+// Catalogue and booking policy now have one SQL authority after verified import.
+const { createBookingReads } = require('./lib/bookingFallback');
 const { createConsultationWorkflow } = require('./lib/consultationRequests');
 // First production migration (2026-10-30): the clinic-day, weekly/special-hours,
 // patient profile/health/appointment, staff-patient and scheduler-unit callables are
@@ -394,14 +392,6 @@ const bookingReads = () => createBookingReads({
   sql: {
     catalogue: () => sqlCatalogueService().public(),
     config: () => bookingSettingsService().runtime(),
-  },
-  firestore: {
-    catalogue: async () => {
-      const [branches, departments, doctors] = await Promise.all(['branches', 'departments', 'doctors'].map((name) => db.collection(name).get()));
-      const rows = (snapshot) => snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      return firestoreCatalogue({ branches: rows(branches), departments: rows(departments), doctors: rows(doctors) });
-    },
-    config: async () => firestoreConfig((await db.collection('clinic').doc('publicConfig').get()).data()),
   },
 });
 

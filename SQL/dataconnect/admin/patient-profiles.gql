@@ -1,0 +1,44 @@
+# IAM only, local pre-cutover backend. Never accept an actor UID from the browser.
+# Clinical text, blood group, email/Auth, provenance and ownership are not editable here.
+query ListLinkedPatientProfiles($actorUid: String!) @auth(level: NO_ACCESS) {
+  user(key: {id: $actorUid}) @check(expr: "this != null && this.active", message: "ACCOUNT_UNAVAILABLE") { active }
+  patientLinks(where: {userId: {eq: $actorUid}, patient: {archivedAt: {isNull: true}}}, limit: 21, orderBy: {patientId: ASC}) {
+    relationship verifiedBy verifiedAt
+    patient { id uhid displayName archivedAt }
+  }
+}
+
+query ReadLinkedPatientProfile($actorUid: String!, $patientId: UUID!) @auth(level: NO_ACCESS) {
+  user(key: {id: $actorUid}) @check(expr: "this != null && this.active", message: "ACCOUNT_UNAVAILABLE") { active }
+  patientLink(key: {patientId: $patientId, userId: $actorUid}) {
+    relationship verifiedBy verifiedAt
+    patient { id uhid displayName phone title dateOfBirth gender maritalStatus addressLine1 city state postalCode emergencyContactName emergencyContactPhone archivedAt updatedAt }
+  }
+}
+
+query GetPatientProfileReceipt($actorUid: String!, $requestId: UUID!) @auth(level: NO_ACCESS) {
+  operationReceipt(key: {actorUid: $actorUid, requestId: $requestId}) { operation }
+}
+
+mutation SaveLinkedPatientProfile(
+  $actorUid: String!, $patientId: UUID!, $requestId: UUID!, $operation: String!, $expectedUpdatedAt: Timestamp!,
+  $displayName: String!, $phone: String!, $title: String, $dateOfBirth: Date, $gender: String, $maritalStatus: String,
+  $addressLine1: String, $city: String, $state: String, $postalCode: String, $emergencyContactName: String, $emergencyContactPhone: String
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: $actorUid, requestId: $requestId}) @check(expr: "this == null", message: "PATIENT_REQUEST_APPLIED") { operation }
+  }
+  # No-op updates lock account/link rows, ordering save against deactivation/revocation.
+  user_updateMany(where: {id: {eq: $actorUid}, active: {eq: true}}, data: {active: true})
+    @check(expr: "this == 1", message: "ACCOUNT_UNAVAILABLE")
+  patientLink_updateMany(
+    where: {patientId: {eq: $patientId}, userId: {eq: $actorUid}, relationship: {in: ["self", "guardian"]}, verifiedBy: {ne: ""}},
+    data: {userId: $actorUid}
+  ) @check(expr: "this == 1", message: "PATIENT_LINK_UNAVAILABLE")
+  patient_updateMany(
+    where: {id: {eq: $patientId}, archivedAt: {isNull: true}, updatedAt: {eq: $expectedUpdatedAt}},
+    data: {displayName: $displayName, phone: $phone, title: $title, dateOfBirth: $dateOfBirth, gender: $gender, maritalStatus: $maritalStatus, addressLine1: $addressLine1, city: $city, state: $state, postalCode: $postalCode, emergencyContactName: $emergencyContactName, emergencyContactPhone: $emergencyContactPhone, updatedAt_expr: "request.time"}
+  ) @check(expr: "this == 1", message: "PATIENT_VERSION_CHANGED")
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: "patient", action: "patient_demographics_saved", resourceType: "patient", resourceId_expr: "vars.patientId"})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}

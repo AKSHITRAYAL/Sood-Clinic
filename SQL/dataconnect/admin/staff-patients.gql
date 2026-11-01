@@ -1,0 +1,44 @@
+# IAM only. These mutations audit reads as well as edits; current Auth role must
+# be checked by the service, never supplied by the browser or a SQL profile.
+mutation SearchStaffPatientsByUhid($actorUid: String!, $actorRole: String!, $uhid: String!) @auth(level: NO_ACCESS) @transaction {
+  query {
+    patients(where: {uhid: {eq: $uhid}, archivedAt: {isNull: true}}, limit: 21, orderBy: {id: ASC}) {
+      id uhid displayName phone archivedAt
+    }
+  }
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: "patient_registry_searched", resourceType: "patient_search", resourceId: "registry"})
+}
+
+mutation SearchStaffPatientsByPhone($actorUid: String!, $actorRole: String!, $phone: String!) @auth(level: NO_ACCESS) @transaction {
+  query {
+    patients(where: {phone: {eq: $phone}, archivedAt: {isNull: true}}, limit: 21, orderBy: {id: ASC}) {
+      id uhid displayName phone archivedAt
+    }
+  }
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: "patient_registry_searched", resourceType: "patient_search", resourceId: "registry"})
+}
+
+mutation ReadStaffPatientDemographics($actorUid: String!, $actorRole: String!, $patientId: UUID!) @auth(level: NO_ACCESS) @transaction {
+  query {
+    patient(key: {id: $patientId}) {
+      id uhid displayName phone title dateOfBirth gender maritalStatus addressLine1 city state postalCode emergencyContactName emergencyContactPhone archivedAt updatedAt
+    }
+  }
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: "patient_demographics_viewed", resourceType: "patient", resourceId_expr: "vars.patientId"})
+}
+
+mutation SaveStaffPatientDemographics(
+  $actorUid: String!, $actorRole: String!, $patientId: UUID!, $requestId: UUID!, $operation: String!, $expectedUpdatedAt: Timestamp!,
+  $displayName: String!, $phone: String!, $title: String, $dateOfBirth: Date, $gender: String, $maritalStatus: String,
+  $addressLine1: String, $city: String, $state: String, $postalCode: String, $emergencyContactName: String, $emergencyContactPhone: String
+) @auth(level: NO_ACCESS) @transaction {
+  query @redact {
+    operationReceipt(key: {actorUid: $actorUid, requestId: $requestId}) @check(expr: "this == null", message: "PATIENT_REQUEST_APPLIED") { operation }
+  }
+  patient_updateMany(
+    where: {id: {eq: $patientId}, archivedAt: {isNull: true}, updatedAt: {eq: $expectedUpdatedAt}},
+    data: {displayName: $displayName, phone: $phone, title: $title, dateOfBirth: $dateOfBirth, gender: $gender, maritalStatus: $maritalStatus, addressLine1: $addressLine1, city: $city, state: $state, postalCode: $postalCode, emergencyContactName: $emergencyContactName, emergencyContactPhone: $emergencyContactPhone, updatedAt_expr: "request.time"}
+  ) @check(expr: "this == 1", message: "PATIENT_VERSION_CHANGED")
+  auditLog_insert(data: {actorUid: $actorUid, actorRole: $actorRole, action: "staff_patient_demographics_saved", resourceType: "patient", resourceId_expr: "vars.patientId"})
+  operationReceipt_insert(data: {actorUid: $actorUid, requestId: $requestId, operation: $operation})
+}

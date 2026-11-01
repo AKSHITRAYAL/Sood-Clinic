@@ -467,8 +467,11 @@ test('IAM-only query and seed deny anonymous, patient and admin-claim callers', 
 test('private clinical and patient collections have no exposed connector operation', async () => {
   await assert.rejects(clinic.executeQuery('ListPatients', undefined, { impersonate: { authClaims: { sub: 'sql-test-manager', role: 'manager' } } }), /not found/i);
   const result = await sql.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'clinic_%'");
-  // First release: exactly the 22 deployed tables. Deferred models are not migrated.
-  assert.equal(result.rows.length, 22);
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const schema = fs.readFileSync(path.join(__dirname, '../dataconnect/schema/schema.gql'), 'utf8');
+  const expectedTables = [...schema.matchAll(/@table\(name: "(clinic_[^"]+)"/g)].map(match => match[1]).sort();
+  assert.deepEqual(result.rows.map(row => row.table_name).sort(), expectedTables);
 });
 
 
