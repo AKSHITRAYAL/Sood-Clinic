@@ -10,7 +10,7 @@ async function seed() {
   const batch = db.batch();
   batch.set(branch, { name: 'Sood Clinic', code: 'SOOD', timezone: 'Asia/Kolkata', active: true, address: { line1: 'House No. 398, Sector 10', city: 'Panchkula', state: 'Haryana', postalCode: '134109', country: 'IN' }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   batch.set(department, { branchId: branch.id, name: 'Gastroenterology', code: 'GASTRO', description: 'Digestive health and gastroenterology consultations.', active: true, publicBookingEnabled: true, sortOrder: 1, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  batch.set(doctor, { branchId: branch.id, departmentIds: [department.id], name: 'Dr. Brig. A. K. Sood VSM (Retd)', qualification: 'MBBS, MD, DNB, DM', registrationNumber: 'HR886', active: true, bookingEnabled: true, weeklySchedule: [1, 2, 3, 4, 5, 6].flatMap((weekday) => [{ weekday, startTime: '08:00', endTime: '10:00', slotMinutes: 20 }, { weekday, startTime: '17:00', endTime: '18:30', slotMinutes: 20 }]), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  batch.set(doctor, { branchId: branch.id, departmentIds: [department.id], name: 'Dr. Brig. A. K. Sood VSM (Retd)', qualification: 'MBBS, MD, DNB, DM', registrationNumber: 'HR886', active: true, bookingEnabled: true, weeklySchedule: [1, 2, 3, 4, 5, 6].flatMap((weekday) => [{ weekday, startTime: '08:00', endTime: '10:00', slotMinutes: 15 }, { weekday, startTime: '17:00', endTime: '18:30', slotMinutes: 15 }]), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   await batch.commit();
   console.log('Sood Clinic Firestore catalog seeded.');
 }

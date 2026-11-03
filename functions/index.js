@@ -28,6 +28,7 @@ const { createStaffAppointmentReader, firestoreStaffAppointmentStore } = require
 const { createSqlWeeklyHoursBackend } = require('./lib/sqlWeeklyHours');
 const { createSqlSpecialHoursBackend } = require('./lib/sqlSpecialHours');
 const { createSqlBookingHours, createSqlClosedDay } = require('./lib/sqlBookingHours');
+const { createReviews } = require('./lib/reviews');
 // Schedules and date exceptions have one authority: SQL. The public booking reader and
 // both staff editors use the same connector operations. Appointment, occupancy,
 // request and Calendar writes remain Firestore (see README remaining runtime domains).
@@ -74,6 +75,8 @@ const PATIENT_PROFILE_FIELDS = Object.freeze([
   'emergencyContactName', 'emergencyContactPhone', 'allergies',
   'currentMedications', 'healthNotes',
 ]);
+const CLINICAL_PROFILE_FIELDS = Object.freeze(['bloodGroup', 'allergies', 'currentMedications', 'healthNotes']);
+const ADMIN_PROFILE_FIELDS = PATIENT_PROFILE_FIELDS.filter(field => !CLINICAL_PROFILE_FIELDS.includes(field));
 const patientProfile = (input = {}) => {
   const result = {};
   PATIENT_PROFILE_FIELDS.forEach((field) => { result[field] = trimmed(input[field], field === 'healthNotes' || field === 'allergies' || field === 'currentMedications' ? 2000 : 160); });
@@ -171,7 +174,7 @@ exports.getAdminPatientProfile = onCall({ ...callableOptions, timeoutSeconds: 30
     patientId: uid,
     uhid: data.uhid || '',
     linkedUids: Array.isArray(data.linkedUids) ? data.linkedUids : [uid],
-    profile: Object.fromEntries([...PATIENT_PROFILE_FIELDS, 'email', 'createdAt', 'updatedAt'].map((field) => [field, data[field] || ''])),
+    profile: Object.fromEntries([...ADMIN_PROFILE_FIELDS, 'email', 'createdAt', 'updatedAt'].map((field) => [field, data[field] || ''])),
   };
 });
 
@@ -180,7 +183,9 @@ exports.updateAdminPatientProfile = onCall({ ...callableOptions, timeoutSeconds:
   const uid = trimmed(request.data?.uid, 128);
   if (!uid) throw new HttpsError('invalid-argument', 'Select a patient first.');
   const patientRef = db.collection('patients').doc(uid);
-  const profile = patientProfile(request.data?.profile);
+  if (CLINICAL_PROFILE_FIELDS.some(field => Object.hasOwn(request.data?.profile || {}, field))) throw new HttpsError('permission-denied', 'Administrator profile editing is limited to demographic details.');
+  const validated = patientProfile(request.data?.profile);
+  const profile = Object.fromEntries(ADMIN_PROFILE_FIELDS.map(field => [field, validated[field]]));
   let existing; let uhid;
   await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(patientRef);
@@ -196,7 +201,7 @@ exports.updateAdminPatientProfile = onCall({ ...callableOptions, timeoutSeconds:
     transaction.set(db.collection('patientDirectory').doc(uid), patientDirectoryRecord({ patientId: uid, uid, email, profile, uhid, linkedUids }), { merge: true });
   });
   await admin.auth().updateUser(uid, { displayName: `${profile.title ? `${profile.title} ` : ''}${profile.displayName}`.trim() }).catch(() => null);
-  await auditPatientAccess({ actorUid: request.auth.uid, action: 'patient_profile_updated', targetUid: uid, meta: { fields: PATIENT_PROFILE_FIELDS.filter((field) => profile[field] !== (existing[field] || '')) } });
+  await auditPatientAccess({ actorUid: request.auth.uid, action: 'patient_profile_updated', targetUid: uid, meta: { fields: ADMIN_PROFILE_FIELDS.filter((field) => profile[field] !== (existing[field] || '')) } });
   return { message: 'Patient profile updated.', uhid };
 });
 
@@ -293,7 +298,7 @@ exports.registerPatient = onCall({ ...callableOptions, timeoutSeconds: 30, memor
 
 const staffSql = () => getDataConnect({ serviceId: 'ak-sood-clinic-service', location: 'asia-south1', connector: 'clinic-admin' });
 exports.getStaffSession = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB', maxInstances: 1 }, async (request) => {
-  const user = await requireLiveStaff(admin.auth(), request, { allowForcedPassword: true });
+  const user = await requireLiveStaff(admin.auth(), request, { roles: ['admin', 'doctor', 'manager', 'receptionist'], allowForcedPassword: true });
   return { role: user.customClaims.role, doctorId: user.customClaims.role === 'doctor' ? user.customClaims.doctorId : null, mustChangePassword: user.customClaims.forcePasswordChange === true || request.auth.token.forcePasswordChange === true };
 });
 const staffLifecycleOptions = { ...callableOptions, timeoutSeconds: 60, memory: '256MiB', maxInstances: 1, concurrency: 1 };
@@ -423,52 +428,18 @@ exports.getAuditLog = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '
   return { events: [...events, ...staffEvents].sort((a, b) => (b.at || '').localeCompare(a.at || '')).slice(0, limit) };
 });
 
-// Experience feedback is never public by default. A patient may submit one
-// review only after a completed appointment; an administrator must explicitly
-// publish it before the public site can receive its minimal projection.
-exports.submitPatientFeedback = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
-  if (!request.auth || isStaffRole(request.auth.token.role)) throw new HttpsError('permission-denied', 'Patient sign-in is required.');
-  const appointmentId = String(request.data?.appointmentId || '').trim();
-  const rating = Number(request.data?.rating);
-  const comment = String(request.data?.comment || '').trim().replace(/\s+/g, ' ').slice(0, 800);
-  if (!/^[A-Za-z0-9_-]{1,200}$/.test(appointmentId) || !Number.isInteger(rating) || rating < 1 || rating > 5 || comment.length < 10) throw new HttpsError('invalid-argument', 'Choose a rating and write at least 10 characters of feedback.');
-  const appointmentRef = db.collection('appointments').doc(appointmentId);
-  const feedbackRef = db.collection('patientFeedback').doc(appointmentId);
-  await db.runTransaction(async (transaction) => {
-    const [appointment, existing] = await Promise.all([transaction.get(appointmentRef), transaction.get(feedbackRef)]);
-    if (!appointment.exists || appointment.get('patientId') !== request.auth.uid || appointment.get('status') !== 'completed') throw new HttpsError('permission-denied', 'Feedback is available after your completed appointment.');
-    if (existing.exists) throw new HttpsError('already-exists', 'Feedback was already submitted for this appointment.');
-    const now = FieldValue.serverTimestamp();
-    transaction.set(feedbackRef, { appointmentId, patientId: request.auth.uid, rating, comment, status: 'pending', createdAt: now, updatedAt: now });
-    transaction.set(db.collection('auditLogs').doc(), { at: now, actor: { uid: request.auth.uid, role: 'patient' }, action: 'patient_feedback_submitted', resource: { type: 'patient_feedback', id: feedbackRef.id }, meta: { rating } });
-  });
-  return { message: 'Thank you. Your feedback has been submitted for review.' };
-});
-
-exports.getPublicTestimonials = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async () => {
-  const snapshot = await db.collection('patientFeedback').where('status', '==', 'published').orderBy('publishedAt', 'desc').limit(6).get();
-  return { testimonials: snapshot.docs.map((item) => ({ id: item.id, rating: item.get('rating'), comment: item.get('comment') })) };
-});
-
-exports.getFeedbackModerationQueue = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
-  await requireAdmin(request);
-  const snapshot = await db.collection('patientFeedback').where('status', '==', 'pending').orderBy('createdAt', 'desc').limit(30).get();
-  return { feedback: snapshot.docs.map((item) => ({ id: item.id, appointmentId: item.get('appointmentId'), rating: item.get('rating'), comment: item.get('comment') })) };
-});
-
-exports.moderatePatientFeedback = onCall({ ...callableOptions, timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
-  await requireAdmin(request);
-  const feedbackId = String(request.data?.feedbackId || '').trim();
-  const action = String(request.data?.action || '').trim();
-  if (!/^[A-Za-z0-9_-]{1,200}$/.test(feedbackId) || !['publish', 'reject', 'unpublish'].includes(action)) throw new HttpsError('invalid-argument', 'Choose a valid feedback moderation action.');
-  const ref = db.collection('patientFeedback').doc(feedbackId);
-  const snapshot = await ref.get();
-  if (!snapshot.exists) throw new HttpsError('not-found', 'Feedback was not found.');
-  const status = action === 'publish' ? 'published' : action === 'reject' ? 'rejected' : 'unpublished';
-  await ref.set({ status, reviewedAt: FieldValue.serverTimestamp(), reviewedBy: request.auth.uid, publishedAt: action === 'publish' ? FieldValue.serverTimestamp() : FieldValue.delete() }, { merge: true });
-  await auditPatientAccess({ actorUid: request.auth.uid, action: `patient_feedback_${status}`, targetUid: snapshot.get('patientId'), meta: { feedbackId } });
-  return { message: `Feedback ${status}.` };
-});
+// Reviews stay in the existing feedback store while operational SQL cutover proceeds.
+const reviewService = () => createReviews({ db, auth: admin.auth() });
+const reviewOptions = { ...callableOptions, invoker: 'public', timeoutSeconds: 30, memory: '256MiB', maxInstances: 1 };
+exports.submitPatientFeedback = onCall(reviewOptions, request => reviewService().submit(request));
+exports.listPatientReviews = onCall(reviewOptions, request => reviewService().list(request));
+exports.getMyPatientReviews = onCall(reviewOptions, request => reviewService().own(request));
+exports.withdrawPatientFeedback = onCall(reviewOptions, request => reviewService().withdraw(request));
+exports.interactWithReview = onCall(reviewOptions, request => reviewService().interact(request));
+exports.getFeedbackModerationQueue = onCall(reviewOptions, request => reviewService().queue(request));
+exports.getReviewModerationDetail = onCall(reviewOptions, request => reviewService().detail(request));
+exports.moderatePatientFeedback = onCall(reviewOptions, request => reviewService().moderate(request));
+exports.getPublicTestimonials = onCall(reviewOptions, async request => ({ testimonials: (await reviewService().list({ ...request, data: { limit: 6 } })).featured }));
 
 const publicError = (code, message) => new HttpsError(code, message);
 const roleFor = (authContext) => authContext?.token?.role || 'patient';
@@ -700,7 +671,9 @@ exports.createBooking = onCall({ ...bookingCallableOptions, timeoutSeconds: 30, 
         if (slot.get('status') === 'booked') throw publicError('already-exists', 'That time has just been booked. Please choose another slot.');
         throw publicError('failed-precondition', 'That time is no longer available. Please choose another slot.');
       }
-      const status = context.config.autoConfirm ? 'confirmed' : 'scheduled';
+      // Legacy direct bookings also confirm immediately; the slot transaction
+      // above is the approval boundary and prevents double-booking.
+      const status = 'confirmed';
       const createdBy = request.auth ? { uid: request.auth.uid, role } : { uid: null, role: 'public' };
       transaction.set(slotRef, { doctorId, dateKey, startsAt: Timestamp.fromDate(requested.startsAt), endsAt: Timestamp.fromDate(requested.endsAt), appointmentId: appointmentRef.id, status: 'booked', createdAt: FieldValue.serverTimestamp() });
       transaction.set(appointmentRef, {

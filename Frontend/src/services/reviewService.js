@@ -1,0 +1,11 @@
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../lib/firebase';
+const invoke = async (name, data = {}) => (await httpsCallable(functions, name)(data)).data;
+export const listReviews = data => invoke('listPatientReviews', data);
+export const myReviews = data => invoke('getMyPatientReviews', data);
+export const submitReview = data => invoke('submitPatientFeedback', data);
+export const withdrawReview = data => invoke('withdrawPatientFeedback', data);
+export const interactWithReview = data => invoke('interactWithReview', data);
+export const moderationQueue = data => invoke('getFeedbackModerationQueue', data);
+export const moderationDetail = data => invoke('getReviewModerationDetail', data);
+export const moderateReview = data => invoke('moderatePatientFeedback', data);

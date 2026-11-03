@@ -1,4 +1,5 @@
-const STAFF_ROLES = Object.freeze(['admin', 'doctor', 'manager']);
+// Identity recognition only. Each handler must explicitly authorize its roles.
+const STAFF_ROLES = Object.freeze(['admin', 'doctor', 'manager', 'receptionist']);
 
 const isStaffRole = (value) => STAFF_ROLES.includes(value);
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();

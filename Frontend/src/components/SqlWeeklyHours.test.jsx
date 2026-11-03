@@ -20,6 +20,16 @@ const load = async api => {
   fireEvent.click(screen.getByText('Load / reload hours'));
   await screen.findByRole('heading', { name: 'Synthetic Doctor' });
 };
+test('can add and remove weekly windows without inventing an unconfigured schedule', async () => {
+  const api = { get: vi.fn(async () => record({ sessions: [] })), save: vi.fn(async () => ({ saved: true })) };
+  await load(api); expect(screen.queryAllByLabelText('Start')).toHaveLength(0);
+  fireEvent.click(screen.getByText('Edit weekly hours')); fireEvent.click(screen.getByText('Add weekly session'));
+  fireEvent.change(screen.getByLabelText('Day for session 1'), { target: { value: '3' } });
+  fireEvent.change(screen.getByLabelText('Start'), { target: { value: '09:00' } }); fireEvent.change(screen.getByLabelText('End'), { target: { value: '10:00' } });
+  fireEvent.click(screen.getByText('Add weekly session')); fireEvent.click(screen.getByText('Remove session 2'));
+  fireEvent.click(screen.getByText('Save weekly hours'));
+  await waitFor(() => expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ sessions: [{ weekday: 3, startMinute: 540, endMinute: 600 }] })));
+});
 
 test('access gate denies missing account, manager/patient roles and unscoped doctors', () => {
   const api = { get: vi.fn(), save: vi.fn() };

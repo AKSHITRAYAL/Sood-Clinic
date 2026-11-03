@@ -24,6 +24,14 @@ afterAll(async () => {
 });
 
 describe('Firestore default-deny boundary', () => {
+  it('keeps reviews, originals, reports and quotas private even from staff browsers', async () => {
+    for (const role of ['admin', 'manager', 'receptionist', 'patient']) {
+      const db = testEnv.authenticatedContext(`review-${role}`, { role }).firestore();
+      for (const path of ['patientFeedback/review-one', 'patientFeedback/review-one/history/version-one', 'patientFeedback/review-one/reports/report-one', 'patientFeedback/review-one/votes/vote-one', 'reviewRateLimits/bucket-one']) {
+        await assertFails(getDoc(doc(db, path))); await assertFails(setDoc(doc(db, path), { status: 'published' }));
+      }
+    }
+  });
   it('allows anonymous reads of the intentionally public doctor catalog', async () => {
     const db = testEnv.unauthenticatedContext().firestore();
 
@@ -70,7 +78,7 @@ describe('Firestore default-deny boundary', () => {
     await assertFails(setDoc(doc(db, 'patients', 'patient-one', 'medicalDocuments', 'record-one'), { title: 'Self upload' }));
   });
 
-  it('keeps patient profiles out of non-admin staff browser sessions', async () => {
+  it('keeps raw patient profiles out of all staff browsers while preserving patient ownership', async () => {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       await setDoc(doc(context.firestore(), 'patients', 'patient-one'), { displayName: 'Patient One' });
     });
@@ -80,7 +88,10 @@ describe('Firestore default-deny boundary', () => {
 
     await assertFails(getDoc(doc(manager, 'patients', 'patient-one')));
     await assertFails(getDoc(doc(doctor, 'patients', 'patient-one')));
-    await assertSucceeds(getDoc(doc(admin, 'patients', 'patient-one')));
+    await assertFails(getDoc(doc(admin, 'patients', 'patient-one')));
+    await assertFails(getDocs(collection(admin, 'patients')));
+    const owner = testEnv.authenticatedContext('patient-one').firestore();
+    await assertSucceeds(getDoc(doc(owner, 'patients', 'patient-one')));
   });
 
   it('keeps clinical history and documents out of manager/admin reads while allowing the owning patient and doctor', async () => {

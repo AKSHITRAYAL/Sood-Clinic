@@ -1,6 +1,8 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { isDoctorId, isStaffRole } = require('./staffAccess');
 
+// Receptionists are deliberately excluded from default operational/clinical access.
+// Only session/account and reviews handlers opt them in explicitly.
 async function requireLiveStaff(auth, request, { roles = ['admin', 'doctor', 'manager'], doctorId, allowForcedPassword = false } = {}) {
   const token = request.auth?.token;
   if (!request.auth?.uid || !isStaffRole(token?.role) || !roles.includes(token.role)) throw new HttpsError('permission-denied', 'Current staff access is required.');

@@ -3,7 +3,7 @@ import PropTypes from 'prop-types';
 import { sqlWeeklyHoursService } from '../services/sqlWeeklyHoursService';
 import ConfirmDialog from './ConfirmDialog';
 
-const minutesToClock = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+const minutesToClock = m => m >= 0 ? `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}` : '';
 const clockToMinutes = value => {
   const match = /^(\d{2}):(\d{2})$/.exec(value || '');
   if (!match) return null;
@@ -15,19 +15,20 @@ const newRequestId = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.ra
 const failClosed = ['functions/permission-denied', 'functions/unauthenticated'];
 const inputErrors = [...failClosed, 'functions/invalid-argument'];
 
-function WeeklyHours({ sessions, editing, saving, onChange }) {
+function WeeklyHours({ sessions, editing, saving, onChange, onAdd, onRemove }) {
   return <fieldset disabled={saving}><legend>Weekly sessions (IST)</legend>
     {!sessions.length && <p>No regular sessions are recorded for this doctor. This is not the same as closed permanently.</p>}
     <ul>{sessions.map((session, index) => <li key={`${session.weekday}-${index}`}>
-      <label>{weekdayLabel(session.weekday)}</label>
+      {editing ? <label>Day<select aria-label={`Day for session ${index + 1}`} value={session.weekday} onChange={event => onChange(index, 'weekday', Number(event.target.value))}>{[1, 2, 3, 4, 5, 6, 7].map(day => <option value={day} key={day}>{weekdayLabel(day)}</option>)}</select></label> : <label>{weekdayLabel(session.weekday)}</label>}
       <input type="time" aria-label="Start" step="300" value={minutesToClock(session.startMinute)} disabled={!editing} onChange={event => {
         const minutes = clockToMinutes(event.target.value);
         if (minutes !== null) onChange(index, 'startMinute', minutes);
       }} />–<input type="time" aria-label="End" step="300" value={minutesToClock(session.endMinute)} disabled={!editing} onChange={event => {
         const minutes = clockToMinutes(event.target.value);
         if (minutes !== null) onChange(index, 'endMinute', minutes);
-      }} />
+      }} />{editing && <button type="button" onClick={() => onRemove(index)}>Remove session {index + 1}</button>}
     </li>)}</ul>
+    {editing && <button type="button" disabled={sessions.length >= 14} onClick={onAdd}>Add weekly session</button>}
   </fieldset>;
 }
 WeeklyHours.propTypes = {
@@ -35,6 +36,8 @@ WeeklyHours.propTypes = {
   editing: PropTypes.bool.isRequired,
   saving: PropTypes.bool.isRequired,
   onChange: PropTypes.func.isRequired,
+  onAdd: PropTypes.func.isRequired,
+  onRemove: PropTypes.func.isRequired,
 };
 
 function WeeklyHoursEditor({ role, assignedDoctorId, api }) {
@@ -97,7 +100,9 @@ function WeeklyHoursEditor({ role, assignedDoctorId, api }) {
       <button type="submit" disabled={busy || saveBusy || !doctorId}>{busy ? 'Loading…' : 'Load / reload hours'}</button>
     </fieldset></form>
     {record && <><h2>{record.doctorName}</h2><p>Last verified {new Date(record.updatedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST.</p>
-      <WeeklyHours sessions={sessions} editing={editing} saving={saveBusy || busy} onChange={change} />
+      <WeeklyHours sessions={sessions} editing={editing} saving={saveBusy || busy} onChange={change}
+        onAdd={() => setSessions(current => current.length < 14 ? [...current, { weekday: 1, startMinute: -1, endMinute: -1 }] : current)}
+        onRemove={index => setSessions(current => current.filter((_, position) => position !== index))} />
       {editing
         ? <button type="button" disabled={saveBusy} onClick={save}>{saveBusy ? 'Saving…' : 'Save weekly hours'}</button>
         : <button type="button" disabled={busy || saveBusy || blocked} onClick={() => { setEditing(true); setError(''); }}>Edit weekly hours</button>}

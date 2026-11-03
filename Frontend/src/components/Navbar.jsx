@@ -40,6 +40,7 @@ const Navbar = () => {
           <NavLink to="/" className={navClass}>Home</NavLink>
           <NavLink to="/About" className={navClass}>About us</NavLink>
           <NavLink to="/guides" className={navClass}>Health guides</NavLink>
+          <NavLink to="/reviews" className={navClass}>Reviews</NavLink>
           <NavLink to="/contact" className={navClass}>Contact</NavLink>
           <Link to={profileDestination} className="nav-profile" aria-label={user ? `Open ${profileName}'s profile` : 'Sign in or create a patient account'}>{user ? <><PatientAvatar name={profileName} photoUrl={user.photoURL} /><span>{profileName.split(' ')[0]}</span></> : <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.25" /><path d="M5.5 20c.65-3.4 2.75-5.1 6.5-5.1s5.85 1.7 6.5 5.1" /></svg>}</Link>
           <NavLink to="/book" className="nav-cta">Book appointment</NavLink>
@@ -57,6 +58,7 @@ const Navbar = () => {
             <NavLink onClick={closeMenu} to="/" className={navClass}>Home</NavLink>
             <NavLink onClick={closeMenu} to="/About" className={navClass}>About us</NavLink>
             <NavLink onClick={closeMenu} to="/guides" className={navClass}>Health guides</NavLink>
+            <NavLink onClick={closeMenu} to="/reviews" className={navClass}>Reviews</NavLink>
             <NavLink onClick={closeMenu} to="/contact" className={navClass}>Contact</NavLink>
           </nav>
           <NavLink onClick={closeMenu} to="/book" className="mobile-nav__cta">Book an appointment <span aria-hidden="true">→</span></NavLink>

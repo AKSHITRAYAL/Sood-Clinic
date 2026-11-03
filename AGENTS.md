@@ -30,7 +30,11 @@ portal) and a staff website (admin, doctor, manager), both served from one Fireb
 | `tests/` | Rules, callable, booking, schedule, time and staff-access suites. |
 
 Auth model: Firebase Auth email/password. Staff roles are **custom claims** (`role` =
-`admin` | `doctor` | `manager`; a doctor also carries `doctorId`). Patients are any
+`admin` | `doctor` | `manager` | `receptionist`; a doctor also carries `doctorId`).
+Receptionist is a separate reviews/account role: it is explicitly excluded from
+the default operational/clinical `requireLiveStaff` allow-list. Only review moderation
+and session/account handlers opt it in. Never alias it to manager.
+Patients are any
 authenticated user without a staff role.
 
 ## 3. Commands

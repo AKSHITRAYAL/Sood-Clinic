@@ -76,7 +76,7 @@ test('no phone number is hard-coded in the footer and no developer-facing copy r
 
 test('every public page that can be reached still renders the footer, and the contact page uses the same record', async () => {
   const root = await sourceRoot();
-  for (const page of ['Home', 'About', 'Contact', 'HealthGuides', 'PatientExperience', 'Bookappointment', 'Login', 'PublicNotFound']) {
+  for (const page of ['Home', 'About', 'Contact', 'HealthGuides', 'Reviews', 'Bookappointment', 'Login', 'PublicNotFound']) {
     const source = await readFile(`${root}/pages/${page}.jsx`, 'utf8');
     expect(source, `${page} does not render the footer`).toContain("components/Footer");
   }
@@ -85,5 +85,5 @@ test('every public page that can be reached still renders the footer, and the co
   expect(contact).toContain('tel:${contact.phone}');
   expect(contact).toContain('mailto:${contact.email}');
   const routes = `${await readFile(`${root}/entry/public.jsx`, 'utf8')}${await readFile(`${root}/main.jsx`, 'utf8').catch(() => '')}`;
-  for (const path of ['/', '/about', '/contact', '/guides', '/experience', '/book', '/login']) expect(routes).toContain(`path="${path}"`);
+  for (const path of ['/', '/about', '/contact', '/guides', '/experience', '/reviews', '/book', '/login']) expect(routes).toContain(`path="${path}"`);
 });

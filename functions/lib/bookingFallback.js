@@ -26,10 +26,10 @@ const FALLBACK_CODES = new Set(['unavailable', 'failed-precondition', 'internal'
 
 // The pre-migration published defaults. `clinic/publicConfig` is absent in production,
 // so these are exactly what /book served before booking moved to the SQL catalogue.
-const DEFAULT_CONFIG = Object.freeze({ bookingWindowDays: 14, leadMinutes: 30, intervalMinutes: 20, bufferBeforeMinutes: 0, bufferAfterMinutes: 0, cancelCutoffHours: 2 });
+const DEFAULT_CONFIG = Object.freeze({ bookingWindowDays: 14, leadMinutes: 30, intervalMinutes: 15, bufferBeforeMinutes: 0, bufferAfterMinutes: 0, cancelCutoffHours: 2 });
 const DEFAULT_VISIT_TYPES = Object.freeze([
-  Object.freeze({ id: 'consultation', label: 'In-clinic consultation', minutes: 20, mode: 'in_person', active: true }),
-  Object.freeze({ id: 'video-consultation', label: 'Online video consultation', minutes: 20, mode: 'video', active: true }),
+  Object.freeze({ id: 'consultation', label: 'In-clinic consultation', minutes: 15, mode: 'in_person', active: true }),
+  Object.freeze({ id: 'video-consultation', label: 'Online video consultation', minutes: 15, mode: 'video', active: true }),
 ]);
 const unavailable = () => new HttpsError('unavailable', 'Booking configuration is temporarily unavailable.');
 const text = (value, max) => String(value ?? '').trim().slice(0, max);

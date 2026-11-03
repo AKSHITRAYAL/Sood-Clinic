@@ -63,14 +63,14 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-test('an in-person request submits the chosen location, day and time without reserving it', async () => {
+test('an in-person booking submits the chosen location, day and time and confirms it', async () => {
   mocks.submitConsultationRequest.mockResolvedValue({ data: { reference: 'CR-TEST01', accessToken: 'token-123' } });
   await openDetails();
-  fireEvent.click(screen.getByText('Send request'));
+  fireEvent.click(screen.getByText('Confirm appointment'));
 
-  await screen.findByText(/Approval is pending/);
+  await screen.findByText(/Appointment confirmed/);
   expect(screen.getByText(/CR-TEST01/)).toBeTruthy();
-  expect(screen.getByText('View or cancel this request').getAttribute('href')).toBe('/consultation-status?reference=CR-TEST01&token=token-123');
+  expect(screen.getByText('View or cancel this appointment').getAttribute('href')).toBe('/consultation-status?reference=CR-TEST01&token=token-123');
   expect(mocks.getConsultationAvailability).toHaveBeenCalledWith(expect.objectContaining({
     doctorId: 'doc-1', serviceId: 'consult', locationId: 'jindal-diagnostics', dateKey: expect.any(String),
   }));
@@ -84,36 +84,36 @@ test('an in-person request submits the chosen location, day and time without res
     patient: expect.objectContaining({ name: 'Synthetic Patient', phone: '+919000000001', consentToTreatment: true }),
     clientRequestId: expect.any(String),
   }));
-  // A request never reserves capacity, so the chosen time stays on offer.
-  expect(screen.getByText('09:00')).toBeTruthy();
+  expect(screen.getByText(/The selected time is reserved/)).toBeTruthy();
   expect(mocks.setDoc).not.toHaveBeenCalled();
   expect(mocks.addDoc).not.toHaveBeenCalled();
 });
 
-test('a video request submits no date or time and does not read availability', async () => {
+test('a video booking uses the shared calendar and confirms the chosen time', async () => {
   mocks.submitConsultationRequest.mockResolvedValue({ data: { reference: 'CR-VIDEO1', accessToken: 'token-video' } });
   renderPage();
   await screen.findByLabelText('Consultation type');
-  mocks.getConsultationAvailability.mockClear();
   fireEvent.change(screen.getByLabelText('Consultation type'), { target: { value: 'video' } });
+  await screen.findByText('09:00');
+  fireEvent.click(screen.getByText('09:00'));
   fireEvent.click(screen.getByText('Continue'));
   fireEvent.change(await screen.findByLabelText('Full name'), { target: { value: 'Synthetic Patient' } });
   fireEvent.change(screen.getByLabelText(/Email address/), { target: { value: 'guest@example.com' } });
   fireEvent.click(screen.getByRole('checkbox'));
-  fireEvent.click(screen.getByText('Send request'));
+  fireEvent.click(screen.getByText('Confirm appointment'));
 
-  await screen.findByText(/Online consultation request sent/);
+  await screen.findByText(/Online consultation confirmed/);
   const payload = mocks.submitConsultationRequest.mock.calls[0][0];
   expect(payload).toMatchObject({ mode: 'video', serviceId: 'video', locationId: null });
-  expect(payload.dateKey).toBeUndefined();
-  expect(payload.time).toBeUndefined();
-  expect(mocks.getConsultationAvailability).not.toHaveBeenCalled();
+  expect(payload.dateKey).toEqual(expect.any(String));
+  expect(payload.time).toBe('09:00');
+  expect(mocks.getConsultationAvailability).toHaveBeenCalled();
 });
 
 test('an unavailable time explains itself without mutating the slot grid', async () => {
   mocks.submitConsultationRequest.mockRejectedValueOnce(failure('failed-precondition', 'That time was just taken. Please choose another time.'));
   await openDetails();
-  fireEvent.click(screen.getByText('Send request'));
+  fireEvent.click(screen.getByText('Confirm appointment'));
 
   await screen.findByText('That time was just taken. Please choose another time.');
   expect(screen.getByText('09:00')).toBeTruthy();
@@ -123,20 +123,20 @@ test('an unavailable time explains itself without mutating the slot grid', async
 test('the contact cap uses the server copy, or a call-the-clinic fallback when stripped', async () => {
   mocks.submitConsultationRequest.mockRejectedValueOnce(failure('resource-exhausted', 'You already have several requests awaiting clinic review.'));
   await openDetails();
-  fireEvent.click(screen.getByText('Send request'));
+  fireEvent.click(screen.getByText('Confirm appointment'));
   await screen.findByText('You already have several requests awaiting clinic review.');
 
   cleanup();
   await openDetails();
   mocks.submitConsultationRequest.mockRejectedValueOnce(failure('resource-exhausted'));
-  fireEvent.click(screen.getByText('Send request'));
+  fireEvent.click(screen.getByText('Confirm appointment'));
   await screen.findByText('You have reached the online request limit. Please call the clinic.');
 });
 
 test('a guest with neither phone nor email is stopped before the callable', async () => {
   await openDetails();
   fireEvent.change(screen.getByLabelText(/Phone number/), { target: { value: '' } });
-  fireEvent.click(screen.getByText('Send request'));
+  fireEvent.click(screen.getByText('Confirm appointment'));
 
   await screen.findByText('Enter a phone number or email address so the clinic can confirm your request.');
   expect(mocks.submitConsultationRequest).not.toHaveBeenCalled();

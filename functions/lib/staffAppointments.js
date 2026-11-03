@@ -23,7 +23,7 @@ function operationalAppointment(row, dateKey) {
 }
 function createStaffAppointmentReader({ auth, store }) {
   return async request => {
-    const actor = await requireLiveStaff(auth, request);
+    const actor = await requireLiveStaff(auth, request, { roles: ['admin', 'doctor', 'manager', 'receptionist'] });
     const input = request.data || {};
     if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['dateKey', 'limit', 'cursor'].includes(key))
       || typeof input.dateKey !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(input.dateKey)) throw invalid();

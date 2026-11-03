@@ -1,15 +1,16 @@
+import StaffLayout from '../components/StaffLayout';
 import { useEffect, useMemo, useState } from 'react';
 import { signOut } from 'firebase/auth';
 import { useStaffAccess } from '../lib/staffSessionContext';
-import { Link, Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { auth } from '../lib/firebase';
-import { getSqlStaffDirectory, manageStaffAccess } from '../services/staffDirectoryService';
-import { publicUrl } from '../lib/portals';
+import { getSqlStaffDirectory, manageStaffAccess, requestStaffPasswordReset } from '../services/staffDirectoryService';
+import { getAdminCatalogue } from '../services/adminCatalogueService';
 import PasswordRequirements from '../components/PasswordRequirements';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 const blankProfile = { name: '', email: '', role: 'manager', doctorId: '', password: '' };
-const roles = [{ value: 'admin', label: 'Administrator' }, { value: 'doctor', label: 'Doctor' }, { value: 'manager', label: 'Manager' }];
+const roles = [{ value: 'admin', label: 'Administrator' }, { value: 'doctor', label: 'Doctor' }, { value: 'manager', label: 'Manager' }, { value: 'receptionist', label: 'Receptionist (reviews)' }];
 
 const StaffAccess = () => {
   const { state } = useStaffAccess('admin');
@@ -26,6 +27,17 @@ const StaffAccess = () => {
   const [nextCursor, setNextCursor] = useState(null);
   const [staffTotal, setStaffTotal] = useState(0);
   const [directoryLoading, setDirectoryLoading] = useState(false);
+  const [doctors, setDoctors] = useState([]);
+  const [doctorError, setDoctorError] = useState('');
+
+  useEffect(() => {
+    if (state !== 'allowed') return undefined;
+    let active = true;
+    getAdminCatalogue().then(catalogue => {
+      if (active) setDoctors(catalogue.doctors.filter(doctor => doctor.active && catalogue.branches.some(branch => branch.id === doctor.branchId && branch.active)));
+    }).catch(() => { if (active) setDoctorError('The active provider directory could not be loaded. Doctor access cannot be assigned until it is available.'); });
+    return () => { active = false; };
+  }, [state]);
 
 
   useEffect(() => {
@@ -88,17 +100,23 @@ const StaffAccess = () => {
       setNotice(result.data.message); setTemporaryPassword(''); setPanel('directory');
     } catch (caught) { setError(caught?.message || 'Unable to set a temporary password.'); } finally { setBusy(false); }
   };
+  const sendReset = async () => {
+    if (!selected || busy) return;
+    setBusy(true); setError(''); setNotice('');
+    try { await requestStaffPasswordReset(selected.email); setNotice(`A password-reset email was requested for ${selected.email}. The staff member must follow the link to change their password.`); }
+    catch { setError('The reset email could not be requested. Please retry or use the temporary-password option.'); }
+    finally { setBusy(false); }
+  };
 
   if (state === 'signed-out') return <Navigate to="/staff/login" replace />;
   if (state === 'password-change') return <Navigate to="/staff/account" replace />;
   if (state === 'denied') return <main className="staff-shell"><section className="workspace-gate"><p>STAFF ACCESS</p><h1>Administrator access required</h1><span>Your account is not authorised to manage staff accounts.</span><button type="button" className="staff-secondary-button" onClick={() => signOut(auth)}>Sign out</button></section></main>;
   if (state === 'checking') return <main className="staff-shell"><p className="workspace-status">Verifying administrator access…</p></main>;
 
-  const formFields = <><label>Full name<input value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} autoComplete="name" required /></label><label>Work email<input value={profile.email} disabled={panel !== 'create'} onChange={(event) => setProfile({ ...profile, email: event.target.value })} type="email" autoComplete="email" required /></label><label>Workspace role<select value={profile.role} onChange={(event) => setProfile({ ...profile, role: event.target.value, doctorId: event.target.value === 'doctor' ? profile.doctorId : '' })}>{roles.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</select></label>{profile.role === 'doctor' && <label>Doctor ID<input value={profile.doctorId} onChange={(event) => setProfile({ ...profile, doctorId: event.target.value })} placeholder="e.g. brig-ak-sood" pattern="[A-Za-z0-9_-]{2,80}" required /><small>Stable identifier used to scope the doctor’s calendar and appointments.</small></label>}</>;
+  const formFields = <><label>Full name<input value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} autoComplete="name" required /></label><label>Work email<input value={profile.email} disabled={panel !== 'create'} onChange={(event) => setProfile({ ...profile, email: event.target.value })} type="email" autoComplete="email" required /></label><label>Workspace role<select value={profile.role} onChange={(event) => setProfile({ ...profile, role: event.target.value, doctorId: event.target.value === 'doctor' ? profile.doctorId : '' })}>{roles.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</select></label>{profile.role === 'doctor' && <label>Doctor<select value={profile.doctorId} onChange={event => setProfile({ ...profile, doctorId: event.target.value })} required disabled={!doctors.length}><option value="">Select an active doctor</option>{profile.doctorId && !doctors.some(doctor => doctor.id === profile.doctorId) && <option value={profile.doctorId} disabled>Unavailable doctor ({profile.doctorId})</option>}{doctors.map(doctor => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}</select><small>{doctorError || 'Only active doctors in the SQL clinic catalogue can receive doctor access.'}</small></label>}</>;
 
   return <>
-  <main className="staff-shell">
-    <header className="staff-topbar"><Link to="/staff/admin" className="staff-wordmark">SOOD CLINIC</Link><nav><Link to="/staff/admin">Overview</Link><Link to="/staff/admin/patients">Patients</Link><Link to="/staff/admin/catalogue">Booking setup</Link><Link to="/staff/admin/access" className="is-active">Staff access</Link><Link to="/staff/admin/audit">Activity</Link><Link to="/staff/account">My account</Link><a href={publicUrl('/')}>View public site</a><button type="button" onClick={() => signOut(auth)}>Sign out</button></nav></header>
+  <StaffLayout>
     <div className="staff-access">
       <header className="staff-access__heading"><div><p className="section-kicker">Identity & access</p><h1>Staff access</h1><span>Create and manage clinic accounts through the trusted server. Every access change is logged and immediately revokes active refresh sessions.</span></div><button type="button" onClick={openCreate}>Add staff member</button></header>
       {notice && <p className="admin-notice" role="status">{notice}</p>}{error && <p className="staff-login__error" role="alert">{error}</p>}
@@ -108,10 +126,10 @@ const StaffAccess = () => {
       {panel === 'directory' && error && <button type="button" disabled={directoryLoading} onClick={() => { setError(''); setRevision((value) => value + 1); }}>Retry directory</button>}
       {panel === 'directory' && <section className="admin-panel staff-access__directory"><div className="admin-panel__head"><div><p className="section-kicker">Directory</p><h2>{staffTotal} managed account{staffTotal === 1 ? '' : 's'}</h2></div></div>{staff.length ? <ul>{staff.map((member) => <li key={member.uid}><div><strong>{member.name || 'Unnamed staff member'}</strong><span>{member.email}</span><small>{member.role === 'doctor' && member.doctorId ? `Doctor ID: ${member.doctorId}` : roles.find((role) => role.value === member.role)?.label || member.role}</small></div><div><span className={member.active === false ? 'staff-status staff-status--inactive' : 'staff-status'}>{member.active === false ? 'Suspended' : member.requiresPasswordChange ? 'Password change required' : 'Active'}</span><button type="button" onClick={() => openManage(member)}>Manage</button></div></li>)}</ul> : <p className="empty-state">{directoryLoading ? 'Loading staff directory…' : error ? 'Directory unavailable.' : 'No managed staff accounts yet.'}</p>}<p className="admin-panel__footnote">Suspending an account prevents future sign-ins. Session revocation causes active refresh sessions to expire; an existing sign-in can remain valid for up to one hour.</p></section>}
       {panel === 'create' && <form className="admin-panel admin-form staff-access__form" onSubmit={createStaff}><div><p className="section-kicker">New account</p><h2>Add staff member</h2><span>The staff member will be required to replace the temporary password before entering their workspace.</span></div>{formFields}<label>Temporary password<input type="password" value={profile.password} onChange={(event) => setProfile({ ...profile, password: event.target.value })} minLength="8" autoComplete="new-password" required /></label><PasswordRequirements password={profile.password} /><div className="staff-access__actions"><button type="button" className="staff-secondary-button" onClick={() => setPanel('directory')}>Cancel</button><button type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create staff account'}</button></div></form>}
-      {panel === 'manage' && selected && <><form className="admin-panel admin-form staff-access__form" onSubmit={saveAccess}><div><p className="section-kicker">Account access</p><h2>{selected.name || selected.email}</h2><span>Changing a role or doctor ID ends the member’s refresh sessions and applies at their next sign-in.</span></div>{formFields}<div className="staff-access__actions"><button type="button" className="staff-secondary-button" onClick={() => setPanel('directory')}>Back to directory</button><button type="submit" disabled={busy || selected.uid === auth.currentUser?.uid}>{busy ? 'Saving…' : 'Save access'}</button></div>{selected.uid === auth.currentUser?.uid && <small>You cannot change your own administrator role from this screen.</small>}</form><section className="admin-panel admin-form staff-access__security"><div><p className="section-kicker">Security actions</p><h2>Account controls</h2><span>Use these only when required. Each action is recorded in the protected audit log.</span></div><div className="staff-access__actions"><button type="button" className="staff-secondary-button" onClick={() => setPanel('temporary-password')} disabled={busy}>Set temporary password</button><button type="button" className="staff-secondary-button" onClick={() => runAction('revokeSessions', `Revoke all active sessions for ${selected.email}?`)} disabled={busy || selected.uid === auth.currentUser?.uid}>Revoke sessions</button><button type="button" className="button-danger" onClick={() => runAction('disable', selected.active === false ? `Restore ${selected.email}?` : `Suspend ${selected.email}? They will lose staff sign-in access.`)} disabled={busy || selected.uid === auth.currentUser?.uid}>{selected.active === false ? 'Restore account' : 'Suspend account'}</button></div></section></>}
+      {panel === 'manage' && selected && <><form className="admin-panel admin-form staff-access__form" onSubmit={saveAccess}><div><p className="section-kicker">Account access</p><h2>{selected.name || selected.email}</h2><span>Changing a role or doctor ID ends the member’s refresh sessions and applies at their next sign-in.</span></div>{formFields}<div className="staff-access__actions"><button type="button" className="staff-secondary-button" onClick={() => setPanel('directory')}>Back to directory</button><button type="submit" disabled={busy || selected.uid === auth.currentUser?.uid}>{busy ? 'Saving…' : 'Save access'}</button></div>{selected.uid === auth.currentUser?.uid && <small>You cannot change your own administrator role from this screen.</small>}</form><section className="admin-panel admin-form staff-access__security"><div><p className="section-kicker">Security actions</p><h2>Account controls</h2><span>Use these only when required. Access changes are recorded in the protected audit log. Reset links are delivered through the account email service.</span></div><div className="staff-access__actions"><button type="button" className="staff-secondary-button" onClick={() => setPanel('temporary-password')} disabled={busy}>Set temporary password</button><button type="button" className="staff-secondary-button" disabled={busy} onClick={() => setDialog({ title: 'Send password-reset email', message: `Send a reset link to ${selected.email}? Their password remains unchanged until they complete the reset.`, confirmLabel: 'Send email', onConfirm: sendReset })}>Send reset email</button><button type="button" className="staff-secondary-button" onClick={() => runAction('revokeSessions', `Revoke all active sessions for ${selected.email}?`)} disabled={busy || selected.uid === auth.currentUser?.uid}>Revoke sessions</button><button type="button" className="button-danger" onClick={() => runAction('disable', selected.active === false ? `Restore ${selected.email}?` : `Suspend ${selected.email}? They will lose staff sign-in access.`)} disabled={busy || selected.uid === auth.currentUser?.uid}>{selected.active === false ? 'Restore account' : 'Suspend account'}</button></div></section></>}
       {panel === 'temporary-password' && selected && <form className="admin-panel admin-form staff-access__form" onSubmit={submitTemporaryPassword}><div><p className="section-kicker">Credential recovery</p><h2>Set temporary password</h2><span>{selected.name || selected.email} will be required to set a new password on their next sign-in. Existing refresh sessions will be revoked.</span></div><label>New temporary password<input type="password" value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} minLength="8" autoComplete="new-password" required /></label><PasswordRequirements password={temporaryPassword} /><div className="staff-access__actions"><button type="button" className="staff-secondary-button" onClick={() => setPanel('manage')}>Cancel</button><button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Set temporary password'}</button></div></form>}
     </div>
-  </main><ConfirmDialog open={Boolean(dialog)} title={dialog?.title || ""} message={dialog?.message || ""} confirmLabel={dialog?.confirmLabel || "Confirm"} requireReason={dialog?.requireReason} onCancel={() => setDialog(null)} onConfirm={(reason) => { const action = dialog?.onConfirm; setDialog(null); action?.(reason); }} /></>;
+  </StaffLayout><ConfirmDialog open={Boolean(dialog)} title={dialog?.title || ""} message={dialog?.message || ""} confirmLabel={dialog?.confirmLabel || "Confirm"} requireReason={dialog?.requireReason} onCancel={() => setDialog(null)} onConfirm={(reason) => { const action = dialog?.onConfirm; setDialog(null); action?.(reason); }} /></>;
 };
 
 export default StaffAccess;

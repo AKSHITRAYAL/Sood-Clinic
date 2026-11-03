@@ -1,5 +1,6 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { FieldValue, FieldPath } = require('firebase-admin/firestore');
+const crypto = require('node:crypto');
 const { requireLiveStaff } = require('./staffAuthorization');
 const { istDateKey } = require('./ist');
 
@@ -23,7 +24,7 @@ const tokens = value => [...new Set(value.normalize('NFKC').toLowerCase().match(
 const publicRow = (doc) => {
   const row = doc.data();
   return { id: doc.id, rating: row.rating, comment: row.publicComment ?? row.comment,
-    authorLabel: 'Verified patient', verifiedVisit: true, privacyEdited: row.publicComment != null,
+    authorLabel: row.verifiedVisit === false ? 'Patient feedback' : 'Verified patient', verifiedVisit: row.verifiedVisit !== false, privacyEdited: row.publicComment != null,
     publishedAt: instant(row.publishedAt), updatedAt: instant(row.updatedAt), helpfulCount: row.helpfulCount || 0,
     reply: row.reply?.text ? { text: row.reply.text, at: instant(row.reply.at) } : null };
 };
@@ -36,10 +37,10 @@ function createReviews({ db, auth }) {
     try { user = await auth.getUser(request.auth.uid); } catch { throw fail('permission-denied', 'Sign in again to continue.'); }
     const cutoff = Date.parse(user.tokensValidAfterTime || '1970-01-01') / 1000;
     if (user.disabled || !Number.isFinite(request.auth.token.auth_time) || !Number.isFinite(cutoff) || request.auth.token.auth_time < cutoff
-      || (patientOnly && (request.auth.token.role || user.customClaims?.role))) throw fail('permission-denied', 'Current patient access is required.');
+      || (patientOnly && [request.auth.token.role, user.customClaims?.role].some(role => role && role !== 'patient'))) throw fail('permission-denied', 'Current patient access is required.');
     return user.uid;
   }
-  const moderator = request => requireLiveStaff(auth, request, { roles: ['admin', 'manager'] });
+  const moderator = request => requireLiveStaff(auth, request, { roles: ['admin', 'manager', 'receptionist'] });
   const requireVersion = (value, row) => {
     if (!Number.isInteger(value) || value !== versionOf(row)) throw fail('aborted', 'This review changed. Refresh it before saving.');
   };
@@ -49,33 +50,54 @@ function createReviews({ db, auth }) {
     if (count >= ceiling) throw fail('resource-exhausted', 'Too many review changes today. Please try again tomorrow.');
     return () => tx.set(ref, { count: count + 1, updatedAt: FieldValue.serverTimestamp() });
   }
-  function record(tx, ref, request, action, version, previous) {
-    tx.set(ref.collection('history').doc(), { action, version, at: FieldValue.serverTimestamp(), actorUid: request.auth.uid,
+  function record(tx, ref, request, action, version, previous, actor = {}) {
+    const actorUid = request.auth?.uid || 'anonymous';
+    tx.set(ref.collection('history').doc(), { action, version, at: FieldValue.serverTimestamp(), actorUid,
       ...(previous ? { previous } : {}) });
     tx.set(db.collection('auditLogs').doc(), { action: `patient_feedback_${action}`, at: FieldValue.serverTimestamp(),
-      actor: { uid: request.auth.uid, role: request.auth.token.role || 'patient' }, resource: { type: 'patient_feedback', id: ref.id }, meta: { version } });
+      actor: { uid: actorUid, role: request.auth?.token?.role || actor.role || 'guest' }, resource: { type: 'patient_feedback', id: ref.id }, meta: { version } });
   }
   async function submit(request) {
-    const uid = await account(request, true);
-    const data = input(request, ['appointmentId', 'rating', 'comment', 'publicConsent', 'version']);
-    const appointmentId = id(data.appointmentId); const comment = text(data.comment, 10, 2000);
+    const staffSubmission = Boolean(request.auth?.uid && request.auth.token?.role && request.auth.token.role !== 'patient');
+    const authenticated = Boolean(request.auth?.uid) && !staffSubmission; const uid = authenticated ? await account(request, true) : null;
+    const data = input(request, ['appointmentId', 'appointmentReference', 'contactPhone', 'contactEmail', 'rating', 'comment', 'publicConsent', 'version']);
+    const comment = text(data.comment, 10, 2000);
     if (!Number.isInteger(data.rating) || data.rating < 1 || data.rating > 5 || typeof data.publicConsent !== 'boolean') throw fail('invalid-argument', 'Choose 1–5 stars and your sharing preference.');
-    const ref = reviews.doc(appointmentId);
+    let appointmentId = authenticated ? id(data.appointmentId) : '';
+    let verifiedVisit = authenticated;
+    if (!authenticated) {
+      const reference = data.appointmentReference ? text(data.appointmentReference, 6, 120).toUpperCase() : '';
+      const phone = data.contactPhone ? String(data.contactPhone).trim() : '';
+      const email = data.contactEmail ? String(data.contactEmail).trim().toLowerCase() : '';
+      if (!phone) throw fail('invalid-argument', 'Enter the phone number used for your visit. Email is optional.');
+      if (reference) {
+        const matches = await db.collection('appointments').where('reference', '==', reference).limit(2).get();
+        if (matches.size !== 1) throw fail('permission-denied', 'We could not verify that visit. Check the reference and contact details, or leave the reference blank for unverified feedback.');
+        const candidate = matches.docs[0]; const snapshot = candidate.get('patientSnapshot') || {};
+        const phoneMatch = snapshot.phone && String(snapshot.phone).replace(/\D/g, '').endsWith(phone.replace(/\D/g, '').slice(-10));
+        const emailMatch = email && snapshot.email && String(snapshot.email).toLowerCase() === email;
+        if (!phoneMatch && !emailMatch) throw fail('permission-denied', 'We could not verify that visit. Check the reference and contact details, or leave the reference blank for unverified feedback.');
+        appointmentId = candidate.id; verifiedVisit = true;
+      }
+    }
+    const ref = appointmentId ? reviews.doc(appointmentId) : reviews.doc();
     await db.runTransaction(async tx => {
-      const [appointment, existing] = await Promise.all([tx.get(db.collection('appointments').doc(appointmentId)), tx.get(ref)]);
-      if (!appointment.exists || appointment.get('patientId') !== uid || appointment.get('status') !== 'completed') throw fail('permission-denied', 'Reviews are available after your own completed visit.');
+      const [appointment, existing] = await Promise.all([appointmentId ? tx.get(db.collection('appointments').doc(appointmentId)) : Promise.resolve(null), tx.get(ref)]);
+      if (appointmentId && (!appointment.exists || appointment.get('status') !== 'completed' || (authenticated && appointment.get('patientId') !== uid))) throw fail('permission-denied', 'Reviews are available after a completed visit.');
       const old = existing.data();
-      if (old) { if (old.patientId !== uid) throw fail('permission-denied', 'You can only edit your own review.'); requireVersion(data.version, old); }
+      if (old) { if (!authenticated || old.patientId !== uid) throw fail('already-exists', 'This visit already has feedback.'); requireVersion(data.version, old); }
       else if (data.version !== undefined) throw fail('aborted', 'Refresh your visits before submitting.');
-      const useQuota = await quota(tx, uid, 'author', 20);
+      const contact = !authenticated ? `${String(data.contactPhone).replace(/\D/g, '')}|${String(data.contactEmail || '').trim().toLowerCase()}` : '';
+      const quotaKey = uid || `guest_${crypto.createHash('sha256').update(contact).digest('hex').slice(0, 32)}`; const useQuota = await quota(tx, quotaKey, 'author', authenticated ? 20 : 3);
       const version = old ? versionOf(old) + 1 : 1; const now = FieldValue.serverTimestamp();
+      const status = data.publicConsent === true ? 'published' : 'unpublished';
       tx.set(ref, { appointmentId, patientId: uid, rating: data.rating, comment, publicConsent: data.publicConsent,
-        consentAt: now, status: 'pending', version, updatedAt: now, publicComment: null, featuredRank: null,
-        searchTokens: tokens(comment), ...(old ? {} : { createdAt: now, helpfulCount: 0, reportCount: 0 }) }, { merge: true });
-      record(tx, ref, request, old ? 'edited' : 'submitted', version, old ? { comment: old.comment, rating: old.rating, publicConsent: old.publicConsent === true } : null);
+        consentAt: now, status, publishedAt: status === 'published' ? now : null, version, updatedAt: now, publicComment: null, featuredRank: null,
+        verifiedVisit, source: authenticated ? 'patient_portal' : 'public_feedback', searchTokens: tokens(comment), ...(old ? {} : { createdAt: now, helpfulCount: 0, reportCount: 0 }) }, { merge: true });
+      record(tx, ref, request, old ? 'edited' : 'submitted', version, old ? { comment: old.comment, rating: old.rating, publicConsent: old.publicConsent === true } : null, { role: authenticated ? 'patient' : 'guest' });
       useQuota();
     });
-    return { message: 'Thank you. Your feedback is awaiting moderation. All ratings are welcome.' };
+    return { message: data.publicConsent === true ? 'Thank you. Your review is now public.' : 'Thank you. Your private feedback was saved.', reviewId: ref.id, status: data.publicConsent === true ? 'published' : 'unpublished' };
   }
   async function own(request) {
     const uid = await account(request, true); const data = input(request, ['cursor']);
@@ -119,7 +141,11 @@ function createReviews({ db, auth }) {
     ]);
     const count = counts.reduce((a, b) => a + b, 0); const selected = [...pinned, ...highlights.docs].filter(doc => doc.exists && doc.get('status') === 'published' && doc.get('publicConsent') === true);
     const unique = [...new Map(selected.map(doc => [doc.id, doc])).values()].slice(0, 6);
-    return { reviews: page.docs.slice(0, limit).map(publicRow), nextCursor: page.size > limit ? { id: page.docs[limit - 1].id, scope } : null,
+    const docs = page.docs.slice(0, limit);
+    // The callable token identifies only the viewer's own votes; never accept a browser UID.
+    const ownVotes = request.auth?.uid && (!request.auth.token.role || request.auth.token.role === 'patient') && docs.length
+      ? await db.getAll(...docs.map(doc => doc.ref.collection('votes').doc(request.auth.uid))) : [];
+    return { reviews: docs.map((doc, index) => ({ ...publicRow(doc), helpfulByMe: ownVotes[index]?.get('helpful') === true })), nextCursor: page.size > limit ? { id: page.docs[limit - 1].id, scope } : null,
       featured: unique.map(publicRow), summary: { count, average: count ? counts.reduce((sum, n, i) => sum + n * (i + 1), 0) / count : 0,
         distribution: Object.fromEntries(counts.map((n, i) => [i + 1, n])) } };
   }

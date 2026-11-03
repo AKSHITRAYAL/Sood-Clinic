@@ -7,7 +7,6 @@ export const clinicLocations = [
     id: 'dhawan-hospital',
     name: 'Dhawan Hospital',
     address: 'Plot No. 1-SP, Sector 7, Panchkula, Haryana 134109, India',
-    phone: '+91 172 2596090 / +91 172 2596091',
     hours: ['11:00 AM–3:00 PM'],
     services: 'OPD consultations and procedures',
     directions: 'https://www.google.com/maps/search/?api=1&query=Dhawan+Hospital%2C+Plot+No.+1-SP%2C+Sector+7%2C+Panchkula%2C+Haryana+134109',

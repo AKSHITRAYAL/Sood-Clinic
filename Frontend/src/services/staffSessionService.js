@@ -14,7 +14,7 @@ export function watchStaffSession(onChange) {
       if (force) await user.getIdToken(true);
       if (!active || version !== generation) return;
       const { data } = await httpsCallable(functions, 'getStaffSession')();
-      if (!['admin', 'doctor', 'manager'].includes(data?.role) || typeof data.mustChangePassword !== 'boolean'
+      if (!['admin', 'doctor', 'manager', 'receptionist'].includes(data?.role) || typeof data.mustChangePassword !== 'boolean'
         || (data.role === 'doctor' && (typeof data.doctorId !== 'string' || !/^[A-Za-z0-9_-]{2,80}$/.test(data.doctorId)))) throw new Error('Invalid session response.');
       if (!active || version !== generation) return;
       verifiedAt = Date.now();
@@ -36,5 +36,5 @@ export function watchStaffSession(onChange) {
 export const staffAccessState = (session, role, allowPasswordChange = false) => {
   if (session.status !== 'allowed') return session.status;
   if (session.mustChangePassword && !allowPasswordChange) return 'password-change';
-  return !role || session.role === role ? 'allowed' : 'denied';
+  return !role || (Array.isArray(role) ? role.includes(session.role) : session.role === role) ? 'allowed' : 'denied';
 };

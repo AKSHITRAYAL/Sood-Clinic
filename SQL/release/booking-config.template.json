@@ -13,7 +13,7 @@
   "clinicSettings": {
     "bookingWindowDays": 14,
     "leadMinutes": 30,
-    "intervalMinutes": 20,
+    "intervalMinutes": 15,
     "bufferBeforeMinutes": 0,
     "bufferAfterMinutes": 0,
     "cancelCutoffMinutes": 120,

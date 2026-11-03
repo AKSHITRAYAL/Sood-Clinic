@@ -1,11 +1,12 @@
+import StaffLayout from '../components/StaffLayout';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { signOut } from 'firebase/auth';
 import { useStaffAccess } from '../lib/staffSessionContext';
-import { Link, Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { auth } from '../lib/firebase';
 import { getBookingSettings, saveBookingSettings } from '../services/bookingSettingsService';
 
-const fresh = () => ({ id: '', label: '', minutes: 20, mode: 'in_person', active: true });
+const fresh = () => ({ id: '', label: '', minutes: 15, mode: 'in_person', active: true });
 const policyFields = [
   ['bookingWindowDays', 'Booking window (days)', 1, 90], ['leadMinutes', 'Minimum notice (minutes)', 0, 1440],
   ['intervalMinutes', 'Time-slot interval (minutes)', 5, 240], ['bufferBeforeMinutes', 'Buffer before visits (minutes)', 0, 120],
@@ -54,8 +55,7 @@ const AdminVisitTypes = () => {
   if (access === 'password-change') return <Navigate to="/staff/account" replace />;
   if (access === 'denied') return <main className="staff-shell"><section className="workspace-gate"><p>SOOD CLINIC STAFF</p><h1>Administrator access required</h1><button type="button" onClick={() => signOut(auth)}>Sign out</button></section></main>;
   if (access === 'checking') return <main className="staff-shell"><p className="workspace-status">Verifying secure administrator access…</p></main>;
-  return <main className="staff-shell">
-    <header className="staff-topbar"><Link to="/staff/admin" className="staff-wordmark">SOOD CLINIC</Link><nav><Link to="/staff/admin">Overview</Link><Link to="/staff/admin/patients">Patients</Link><Link to="/staff/admin/catalogue">Booking setup</Link><Link to="/staff/admin/visit-types" className="is-active">Visit formats</Link><Link to="/staff/video">Video visits</Link><Link to="/staff/admin/access">Staff access</Link><Link to="/staff/admin/audit">Activity</Link><Link to="/staff/account">My account</Link><button type="button" onClick={() => signOut(auth)}>Sign out</button></nav></header>
+  return <StaffLayout>
     <div className="admin-catalogue">
       <header className="staff-access__heading"><div><p className="section-kicker">Appointment settings</p><h1>Booking policy and visit formats</h1><span>Changes apply to future booking and online appointment changes. Existing appointments are not rewritten. Timezone: Asia/Kolkata.</span></div><button type="button" disabled={busy || loading} onClick={() => { reset(); pending.current = null; setNotice(''); load(); }}>Reload / discard edits</button></header>
       {notice && <p className="admin-notice" role="status">{notice}</p>}{error && <p className="staff-login__error" role="alert">{error}</p>}
@@ -64,7 +64,7 @@ const AdminVisitTypes = () => {
         <form className="admin-panel admin-form catalogue-editor" onSubmit={savePolicy}>
           <h2>Booking policy</h2><p>Save or discard changes in one form before editing the other.</p>
           <div className="patient-form__grid">{policyFields.map(([key, label, min, max]) => <label key={key}>{label}<input type="number" min={min} max={max} step="1" required disabled={unavailable || formatDirty} value={policy[key]} onChange={event => setPolicy(current => ({ ...current, [key]: event.target.value === '' ? '' : Number(event.target.value) }))} /></label>)}</div>
-          <label className="catalogue-check"><input type="checkbox" disabled={unavailable || formatDirty} checked={policy.autoConfirm} onChange={event => setPolicy(current => ({ ...current, autoConfirm: event.target.checked }))} /> Automatically confirm new appointments</label>
+          <p className="booking-field-hint">New public requests always remain pending until a staff member reviews and confirms them. Automatic approval is disabled.</p>
           <button type="submit" disabled={unavailable || formatDirty || !policyDirty}>{busy ? 'Saving…' : 'Save booking policy'}</button>
         </form>
         <section className="admin-catalogue__grid">
@@ -83,6 +83,6 @@ const AdminVisitTypes = () => {
         </section>
       </>}
     </div>
-  </main>;
+  </StaffLayout>;
 };
 export default AdminVisitTypes;

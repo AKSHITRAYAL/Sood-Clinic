@@ -1,11 +1,9 @@
 // Consultation-request and appointment-proposal workflow.
 //
 // Live booking still writes Firestore, so this workflow does too: one doctor's
-// capacity is represented by `appointmentSlots` documents on a shared 30-minute
-// grid, which every location and the video mode already respect. A request never
-// touches capacity; approval and proposal acceptance promote it to a confirmed
-// `appointments` row plus the occupied units, event, audit and notification in a
-// single transaction.
+// capacity is represented by `appointmentSlots` documents on a shared grid.
+// A public request with a selected free time is confirmed immediately; the
+// staff approval/proposal tools remain for legacy pending requests.
 //
 // The SQL request/proposal draft lives in `SQL/dataconnect/deferred/` and is not
 // part of the reduced first release.
@@ -221,7 +219,7 @@ function createConsultationWorkflow({
     const clientRequestId = text(input.clientRequestId, 128);
     if (!CLIENT_REQUEST_ID.test(clientRequestId)) throw fail('invalid-argument', 'Please refresh and try submitting again.');
     const accountUid = request.auth?.uid || null;
-    if (request.auth && ['admin', 'doctor', 'manager'].includes(request.auth.token?.role)) throw fail('permission-denied', 'Use the staff booking workflow instead of the public request form.');
+    if (request.auth && ['admin', 'doctor', 'manager', 'receptionist'].includes(request.auth.token?.role)) throw fail('permission-denied', 'Use the staff booking workflow instead of the public request form.');
     const patient = input.patient || {};
     const name = text(patient.name, 120);
     const phone = text(patient.phone, 30);
@@ -246,12 +244,11 @@ function createConsultationWorkflow({
     if (serviceKind(policyValue, service.id) === 'procedure' && mode !== 'in_person') throw fail('failed-precondition', 'Procedures require an in-person consultation.');
 
     let requested = null;
-    if (mode === 'in_person') {
+    {
       const dateKey = text(input.dateKey, 10);
       const time = text(input.time, 5);
       if (!DATE_KEY.test(dateKey) || !TIME.test(time)) throw fail('invalid-argument', 'Choose a valid appointment date and time.');
-      // The request does not reserve capacity, but a time that is not currently
-      // offered must be refused rather than stored for later approval.
+      // Immediate confirmation requires a currently offered time for every mode.
       const slots = await daySlotsFor({ doctorId, dateKey, mode, locationId, service });
       if (!slots.some((slot) => slot.time === time)) throw fail('failed-precondition', 'That time is not currently available. Please choose another time.');
       requested = { dateKey, time };
@@ -279,15 +276,15 @@ function createConsultationWorkflow({
     const createdAt = FieldValue.serverTimestamp();
     const consentVersion = text(input.consentVersion, 40) || 'consultation-request-v1';
     const guest = !accountUid;
+    let result;
     await db.runTransaction(async (transaction) => {
       const current = await transaction.get(requestRef);
       if (current.exists) {
         if (current.get('submissionHash') !== hash) throw fail('already-exists', 'That request id was used for different details. Please refresh and try again.');
         return;
       }
-      // Re-check the one shared capacity source at write time: a request stores no
-      // hold, but its time must still be free so staff are not asked to approve an
-      // already-taken time.
+      // Re-check capacity at write time, then promote the request in the same
+      // transaction so two callers cannot confirm the same slot.
       if (requested) {
         const busies = await transaction.get(daySlotQuery(doctorId, requested.dateKey));
         const rows = busies.docs.map((doc) => {
@@ -297,67 +294,51 @@ function createConsultationWorkflow({
         const startsAt = istInstant(requested.dateKey, requested.time).getTime();
         const endsAt = startsAt + service.minutes * 60 * 1000;
         if (rows.some((row) => overlaps(startsAt, endsAt, row.startsAt, row.endsAt))) throw fail('failed-precondition', 'That time was just taken. Please choose another time.');
+        const [patients] = await Promise.all([
+          phoneKey
+            ? transaction.get(collection('appointments').where('phoneKey', '==', phoneKey).where('status', 'in', ['scheduled', 'confirmed']).limit(3))
+            : Promise.resolve(null),
+        ]);
+        const phoneBlocked = Boolean(patients && patients.docs.filter((doc) => countsAsAppointment(doc.data())).length >= 2);
+        const plan = planPromotion({ policyValue, settings, service, mode, locationId, doctorId, dateKey: requested.dateKey, time: requested.time, busy: rows, phoneBlocked });
+        if (!plan.ok) throw fail('failed-precondition', plan.reason);
+        const appointmentRef = collection('appointments').doc();
+        const requestDoc = {
+          id: requestRef.id, ref: requestRef, reference: referenceValue, status: 'pending', accountUid,
+          patient: { name, phone: phone || null, email: email || null }, phoneKey,
+          reason: text(input.reason, 500) || null,
+          consent: { version: consentVersion, actor: guest ? 'guest' : 'authenticated_patient', acceptedAt: createdAt },
+        };
+        transaction.set(requestRef, {
+          reference: referenceValue, clientRequestId, mode, locationId, serviceId: service.id,
+          serviceLabel: service.label, durationMinutes: service.minutes, doctorId, requested,
+          patient: requestDoc.patient, phoneKey, reason: requestDoc.reason, accountUid, guest,
+          status: 'pending', appointmentId: null, acceptedProposalId: null, declineCode: null, declineReason: null,
+          consent: requestDoc.consent, accessTokenHash: hashToken(token), submissionHash: hash,
+          version: 1, createdBy: accountUid ? { uid: accountUid, role: 'patient' } : { uid: null, role: 'public' },
+          createdAt, updatedAt: createdAt,
+        });
+        transaction.set(requestRef.collection('events').doc(), {
+          action: 'consultation_request_submitted', from: null, to: 'pending',
+          byUid: accountUid, byRole: guest ? 'public' : 'patient', at: createdAt,
+        });
+        transaction.set(collection('auditLogs').doc(), {
+          at: createdAt, actor: { uid: accountUid, role: guest ? 'public' : 'patient' },
+          action: 'consultation_request_submitted', resource: { type: 'consultation_request', id: clientRequestId },
+          meta: { mode, serviceId: service.id, doctorId, guest, hasRequestedTime: true, immediateConfirmation: true },
+        });
+        const promoted = promote(transaction, {
+          requestDoc, actor: accountUid ? { uid: accountUid, role: 'patient' } : { uid: null, role: 'public' },
+          appointmentRef, service, mode, locationId, doctor, dateKey: requested.dateKey, time: requested.time,
+          startsAt: plan.startsAt, endsAt: plan.endsAt, unitIds: plan.unitIds, consent: requestDoc.consent,
+          acceptedProposal: null, supersededProposals: [],
+        });
+        result = { ...promoted, requestId: clientRequestId, reference: referenceValue, appointmentReference: promoted.reference, status: 'confirmed', mode, approvalPending: false, accessToken: token, idempotent: false };
+        return;
       }
-      transaction.set(requestRef, {
-        reference: referenceValue,
-        clientRequestId,
-        mode,
-        locationId,
-        serviceId: service.id,
-        serviceLabel: service.label,
-        durationMinutes: service.minutes,
-        doctorId,
-        requested,
-        patient: { name, phone: phone || null, email: email || null },
-        phoneKey,
-        reason: text(input.reason, 500) || null,
-        accountUid,
-        guest,
-        status: 'pending',
-        appointmentId: null,
-        acceptedProposalId: null,
-        declineCode: null,
-        declineReason: null,
-        consent: { version: consentVersion, actor: guest ? 'guest' : 'authenticated_patient', acceptedAt: createdAt },
-        accessTokenHash: hashToken(token),
-        submissionHash: hash,
-        version: 1,
-        createdBy: accountUid ? { uid: accountUid, role: 'patient' } : { uid: null, role: 'public' },
-        createdAt,
-        updatedAt: createdAt,
-      });
-      transaction.set(requestRef.collection('events').doc(), {
-        action: 'consultation_request_submitted', from: null, to: 'pending',
-        byUid: accountUid, byRole: guest ? 'public' : 'patient', at: createdAt,
-      });
-      transaction.set(collection('auditLogs').doc(), {
-        at: createdAt,
-        actor: { uid: accountUid, role: guest ? 'public' : 'patient' },
-        action: 'consultation_request_submitted',
-        resource: { type: 'consultation_request', id: clientRequestId },
-        meta: { mode, serviceId: service.id, doctorId, guest, hasRequestedTime: Boolean(requested) },
-      });
-      transaction.set(collection('notifications').doc(), {
-        channel: accountUid ? 'portal' : 'clinic_console',
-        template: 'consultation_request_received',
-        recipient: accountUid,
-        reference: referenceValue,
-        status: 'queued',
-        attempts: 0,
-        sendAfter: createdAt,
-        email: { configured: EMAIL_DELIVERY_CONFIGURED, to: email || null },
-        createdAt,
-      });
     });
-    return {
-      requestId: clientRequestId,
-      reference: referenceValue,
-      status: 'pending',
-      mode,
-      approvalPending: true,
-      accessToken: token,
-      idempotent: false,
-    };
+    if (result?.appointmentId) await syncAppointment(result.appointmentId);
+    return result;
   }
 
   // Shared active-appointment cap. A submission additionally bounds the number of
@@ -384,13 +365,13 @@ function createConsultationWorkflow({
   }
 
   // --- Staff queue --------------------------------------------------------
-  async function staffActor(request, roles = ['admin', 'doctor', 'manager']) {
+  async function staffActor(request, roles = ['admin', 'doctor', 'manager', 'receptionist']) {
     const user = await requireLiveStaff(auth, request, { roles });
     return { uid: request.auth.uid, role: user.customClaims.role, doctorId: user.customClaims.doctorId || null };
   }
 
   function staffRequestView(request, actor) {
-    const intakeRestricted = actor.role === 'manager';
+    const intakeRestricted = actor.role === 'manager' || actor.role === 'receptionist';
     return {
       requestId: request.id,
       reference: request.reference,
@@ -564,7 +545,7 @@ function createConsultationWorkflow({
       from: null, to: 'confirmed', byUid: actor.uid, byRole: actor.role, at,
       meta: { source: 'consultation_request', requestReference: requestDoc.reference },
     });
-    transaction.update(requestDoc.ref, {
+    transaction.set(requestDoc.ref, {
       status: 'confirmed',
       appointmentId,
       acceptedProposalId: acceptedProposal?.id || null,
@@ -573,7 +554,7 @@ function createConsultationWorkflow({
       confirmedAt: at,
       updatedAt: at,
       version: FieldValue.increment(1),
-    });
+    }, { merge: true });
     transaction.set(requestDoc.ref.collection('events').doc(), {
       action: 'consultation_request_confirmed', from: requestDoc.status, to: 'confirmed',
       byUid: actor.uid, byRole: actor.role, at, meta: { appointmentId, proposalId: acceptedProposal?.id || null },
@@ -923,7 +904,7 @@ function createConsultationWorkflow({
     const accountMatches = Boolean(request.auth?.uid) && requestRow.accountUid === request.auth.uid;
     // Unauthorised acceptance never releases capacity or reveals request detail.
     if (!tokenMatches && !accountMatches) throw fail('permission-denied', 'This proposed time can only be answered by the patient it was sent to.');
-    if (request.auth && ['admin', 'doctor', 'manager'].includes(request.auth.token?.role)) throw fail('permission-denied', 'Staff cannot answer a patient proposal.');
+    if (request.auth && ['admin', 'doctor', 'manager', 'receptionist'].includes(request.auth.token?.role)) throw fail('permission-denied', 'Staff cannot answer a patient proposal.');
 
     const [policyValue, settings, catalog] = await Promise.all([policy(), config(), catalogue()]);
     let result;
@@ -1018,7 +999,7 @@ function createConsultationWorkflow({
 
   // Expiry sweep. Bounded, deterministic by expiry, one audit trail per proposal.
   async function expireProposals(request) {
-    const actor = await staffActor(request, ['admin', 'doctor', 'manager']);
+    const actor = await staffActor(request, ['admin', 'doctor', 'manager', 'receptionist']);
     const limitInput = Number(request.data?.limit);
     const limit = Number.isInteger(limitInput) ? Math.min(Math.max(limitInput, 1), 50) : 25;
     const due = await collection(PROPOSALS)

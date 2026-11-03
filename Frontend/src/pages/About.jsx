@@ -327,7 +327,7 @@ const About = () => (
             <article className="overflow-hidden rounded-2xl border border-[#d5e5f4] bg-[#eaf3fc] p-6 md:p-8">
               <div>
                 <p className="text-xs font-extrabold uppercase tracking-[.16em] text-sky-700">
-          Diagnostic &        Diagnostic &amp; therapeutic care
+                  Diagnostic &amp; therapeutic care
                 </p>
 
                 <h3 className="mt-2 text-xl font-bold text-[#173f76]">

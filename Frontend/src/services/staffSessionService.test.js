@@ -33,6 +33,10 @@ test('shared decisions cover signed out, role mismatch and mandatory replacement
   expect(staffAccessState(session, 'admin')).toBe('denied');
   expect(staffAccessState({ ...session, mustChangePassword: true }, 'doctor')).toBe('password-change');
   expect(staffAccessState({ ...session, mustChangePassword: true }, undefined, true)).toBe('allowed');
+  const reception = { status: 'allowed', role: 'receptionist', mustChangePassword: false };
+  expect(staffAccessState(reception, ['admin', 'manager', 'receptionist'])).toBe('allowed');
+  expect(staffAccessState(reception, ['admin', 'doctor', 'manager'])).toBe('denied');
+  expect(staffAccessState(reception, 'admin')).toBe('denied');
 });
 
 test('does not check before Auth restoration and reuses a recent verification', async () => {

@@ -1,5 +1,10 @@
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
+import { sendPasswordResetEmail } from 'firebase/auth';
+import { auth } from '../lib/firebase';
+import { staffUrl } from '../lib/portals';
+
+export const requestStaffPasswordReset = email => sendPasswordResetEmail(auth, email, { url: staffUrl('/staff/login') });
 
 export async function manageStaffAccess(payload) {
   try {

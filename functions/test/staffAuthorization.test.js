@@ -5,6 +5,13 @@ const { requireLiveStaff, requireOAuthAdministrator } = require('../lib/staffAut
 const request = (token = {}) => ({ auth: { uid: 'doctor', token: { role: 'doctor', doctorId: 'doctor-a', auth_time: 100, ...token } } });
 const current = (claims = {}, extra = {}) => ({ uid: 'doctor', disabled: false, tokensValidAfterTime: '1970-01-01T00:00:00Z', customClaims: { role: 'doctor', doctorId: 'doctor-a', ...claims }, ...extra });
 const verify = (user, req = request(), options) => requireLiveStaff({ getUser: async () => user }, req, options);
+test('recognizes receptionist identity only when a handler explicitly grants that role', async () => {
+  const user = current({ role: 'receptionist' }); const req = request({ role: 'receptionist' });
+  await expect(verify(user, req)).rejects.toMatchObject({ code: 'permission-denied' });
+  await expect(verify(user, req, { roles: ['admin', 'manager'] })).rejects.toMatchObject({ code: 'permission-denied' });
+  await expect(verify(user, req, { roles: ['admin', 'manager', 'receptionist'] })).resolves.toMatchObject({ customClaims: { role: 'receptionist' } });
+  await expect(verify(current({ role: 'receptionist', forcePasswordChange: true }), req, { roles: ['receptionist'] })).rejects.toMatchObject({ code: 'permission-denied' });
+});
 
 test('validates current doctor scope and requested resource scope', async () => {
   await expect(verify(current(), request(), { roles: ['doctor'], doctorId: 'doctor-a' })).resolves.toMatchObject({ uid: 'doctor' });

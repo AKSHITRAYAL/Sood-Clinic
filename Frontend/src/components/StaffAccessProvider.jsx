@@ -34,4 +34,4 @@ export function StaffRoute({ role, allowPasswordChange = false }) {
 }
 
 StaffAccessProvider.propTypes = { children: PropTypes.node };
-StaffRoute.propTypes = { role: PropTypes.string, allowPasswordChange: PropTypes.bool };
+StaffRoute.propTypes = { role: PropTypes.oneOfType([PropTypes.string, PropTypes.arrayOf(PropTypes.string)]), allowPasswordChange: PropTypes.bool };

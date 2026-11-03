@@ -13,7 +13,7 @@
 //                                      [--before-image <new-file.json>]
 //
 // The manifest is reviewed, hand-written JSON; no value is inferred from Firestore or the repo:
-//   { "clinicSettings": { "bookingWindowDays": 14, "leadMinutes": 30, "intervalMinutes": 20,
+//   { "clinicSettings": { "bookingWindowDays": 14, "leadMinutes": 30, "intervalMinutes": 15,
 //       "bufferBeforeMinutes": 0, "bufferAfterMinutes": 0, "cancelCutoffMinutes": 120,
 //       "autoConfirm": false },
 //     "services": [{ "code": "consultation", "legacyId": "consultation", "legacySortOrder": 0 }] }

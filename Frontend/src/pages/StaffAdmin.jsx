@@ -1,3 +1,4 @@
+import StaffLayout from '../components/StaffLayout';
 import { useEffect, useMemo, useState } from 'react';
 import { signOut } from 'firebase/auth';
 import { useStaffAccess } from '../lib/staffSessionContext';
@@ -9,7 +10,6 @@ import { addIstDays, istDateKey, toIstParts } from '../lib/ist';
 import { formatDateTime, patientName, patientPhone } from '../lib/time';
 import { closeDay, transitionAppointment } from '../services/appointmentService';
 import { allowedAppointmentTransitions, appointmentActionLabel, canMarkAppointmentNoShow, canStaffRescheduleAppointment } from '../lib/appointmentState';
-import { publicUrl } from '../lib/portals';
 import ConfirmDialog from '../components/ConfirmDialog';
 import RescheduleDialog from '../components/RescheduleDialog';
 import { getSqlStaffDirectory } from '../services/staffDirectoryService';
@@ -180,11 +180,7 @@ const StaffAdmin = () => {
   if (state === 'checking') return <main className="staff-shell"><p className="workspace-status">Verifying secure administrator access…</p></main>;
 
   return <>
-  <main className="staff-shell">
-    <header className="staff-topbar">
-      <Link to="/staff/admin" className="staff-wordmark">SOOD CLINIC</Link>
-      <nav><Link to="/staff/admin" className="is-active">Overview</Link><Link to="/staff/admin/patients">Patients</Link><Link to="/staff/admin/catalogue">Booking setup</Link><Link to="/staff/admin/visit-types">Visit formats</Link><Link to="/staff/requests">Requests</Link><Link to="/staff/video">Video visits</Link><Link to="/staff/admin/feedback">Feedback</Link><Link to="/staff/admin/access">Staff access</Link><Link to="/staff/admin/audit">Activity</Link><Link to="/staff/account">My account</Link><a href={publicUrl('/')}>View public site</a><button type="button" onClick={() => signOut(auth)}>Sign out</button></nav>
-    </header>
+  <StaffLayout>
     <div className="staff-admin">
       <header className="staff-admin__heading"><div><p className="section-kicker">Clinic operations</p><h1>{greeting()}, {auth.currentUser?.displayName || 'Administrator'}</h1><span>Monitor appointments, manage clinic availability, and maintain the internal staff directory.</span></div><div className="staff-admin__identity"><strong>{auth.currentUser?.displayName || 'Administrator'}</strong><span>Clinic administrator</span></div></header>
       <section className="admin-metrics" aria-label="Appointment overview"><article><span>Scheduled</span><strong>{summary.scheduled}</strong><small>Awaiting consultation</small></article><article><span>Completed</span><strong>{summary.completed}</strong><small>Closed consultations</small></article><article><span>Cancelled</span><strong>{summary.cancelled}</strong><small>Released time slots</small></article><article><span>Directory</span><strong>{staffTotal}</strong><small>Internal staff records</small></article></section>
@@ -200,7 +196,7 @@ const StaffAdmin = () => {
         <section className="admin-panel admin-panel--directory"><div className="admin-panel__head"><div><p className="section-kicker">Team</p><h2>Staff directory</h2></div><Link to="/staff/admin/access">Open access controls</Link></div>{staff.length ? <ul className="staff-directory">{staff.slice(0, 5).map((member) => <li key={member.id}><div><strong>{member.name}</strong><span>{member.email}</span></div><div className="staff-directory__actions"><span>{member.active === false ? 'Suspended' : member.role}</span></div></li>)}</ul> : <p className="empty-state">No internal staff records yet.</p>}<p className="admin-panel__footnote">Account lifecycle changes are performed only by the protected server-side access service and recorded in the audit log.</p></section>
       </section>
     </div>
-  </main><RescheduleDialog open={Boolean(reschedule)} appointment={reschedule} onClose={() => setReschedule(null)} onDone={(text) => { setReschedule(null); setNotice(text); }} /><ConfirmDialog open={Boolean(dialog)} title={dialog?.title || ""} message={dialog?.message || ""} confirmLabel={dialog?.confirmLabel || "Confirm"} requireReason={dialog?.requireReason} onCancel={() => setDialog(null)} onConfirm={(reason) => { const action = dialog?.onConfirm; setDialog(null); action?.(reason); }} /></>;
+  </StaffLayout><RescheduleDialog open={Boolean(reschedule)} appointment={reschedule} onClose={() => setReschedule(null)} onDone={(text) => { setReschedule(null); setNotice(text); }} /><ConfirmDialog open={Boolean(dialog)} title={dialog?.title || ""} message={dialog?.message || ""} confirmLabel={dialog?.confirmLabel || "Confirm"} requireReason={dialog?.requireReason} onCancel={() => setDialog(null)} onConfirm={(reason) => { const action = dialog?.onConfirm; setDialog(null); action?.(reason); }} /></>;
 };
 
 export default StaffAdmin;

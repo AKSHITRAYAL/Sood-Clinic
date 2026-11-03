@@ -7,12 +7,13 @@ import { StaffAccessProvider, StaffRoute } from '../components/StaffAccessProvid
 const AccountSettings = lazy(() => import('../pages/AccountSettings'));
 const DoctorSchedule = lazy(() => import('../pages/DoctorSchedule'));
 const ManagerWorkspace = lazy(() => import('../pages/ManagerWorkspace'));
+const ReceptionWorkspace = lazy(() => import('../pages/ReceptionWorkspace'));
 const StaffAdmin = lazy(() => import('../pages/StaffAdmin'));
 const StaffAccess = lazy(() => import('../pages/StaffAccess'));
 const AdminPatients = lazy(() => import('../pages/AdminPatients'));
 const AdminAudit = lazy(() => import('../pages/AdminAudit'));
 const AdminCatalogue = lazy(() => import('../pages/AdminCatalogue'));
-const AdminFeedback = lazy(() => import('../pages/AdminFeedback'));
+const AdminFeedback = lazy(() => import('../pages/ReviewModeration'));
 const AdminVisitTypes = lazy(() => import('../pages/AdminVisitTypes'));
 const VideoConsultations = lazy(() => import('../pages/VideoConsultations'));
 const ConsultationRequests = lazy(() => import('../pages/ConsultationRequests'));
@@ -36,10 +37,12 @@ const StaffApp = () => <BrowserRouter><AppErrorBoundary staff><StaffSessionGuard
   <Route path="/staff/admin/feedback" element={<AdminFeedback />} />
   <Route path="/staff/admin/visit-types" element={<AdminVisitTypes />} />
   </Route>
-  <Route element={<StaffRoute />}><Route path="/staff/video" element={<VideoConsultations />} /></Route>
-  <Route element={<StaffRoute />}><Route path="/staff/requests" element={<ConsultationRequests />} /></Route>
+  <Route element={<StaffRoute role={['admin', 'manager', 'receptionist']} />}><Route path="/staff/reviews" element={<AdminFeedback />} /></Route>
+  <Route element={<StaffRoute role={['admin', 'doctor', 'manager']} />}><Route path="/staff/video" element={<VideoConsultations />} /></Route>
+  <Route element={<StaffRoute role={['admin', 'doctor', 'manager', 'receptionist']} />}><Route path="/staff/requests" element={<ConsultationRequests />} /></Route>
   <Route element={<StaffRoute role="doctor" />}><Route path="/staff/doctor" element={<DoctorSchedule />} /></Route>
   <Route element={<StaffRoute role="manager" />}><Route path="/staff/manager" element={<ManagerWorkspace />} /></Route>
+  <Route element={<StaffRoute role="receptionist" />}><Route path="/staff/receptionist" element={<ReceptionWorkspace />} /></Route>
   <Route path="*" element={<Navigate to="/" replace />} />
 </Routes></Suspense></StaffAccessProvider></StaffSessionGuard></AppErrorBoundary></BrowserRouter>;
 

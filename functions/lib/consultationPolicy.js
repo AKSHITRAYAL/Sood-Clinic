@@ -3,7 +3,7 @@
 // One doctor works across two physical locations and a video mode, and all three
 // share the SAME doctor capacity. This module is the single validation/decision
 // source for that contract: stable location identifiers, permitted windows, the
-// 30-minute slot grid, multi-unit durations, buffers, Sunday closure, proposal
+// 15-minute slot grid, multi-unit durations, buffers, Sunday closure, proposal
 // lifetime and the Jindal "consultations only" rule.
 //
 // Nothing here reads a database or the clock, so every rule is unit-testable. The
@@ -13,7 +13,7 @@
 const { addIstDays, istDateKey, istInstant, weekdayIst } = require('./ist');
 const { makeSlotId } = require('./availability');
 
-const SLOT_MINUTES = 30;
+const SLOT_MINUTES = 15;
 const DEFAULT_PROPOSAL_LIFETIME_HOURS = 24;
 const MAX_PROPOSAL_LIFETIME_HOURS = 168;
 const MAX_WINDOWS = 6;
@@ -26,7 +26,7 @@ const DEFAULT_LOCATIONS = Object.freeze([
     name: 'Dhawan Hospital',
     address: 'Plot No. 1-SP, Sector 7, Panchkula, Haryana 134109',
     landmark: '',
-    phones: Object.freeze(['+911722596090', '+911722596091']),
+    phones: Object.freeze(['+919877853935', '+919855986743']),
     windows: Object.freeze([Object.freeze({ start: '11:00', end: '15:00' })]),
     procedureAllowed: true,
   }),

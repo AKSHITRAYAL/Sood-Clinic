@@ -1,8 +1,13 @@
 import { beforeEach, expect, test, vi } from 'vitest';
-const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
+const { invoke, resetEmail } = vi.hoisted(() => ({ invoke: vi.fn(), resetEmail: vi.fn() }));
 vi.mock('firebase/functions', () => ({ httpsCallable: () => invoke }));
-vi.mock('../lib/firebase', () => ({ functions: {} }));
-import { getSqlStaffDirectory, manageStaffAccess } from './staffDirectoryService';
+vi.mock('../lib/firebase', () => ({ functions: {}, auth: {} }));
+vi.mock('firebase/auth', () => ({ sendPasswordResetEmail: resetEmail }));
+import { getSqlStaffDirectory, manageStaffAccess, requestStaffPasswordReset } from './staffDirectoryService';
+test('requests a reset at the selected registered email and returns to the staff sign-in page', async () => {
+  resetEmail.mockResolvedValue(); await requestStaffPasswordReset('staff@synthetic.test');
+  expect(resetEmail).toHaveBeenCalledWith({}, 'staff@synthetic.test', { url: 'https://sood-clinic-staff.web.app/staff/login' });
+});
 
 beforeEach(() => { invoke.mockReset(); });
 test('passes bounded page parameters and returns directory counts', async () => {

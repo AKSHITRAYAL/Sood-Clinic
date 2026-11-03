@@ -143,6 +143,46 @@ required for new production changes.
   `invoker: 'public'` when it creates a service but ignores it on update, so re-check the
   binding after any redeploy that recreates a service.
 
+## Reviews
+
+Live (2026-11-02): `/reviews` (also `/experience`) and `/staff/reviews`.
+Public/mobile navigation and completed-visit links lead to Reviews. Admin, Manager
+and the separate Receptionist role can moderate; administrators assign Receptionist
+through Staff Access. Receptionist has reviews/account access, not clinical or
+appointment management access. All moderation uses live server-side role checks.
+
+One review per owned completed appointment; authors can edit or withdraw it.
+Explicit public-sharing consent is required before publication. Existing feedback
+without consent remains private. All ratings are allowed. Public ratings/distribution
+cover published reviews; clinic-selected highlights are labelled separately. Staff
+can publish/hide/reject, reply, redact privacy details with a reason, resolve reports
+and select highlight positions 1–6. Originals and versioned audit/history are retained;
+staff cannot change a patient's rating. Developer highlights use existing consented,
+published IDs in `FEATURED_REVIEW_IDS` in `functions/lib/reviews.js`.
+
+These are independent clinic reviews, not a Google Reviews integration. No new paid
+service or media storage was configured. Reviews deliberately extend the existing
+Firestore `patientFeedback` store. Future SQL cutover must preserve consent, originals,
+privacy edits, replies, versions, highlights, votes, reports and history; the legacy SQL
+feedback table alone is not a replacement for this workflow. Browser reads/writes of
+feedback, its subcollections and review quotas are denied; only projected callables
+serve public data. Public/moderation queries are paginated; there is no polling.
+
+Verified: callable emulator 26/26 (including 9 review scenarios), booking 39/39,
+rules 17/17, review UI/session 11/11, staff lifecycle/authorization/directory 24/24,
+patient-profile/link unit tests 11/11. Frontend lint/both builds and functions syntax
+checks passed. Review, receptionist account and patient-only exclusion Functions,
+indexes, rules and both Hosting sites deployed. Live public sorts/filters returned
+200; private review endpoints denied anonymous callers. No synthetic reviews were
+written to production. Authenticated moderation was exercised in emulators, not with
+a real production staff account.
+
+Additional checks exposed existing stale assertions: `Footer.test.jsx` still expects
+asynchronous contact reads although Footer uses `clinicLocations`; three assertions
+fail. `sqlPatientHandlers.test.js` expects deferred patient handlers to be exported;
+one assertion fails. Neither implementation was changed to satisfy those unrelated
+expectations, and those failures must not be reported as passing.
+
 ## Docs
 
 - `AGENTS.md` — operating rules: golden rules, security, deploy protocol, release gates.

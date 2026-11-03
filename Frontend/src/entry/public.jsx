@@ -9,7 +9,7 @@ const ConsultationStatus = lazy(() => import('../pages/ConsultationStatus'));
 const Contact = lazy(() => import('../pages/Contact'));
 const Home = lazy(() => import('../pages/Home'));
 const HealthGuides = lazy(() => import('../pages/HealthGuides'));
-const PatientExperience = lazy(() => import('../pages/PatientExperience'));
+const PatientExperience = lazy(() => import('../pages/Reviews'));
 const Login = lazy(() => import('../pages/Login'));
 const PasswordReset = lazy(() => import('../pages/PasswordReset'));
 const PatientPortal = lazy(() => import('../pages/PatientPortal'));
@@ -24,6 +24,7 @@ const PublicApp = () => <BrowserRouter><AppErrorBoundary><Suspense fallback={<Ro
   <Route path="/contact" element={<Contact />} />
   <Route path="/guides" element={<HealthGuides />} />
   <Route path="/experience" element={<PatientExperience />} />
+  <Route path="/reviews" element={<PatientExperience />} />
   <Route path="/book" element={<Bookappointment />} />
   <Route path="/consultation-status" element={<ConsultationStatus />} />
   <Route path="/Booknow" element={<Navigate to="/book" replace />} />

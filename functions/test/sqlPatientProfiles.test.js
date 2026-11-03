@@ -27,7 +27,7 @@ test('linked patient reads expose only demographic fields, explicit UUID and rev
   expect((await service.list(request({}))).patients).toEqual([{ patientId, uhid: 'TEST-ONLY', displayName: profile.displayName, relationship: 'self' }]);
 });
 test('unverified, disabled, staff, revoked and future sessions fail before any SQL access', async () => {
-  for (const patch of [{ emailVerified: false }, { disabled: true }, { customClaims: { role: 'manager' } }, { tokensValidAfterTime: '2026-10-20T00:00:00Z' }]) {
+  for (const patch of [{ emailVerified: false }, { disabled: true }, { customClaims: { role: 'manager' } }, { customClaims: { role: 'receptionist' } }, { tokensValidAfterTime: '2026-10-20T00:00:00Z' }]) {
     const { user, service, request, store } = setup(); Object.assign(user, patch);
     await expect(service.list(request({}))).rejects.toMatchObject({ code: 'permission-denied' });
     expect(store.list).not.toHaveBeenCalled();

@@ -49,30 +49,29 @@ describe('consultation scheduling policy', () => {
     expect(windowsFor({ policy: DEFAULT_POLICY, mode: 'video', dateKey: MONDAY })).toEqual(DEFAULT_POLICY.videoWindows);
   });
 
-  it('generates a 30-minute grid that fits completely inside each window', () => {
-    expect(times(build())).toEqual(['11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30']);
+  it('generates a 15-minute grid that fits completely inside each window', () => {
+    expect(times(build())).toEqual(['11:00', '11:15', '11:30', '11:45', '12:00', '12:15', '12:30', '12:45', '13:00', '13:15', '13:30', '13:45', '14:00', '14:15', '14:30']);
     expect(times(build({ locationId: 'jindal-diagnostics', leadMinutes: 0 })))
-      .toEqual(['09:00', '09:30', '10:00', '10:30', '17:00', '17:30', '18:00', '18:30']);
-    expect(times(build({ mode: 'video', locationId: null }))).toEqual(['09:30', '10:00', '17:30', '18:00']);
+      .toEqual(['09:00', '09:15', '09:30', '09:45', '10:00', '10:15', '10:30', '17:00', '17:15', '17:30', '17:45', '18:00', '18:15', '18:30']);
+    expect(times(build({ mode: 'video', locationId: null }))).toEqual(['09:30', '09:45', '10:00', '17:30', '17:45', '18:00']);
   });
 
   it('does not assume a procedure is one unit: a longer service consumes consecutive units', () => {
-    expect(times(build({ durationMinutes: 60 }))).toEqual(['11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00']);
+    expect(times(build({ durationMinutes: 60 }))).toEqual(['11:00', '11:15', '11:30', '11:45', '12:00', '12:15', '12:30', '12:45', '13:00', '13:15', '13:30', '13:45', '14:00']);
     // A 90-minute booking cannot start at 14:00 because it would run past 15:00.
-    expect(times(build({ durationMinutes: 90 }))).toEqual(['11:00', '11:30', '12:00', '12:30', '13:00', '13:30']);
+    expect(times(build({ durationMinutes: 90 }))).toEqual(['11:00', '11:15', '11:30', '11:45', '12:00', '12:15', '12:30', '12:45', '13:00', '13:15', '13:30']);
     expect(unitStarts({ startsAt: new Date('2026-11-02T05:30:00.000Z'), endsAt: new Date('2026-11-02T07:00:00.000Z') }))
-      .toEqual([new Date('2026-11-02T05:30:00.000Z'), new Date('2026-11-02T06:00:00.000Z'), new Date('2026-11-02T06:30:00.000Z')]);
+      .toEqual([new Date('2026-11-02T05:30:00.000Z'), new Date('2026-11-02T05:45:00.000Z'), new Date('2026-11-02T06:00:00.000Z'), new Date('2026-11-02T06:15:00.000Z'), new Date('2026-11-02T06:30:00.000Z'), new Date('2026-11-02T06:45:00.000Z')]);
   });
 
   it('shares one doctor-capacity grid across every mode and location', () => {
-    // A 09:30-10:30 video consultation occupies the same units as Jindal's 09:30 start.
+    // A 09:30-10:30 video consultation occupies the same 15-minute units as Jindal's 09:30 start.
     const videoUnits = unitSlotIds({
       doctorId: DOCTOR, dateKey: MONDAY,
       startsAt: new Date('2026-11-02T04:00:00.000Z'), endsAt: new Date('2026-11-02T05:00:00.000Z'),
     });
     expect(videoUnits).toEqual([
-      `${DOCTOR}_20261102_0930`,
-      `${DOCTOR}_20261102_1000`,
+      `${DOCTOR}_20261102_0930`, `${DOCTOR}_20261102_0945`, `${DOCTOR}_20261102_1000`, `${DOCTOR}_20261102_1015`,
     ]);
     const jindal = build({ locationId: 'jindal-diagnostics', busyRanges: [{ startsAt: new Date('2026-11-02T04:00:00.000Z'), endsAt: new Date('2026-11-02T05:00:00.000Z') }] });
     expect(times(jindal)).not.toContain('09:30');
