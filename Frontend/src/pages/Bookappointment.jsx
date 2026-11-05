@@ -60,7 +60,7 @@ const Bookappointment = () => {
     const [year, month] = calendarMonth.split('-').map(Number);
     const first = `${calendarMonth}-01`;
     const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-    const leading = (weekdayIst(first) + 6) % 7;
+    const leading = weekdayIst(first);
     return [...Array.from({ length: leading }, () => null), ...Array.from({ length: daysInMonth }, (_, index) => `${calendarMonth}-${String(index + 1).padStart(2, '0')}`)];
   }, [calendarMonth]);
   const firstCalendarMonth = days[0]?.slice(0, 7) || calendarMonth;
@@ -170,7 +170,7 @@ const Bookappointment = () => {
   const scheduleMarkup = <div className="booking-scheduler">
     <aside className="booking-calendar" aria-label="Choose an appointment date">
       <div className="booking-calendar__header"><button type="button" aria-label="Previous month" disabled={calendarMonth <= firstCalendarMonth} onClick={() => shiftCalendarMonth(-1)}>‹</button><strong>{calendarMonthLabel}</strong><button type="button" aria-label="Next month" disabled={calendarMonth >= lastCalendarMonth} onClick={() => shiftCalendarMonth(1)}>›</button></div>
-      <div className="booking-calendar__weekdays">{['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
+      <div className="booking-calendar__weekdays">{['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
       <div className="booking-calendar__grid">{calendarCells.map((dateKey, index) => { const enabled = dateKey && days.includes(dateKey); return dateKey ? <button key={dateKey} type="button" disabled={!enabled} aria-label={labelDate(dateKey)} onClick={() => setSelection({ ...selection, dateKey })} className={dateKey === selection.dateKey ? 'booking-calendar__day booking-calendar__day--selected' : 'booking-calendar__day'}><span>{Number(dateKey.slice(-2))}</span>{enabled && <i aria-hidden="true" />}</button> : <span key={`blank-${index}`} />; })}</div>
       <p className="booking-timezone">Times shown in Indian Standard Time (IST).</p>
     </aside>

@@ -10,10 +10,10 @@ import './staffLayout.css';
 
 const homeByRole = { admin: '/staff/admin', doctor: '/staff/doctor', manager: '/staff/manager', receptionist: '/staff/receptionist' };
 const menuByRole = {
-  admin: [['/staff/admin', 'Overview'], ['/staff/admin/patients', 'Patients'], ['/staff/admin/catalogue', 'Booking setup'], ['/staff/admin/visit-types', 'Visit formats'], ['/staff/requests', 'Requests'], ['/staff/video', 'Video visits'], ['/staff/reviews', 'Reviews'], ['/staff/admin/access', 'Staff access'], ['/staff/admin/audit', 'Activity']],
-  doctor: [['/staff/doctor', 'Calendar'], ['/staff/requests', 'Requests'], ['/staff/video', 'Video visits']],
-  manager: [['/staff/manager', 'Appointments'], ['/staff/requests', 'Requests'], ['/staff/video', 'Video visits'], ['/staff/reviews', 'Reviews']],
-  receptionist: [['/staff/receptionist', 'Appointments'], ['/staff/requests', 'Requests'], ['/staff/reviews', 'Reviews']],
+  admin: [['/staff/admin', 'Overview'], ['/staff/admin/patients', 'Patients'], ['/staff/appointments', 'Appointment board'], ['/staff/admin/catalogue', 'Booking setup'], ['/staff/admin/visit-types', 'Visit formats'], ['/staff/requests', 'Requests'], ['/staff/video', 'Video visits'], ['/staff/reviews', 'Reviews'], ['/staff/admin/access', 'Staff access'], ['/staff/admin/audit', 'Activity']],
+  doctor: [['/staff/doctor', 'Calendar'], ['/staff/appointments', 'Appointment board'], ['/staff/requests', 'Requests'], ['/staff/video', 'Video visits']],
+  manager: [['/staff/manager', 'Appointments'], ['/staff/appointments', 'Appointment board'], ['/staff/requests', 'Requests'], ['/staff/video', 'Video visits'], ['/staff/reviews', 'Reviews']],
+  receptionist: [['/staff/receptionist', 'Appointments'], ['/staff/appointments', 'Appointment board'], ['/staff/requests', 'Requests'], ['/staff/reviews', 'Reviews']],
 };
 export default function StaffLayout({ children }) {
   const { role, mustChangePassword } = useStaffAccess(); const { pathname } = useLocation();

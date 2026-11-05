@@ -286,53 +286,17 @@ a { text-decoration: none; }
 .confirm-dialog__actions { display: flex; justify-content: flex-end; gap: .75rem; flex-wrap: wrap; }
 @media (max-width: 400px) { .patient-auth__links { flex-wrap: wrap; white-space: normal; }.patient-auth__links > span { width: 100%; margin-left: 0; } }
 
-/* Appointment scheduler: month calendar beside the clinic's shift panels. */
-.booking-scheduler { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(190px, 230px) minmax(0, 1fr); gap: 1.25rem; align-items: start; }
-.booking-scheduler .booking-calendar { grid-column: auto; margin: 0; border: 1px solid #e0eaf5; border-radius: .85rem; background: #fbfdff; padding: .85rem; }
-.booking-calendar__header { display: flex; align-items: center; justify-content: space-between; gap: .35rem; margin-bottom: .8rem; color: #173f76; }
-.booking-calendar__header strong { font-size: .82rem; letter-spacing: -.01em; }
-.booking-calendar__header button { width: 1.7rem; min-height: 1.7rem; border: 0; border-radius: 50%; background: transparent; color: #176dcc; font-size: 1.25rem; line-height: 1; cursor: pointer; }
-.booking-calendar__header button:hover:not(:disabled) { background: #eaf3ff; }
-.booking-calendar__header button:disabled { color: #b8c5d2; cursor: not-allowed; }
-.booking-calendar__weekdays, .booking-calendar__grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .25rem; text-align: center; }
-.booking-calendar__weekdays { margin-bottom: .35rem; color: #8b9bae; font-size: .63rem; font-weight: 800; }
-.booking-calendar__day { width: 100%; min-height: 1.9rem; border: 0; border-radius: 50%; background: transparent; color: #29496e; font: inherit; font-size: .72rem; cursor: pointer; }
-.booking-calendar__day:hover:not(:disabled) { background: #eaf3ff; color: #176dcc; }
-.booking-calendar__day:disabled { color: #c8d1dc; cursor: not-allowed; }
-.booking-calendar__day--selected, .booking-calendar__day--selected:hover { background: #176dcc; color: #fff; font-weight: 800; box-shadow: 0 5px 12px rgba(23,109,204,.22); }
-.booking-scheduler .slot-picker { grid-column: auto; min-width: 0; }
-.booking-scheduler .booking-session { min-height: 7.2rem; padding: 1rem; }
-@media (max-width: 760px) { .booking-scheduler { grid-template-columns: 1fr; }.booking-scheduler .booking-calendar { width: min(100%, 280px); }.booking-scheduler .slot-picker { width: 100%; } }
-
-/* Refined month calendar: quiet grid, clear selected day, availability dots. */
-.booking-scheduler .booking-calendar { width: 100%; border-color: #dce8f4; background: #fff; box-shadow: 0 8px 20px rgb(32 80 130 / 5%); }
-.booking-calendar__header button { display: grid; place-items: center; background: #f1f6fb; color: #2f78bd; font-size: 1rem; font-weight: 800; }
-.booking-calendar__header button:hover:not(:disabled) { background: #e5f0fb; }
-.booking-calendar__header strong { color: #234b78; font-size: .78rem; font-weight: 800; }
-.booking-calendar__weekdays { color: #91a1b2; font-size: .59rem; letter-spacing: .05em; }
-.booking-calendar__grid { row-gap: .35rem; }
-.booking-calendar__day { position: relative; display: grid; place-items: center; align-content: center; gap: .06rem; width: 1.95rem; min-height: 2rem; justify-self: center; border-radius: 50%; background: transparent !important; color: #657b92; font-size: .7rem; font-weight: 700; }
-.booking-calendar__day:hover:not(:disabled) { background: #eef6fd; color: #176dcc; }
-.booking-calendar__day:disabled { color: #cbd5df; opacity: .85; }
-.booking-calendar__day i { width: .22rem; height: .22rem; border-radius: 50%; background: #5da1d8; }
-.booking-calendar__day--selected, .booking-calendar__day--selected:hover { background: #2ca866 !important; color: #fff; box-shadow: 0 4px 10px rgb(44 168 102 / 24%); }
-.booking-calendar__day--selected i { background: #fff; }
-.booking-calendar .booking-timezone { margin-top: .8rem; padding-top: .7rem; border-top: 1px solid #edf2f7; font-size: .68rem; }
-.booking-scheduler .booking-session { border-color: #dce8f4; background: #fff; box-shadow: 0 5px 14px rgb(32 80 130 / 4%); }
-.booking-scheduler .booking-session > div:first-child { margin-bottom: .85rem; }
-.booking-scheduler .booking-session > div:first-child strong { color: #234b78; font-size: .84rem; }
-.booking-scheduler .booking-session > div:first-child span { color: #8395a8; font-size: .67rem; }
-.booking-scheduler .slot-grid { gap: .55rem; }
-.booking-scheduler .slot-option { min-width: 5.4rem; min-height: 2.65rem; border-color: #bcd9f2; border-radius: .55rem; background: #fff !important; color: #176dcc; font-size: .76rem; }
-.booking-scheduler .slot-option:hover, .booking-scheduler .slot-option--selected { border-color: #176dcc; background: #176dcc !important; color: #fff; box-shadow: 0 5px 12px rgb(23 109 204 / 18%); }
-
 /* Final booking scheduler layout: compact calendar + shift panels (reference-aligned). */
 .booking-scheduler {
+  grid-column: 1 / -1;
+  display: grid;
   grid-template-columns: minmax(206px, 242px) minmax(0, 1fr);
   gap: 1rem;
   align-items: start;
 }
 .booking-scheduler .booking-calendar {
+  grid-column: auto;
+  margin: 0;
   width: 100%;
   padding: .85rem;
   border: 1px solid #d8e5f2;
@@ -352,30 +316,33 @@ a { text-decoration: none; }
   color: #176dcc;
   font-size: 1.05rem;
   font-weight: 850;
+  cursor: pointer;
 }
+.booking-calendar__header button:hover:not(:disabled) { background: #e5f0fb; }
+.booking-calendar__header button:disabled { color: #b8c5d2; cursor: not-allowed; }
 .booking-calendar__header strong { color: #173f76; font-size: .8rem; }
 .booking-calendar__weekdays, .booking-calendar__grid { gap: .3rem; }
 .booking-calendar__weekdays { margin-bottom: .35rem; color: #8194a9; font-size: .6rem; letter-spacing: .04em; }
 .booking-calendar__day {
   position: relative;
   display: grid;
-  width: 100%;
-  min-height: 2.15rem;
+  width: 2rem;
+  min-height: 2rem;
   place-items: center;
   align-content: center;
-  gap: .12rem;
-  justify-self: stretch;
-  border: 1px solid transparent;
-  border-radius: .5rem;
-  background: #f7fafd !important;
+  gap: .06rem;
+  justify-self: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent !important;
   color: #5d7590;
   font-size: .72rem;
   font-weight: 800;
 }
-.booking-calendar__day:hover:not(:disabled) { border-color: #b9d8f3; background: #eef6ff !important; color: #176dcc; }
-.booking-calendar__day:disabled { background: transparent !important; color: #c6d1dc; }
+.booking-calendar__day:hover:not(:disabled) { background: #eef6ff !important; color: #176dcc; }
+.booking-calendar__day:disabled { color: #c6d1dc; }
 .booking-calendar__day i { width: .22rem; height: .22rem; border-radius: 50%; background: #5da1d8; }
-.booking-calendar__day--selected, .booking-calendar__day--selected:hover { border-color: #176dcc; background: #176dcc !important; color: #fff; box-shadow: 0 5px 12px rgb(23 109 204 / 18%); }
+.booking-calendar__day--selected, .booking-calendar__day--selected:hover { background: #35b66d !important; color: #fff; box-shadow: 0 4px 10px rgb(53 182 109 / 22%); }
 .booking-calendar__day--selected i { background: #fff; }
 .booking-calendar .booking-timezone { margin-top: .8rem; padding-top: .7rem; border-top: 1px solid #edf2f7; color: #6f849a; font-size: .68rem; line-height: 1.45; }
 .booking-scheduler .slot-picker { min-width: 0; }
@@ -387,6 +354,7 @@ a { text-decoration: none; }
 .booking-scheduler .booking-session > div:first-child span { color: #8395a8; font-size: .67rem; }
 .booking-scheduler .slot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(5.25rem, 1fr)); gap: .55rem; }
 .booking-scheduler .slot-option { width: 100% !important; min-width: 0; min-height: 2.55rem; border-color: #bcd9f2; border-radius: .55rem; background: #fff !important; color: #176dcc; font-size: .76rem; }
+.booking-scheduler .slot-option:hover, .booking-scheduler .slot-option--selected { border-color: #176dcc; background: #176dcc !important; color: #fff; box-shadow: 0 5px 12px rgb(23 109 204 / 18%); }
 @media (max-width: 760px) {
   .booking-scheduler { grid-template-columns: 1fr; }
   .booking-scheduler .booking-calendar { width: min(100%, 320px); }

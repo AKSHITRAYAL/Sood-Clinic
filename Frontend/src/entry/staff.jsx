@@ -17,6 +17,7 @@ const AdminFeedback = lazy(() => import('../pages/ReviewModeration'));
 const AdminVisitTypes = lazy(() => import('../pages/AdminVisitTypes'));
 const VideoConsultations = lazy(() => import('../pages/VideoConsultations'));
 const ConsultationRequests = lazy(() => import('../pages/ConsultationRequests'));
+const StaffAppointments = lazy(() => import('../pages/StaffAppointments'));
 const StaffEntry = lazy(() => import('../pages/StaffEntry'));
 const StaffLogin = lazy(() => import('../pages/StaffLogin'));
 const RouteLoading = () => <main className="route-loading route-loading--staff" aria-live="polite">Loading secure workspace…</main>;
@@ -40,6 +41,7 @@ const StaffApp = () => <BrowserRouter><AppErrorBoundary staff><StaffSessionGuard
   <Route element={<StaffRoute role={['admin', 'manager', 'receptionist']} />}><Route path="/staff/reviews" element={<AdminFeedback />} /></Route>
   <Route element={<StaffRoute role={['admin', 'doctor', 'manager']} />}><Route path="/staff/video" element={<VideoConsultations />} /></Route>
   <Route element={<StaffRoute role={['admin', 'doctor', 'manager', 'receptionist']} />}><Route path="/staff/requests" element={<ConsultationRequests />} /></Route>
+  <Route element={<StaffRoute role={['admin', 'doctor', 'manager', 'receptionist']} />}><Route path="/staff/appointments" element={<StaffAppointments />} /></Route>
   <Route element={<StaffRoute role="doctor" />}><Route path="/staff/doctor" element={<DoctorSchedule />} /></Route>
   <Route element={<StaffRoute role="manager" />}><Route path="/staff/manager" element={<ManagerWorkspace />} /></Route>
   <Route element={<StaffRoute role="receptionist" />}><Route path="/staff/receptionist" element={<ReceptionWorkspace />} /></Route>

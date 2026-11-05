@@ -35,6 +35,37 @@ afterAll(async () => {
   await Promise.all(users.map(uid => admin.auth().deleteUser(uid))); await deleteApp(app); await admin.app().delete();
 });
 suite('verified patient reviews', () => {
+  it('accepts an anonymous public review without an account or appointment reference', async () => {
+    await signOut(auth);
+    const result = await call('submitPatientFeedback', {
+      contactPhone: '9877853935',
+      rating: 5,
+      comment: 'A helpful and respectful consultation experience.',
+      publicConsent: true,
+    });
+    expect(result.status).toBe('published');
+    expect((await db.collection('patientFeedback').doc(result.reviewId).get()).data()).toMatchObject({
+      patientId: null,
+      status: 'published',
+      publicConsent: true,
+      verifiedVisit: false,
+    });
+    ids.push(result.reviewId);
+  }, 30_000);
+
+  it('accepts an anonymous public review with email only', async () => {
+    await signOut(auth);
+    const result = await call('submitPatientFeedback', {
+      contactEmail: 'email-only@example.com',
+      rating: 5,
+      comment: 'The clinic explained everything clearly and kindly.',
+      publicConsent: true,
+    });
+    expect(result.status).toBe('published');
+    expect((await db.collection('patientFeedback').doc(result.reviewId).get()).get('patientId')).toBeNull();
+    ids.push(result.reviewId);
+  }, 30_000);
+
   it('requires a completed owned appointment and rejects invalid ratings and excessive text', async () => {
     await login();
     await expect(call('submitPatientFeedback', { appointmentId: 'missing', rating: 5, comment: 'A detailed review.', publicConsent: true })).rejects.toMatchObject({ code: 'functions/permission-denied' });

@@ -16,6 +16,9 @@ afterEach(cleanup);
 test('shows low-rating reviews with compact filters', async () => {
   render(<MemoryRouter><Reviews /></MemoryRouter>);
   await screen.findByText(row.comment); expect(screen.getByRole('heading', { name: 'Patient reviews' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Previous Testimonials' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Recent reviews' })).toBeTruthy();
+  expect(screen.getByText('An extremely humble, polite, and professional doctor.', { exact: false })).toBeTruthy();
   fireEvent.change(screen.getByLabelText('Sort'), { target: { value: 'lowest' } });
   await waitFor(() => expect(api.list).toHaveBeenLastCalledWith(expect.objectContaining({ sort: 'lowest', rating: 0 })));
   fireEvent.change(screen.getByLabelText('Rating'), { target: { value: '1' } });
@@ -45,9 +48,35 @@ test('lets a guest submit feedback with an optional reference and booking contac
   render(<MemoryRouter><Reviews /></MemoryRouter>);
   await screen.findByRole('heading', { name: 'Write a review' });
   fireEvent.change(screen.getByLabelText(/Appointment reference/), { target: { value: 'SC-ABC123' } });
-  fireEvent.change(screen.getByLabelText('Phone used for booking'), { target: { value: '9877853935' } });
+  fireEvent.change(screen.getByLabelText(/Phone used for booking/), { target: { value: '9877853935' } });
   fireEvent.click(screen.getByRole('radio', { name: '5 stars' }));
   fireEvent.change(screen.getByLabelText(/Your experience/), { target: { value: 'The clinic explained the next steps clearly.' } });
   fireEvent.click(screen.getByText('Send feedback'));
   await waitFor(() => expect(api.submit).toHaveBeenCalledWith(expect.objectContaining({ appointmentReference: 'SC-ABC123', contactPhone: '9877853935', rating: 5, publicConsent: true })));
+});
+
+test('lets a guest submit with email only', async () => {
+  const submitted = { ...row, id: 'submitted-review', rating: 5, comment: 'The clinic explained the next steps clearly.', authorLabel: 'Patient feedback', verifiedVisit: false };
+  api.list.mockResolvedValueOnce({ ...result, reviews: [] }).mockResolvedValueOnce({ ...result, reviews: [submitted] });
+  api.submit.mockResolvedValue({ message: 'Thank you. Your review is now public.' });
+  render(<MemoryRouter><Reviews /></MemoryRouter>);
+  await screen.findByRole('heading', { name: 'Write a review' });
+  fireEvent.change(screen.getByLabelText(/Email used for booking/), { target: { value: 'patient@example.com' } });
+  fireEvent.click(screen.getByRole('radio', { name: '5 stars' }));
+  fireEvent.change(screen.getByLabelText(/Your experience/), { target: { value: 'The clinic explained the next steps clearly.' } });
+  fireEvent.click(screen.getByText('Send feedback'));
+  await waitFor(() => expect(api.submit).toHaveBeenCalledWith(expect.objectContaining({ contactPhone: '', contactEmail: 'patient@example.com', rating: 5, publicConsent: true })));
+  await screen.findByText(submitted.comment);
+  expect(screen.getByRole('status').textContent).toContain('Your review is now public.');
+  expect(api.list).toHaveBeenCalledTimes(2);
+});
+
+test('explains that a guest needs one contact method', async () => {
+  render(<MemoryRouter><Reviews /></MemoryRouter>);
+  await screen.findByRole('heading', { name: 'Write a review' });
+  fireEvent.click(screen.getByRole('radio', { name: '5 stars' }));
+  fireEvent.change(screen.getByLabelText(/Your experience/), { target: { value: 'The clinic explained the next steps clearly.' } });
+  fireEvent.click(screen.getByText('Send feedback'));
+  expect((await screen.findByRole('status')).textContent).toContain('Enter a phone number or email address for follow-up.');
+  expect(api.submit).not.toHaveBeenCalled();
 });

@@ -69,7 +69,7 @@ function createReviews({ db, auth }) {
       const reference = data.appointmentReference ? text(data.appointmentReference, 6, 120).toUpperCase() : '';
       const phone = data.contactPhone ? String(data.contactPhone).trim() : '';
       const email = data.contactEmail ? String(data.contactEmail).trim().toLowerCase() : '';
-      if (!phone) throw fail('invalid-argument', 'Enter the phone number used for your visit. Email is optional.');
+      if (!phone && !email) throw fail('invalid-argument', 'Enter a phone number or email address for follow-up.');
       if (reference) {
         const matches = await db.collection('appointments').where('reference', '==', reference).limit(2).get();
         if (matches.size !== 1) throw fail('permission-denied', 'We could not verify that visit. Check the reference and contact details, or leave the reference blank for unverified feedback.');
