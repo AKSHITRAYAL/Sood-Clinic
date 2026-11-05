@@ -3,6 +3,7 @@ const { FieldValue, FieldPath } = require('firebase-admin/firestore');
 const crypto = require('node:crypto');
 const { requireLiveStaff } = require('./staffAuthorization');
 const { istDateKey } = require('./ist');
+const { toE164 } = require('./phone');
 
 // Developer-selected highlights: existing published, consented review IDs only.
 const FEATURED_REVIEW_IDS = Object.freeze([]);
@@ -64,31 +65,57 @@ function createReviews({ db, auth }) {
     const comment = text(data.comment, 10, 2000);
     if (!Number.isInteger(data.rating) || data.rating < 1 || data.rating > 5 || typeof data.publicConsent !== 'boolean') throw fail('invalid-argument', 'Choose 1–5 stars and your sharing preference.');
     let appointmentId = authenticated ? id(data.appointmentId) : '';
+    let consultationRequestId = null; let guestContactKey = '';
     let verifiedVisit = authenticated;
     if (!authenticated) {
       const reference = data.appointmentReference ? text(data.appointmentReference, 6, 120).toUpperCase() : '';
-      const phone = data.contactPhone ? String(data.contactPhone).trim() : '';
-      const email = data.contactEmail ? String(data.contactEmail).trim().toLowerCase() : '';
+      const phoneInput = typeof data.contactPhone === 'string' ? data.contactPhone.trim() : '';
+      const phone = phoneInput ? toE164(phoneInput) : null;
+      if (phoneInput && !phone) throw fail('invalid-argument', 'Enter a valid Indian phone number.');
+      const email = typeof data.contactEmail === 'string' ? data.contactEmail.trim().toLowerCase() : '';
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw fail('invalid-argument', 'Enter a valid email address.');
       if (!phone && !email) throw fail('invalid-argument', 'Enter a phone number or email address for follow-up.');
+      guestContactKey = `${phone || ''}|${email}`;
       if (reference) {
-        const matches = await db.collection('appointments').where('reference', '==', reference).limit(2).get();
-        if (matches.size !== 1) throw fail('permission-denied', 'We could not verify that visit. Check the reference and contact details, or leave the reference blank for unverified feedback.');
-        const candidate = matches.docs[0]; const snapshot = candidate.get('patientSnapshot') || {};
-        const phoneMatch = snapshot.phone && String(snapshot.phone).replace(/\D/g, '').endsWith(phone.replace(/\D/g, '').slice(-10));
-        const emailMatch = email && snapshot.email && String(snapshot.email).toLowerCase() === email;
+        let candidate;
+        const referenceFormat = /^(SC|CR)-[0-9A-F]{8}$/.exec(reference);
+        if (!referenceFormat) throw fail('invalid-argument', 'Enter the SC appointment reference or CR consultation reference shown by the clinic.');
+        if (referenceFormat[1] === 'SC') {
+          const matches = await db.collection('appointments').where('reference', '==', reference).limit(2).get();
+          if (matches.size === 1) candidate = matches.docs[0];
+        } else {
+          const matches = await db.collection('consultationRequests').where('reference', '==', reference).limit(2).get();
+          if (matches.size === 1 && matches.docs[0].get('status') === 'confirmed' && typeof matches.docs[0].get('appointmentId') === 'string') {
+            consultationRequestId = matches.docs[0].id;
+            appointmentId = matches.docs[0].get('appointmentId');
+            const appointment = await db.collection('appointments').doc(appointmentId).get();
+            if (appointment.exists) candidate = appointment;
+          }
+        }
+        if (!candidate) throw fail('permission-denied', 'We could not verify a completed visit. Check the SC or CR reference and contact details, or leave the reference blank for unverified feedback.');
+        const snapshot = candidate.get('patientSnapshot') || {};
+        const phoneMatch = phone && toE164(snapshot.phone) === phone;
+        const emailMatch = email && typeof snapshot.email === 'string' && snapshot.email.trim().toLowerCase() === email;
         if (!phoneMatch && !emailMatch) throw fail('permission-denied', 'We could not verify that visit. Check the reference and contact details, or leave the reference blank for unverified feedback.');
-        appointmentId = candidate.id; verifiedVisit = true;
+        if (referenceFormat[1] === 'SC') appointmentId = candidate.id;
+        verifiedVisit = true;
       }
     }
     const ref = appointmentId ? reviews.doc(appointmentId) : reviews.doc();
+    const requestRef = consultationRequestId ? db.collection('consultationRequests').doc(consultationRequestId) : null;
     await db.runTransaction(async tx => {
-      const [appointment, existing] = await Promise.all([appointmentId ? tx.get(db.collection('appointments').doc(appointmentId)) : Promise.resolve(null), tx.get(ref)]);
+      const [appointment, existing, consultationRequest] = await Promise.all([
+        appointmentId ? tx.get(db.collection('appointments').doc(appointmentId)) : Promise.resolve(null),
+        tx.get(ref), requestRef ? tx.get(requestRef) : Promise.resolve(null),
+      ]);
+      if (requestRef && (!consultationRequest.exists || consultationRequest.get('status') !== 'confirmed' || consultationRequest.get('appointmentId') !== appointmentId)) {
+        throw fail('permission-denied', 'We could not verify a completed visit. Check the SC or CR reference and contact details, or leave the reference blank for unverified feedback.');
+      }
       if (appointmentId && (!appointment.exists || appointment.get('status') !== 'completed' || (authenticated && appointment.get('patientId') !== uid))) throw fail('permission-denied', 'Reviews are available after a completed visit.');
       const old = existing.data();
       if (old) { if (!authenticated || old.patientId !== uid) throw fail('already-exists', 'This visit already has feedback.'); requireVersion(data.version, old); }
       else if (data.version !== undefined) throw fail('aborted', 'Refresh your visits before submitting.');
-      const contact = !authenticated ? `${String(data.contactPhone).replace(/\D/g, '')}|${String(data.contactEmail || '').trim().toLowerCase()}` : '';
-      const quotaKey = uid || `guest_${crypto.createHash('sha256').update(contact).digest('hex').slice(0, 32)}`; const useQuota = await quota(tx, quotaKey, 'author', authenticated ? 20 : 3);
+      const quotaKey = uid || `guest_${crypto.createHash('sha256').update(guestContactKey).digest('hex').slice(0, 32)}`; const useQuota = await quota(tx, quotaKey, 'author', authenticated ? 20 : 3);
       const version = old ? versionOf(old) + 1 : 1; const now = FieldValue.serverTimestamp();
       const status = data.publicConsent === true ? 'published' : 'unpublished';
       tx.set(ref, { appointmentId, patientId: uid, rating: data.rating, comment, publicConsent: data.publicConsent,
