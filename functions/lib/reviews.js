@@ -24,8 +24,8 @@ const text = (value, min, max) => {
 const tokens = value => [...new Set(value.normalize('NFKC').toLowerCase().match(/[\p{L}\p{N}]{2,40}/gu) || [])].slice(0, 350);
 const publicRow = (doc) => {
   const row = doc.data();
-  return { id: doc.id, rating: row.rating, comment: row.publicComment ?? row.comment,
-    authorLabel: row.verifiedVisit === false ? 'Patient feedback' : 'Verified patient', verifiedVisit: row.verifiedVisit !== false, privacyEdited: row.publicComment != null,
+    return { id: doc.id, rating: row.rating, comment: row.publicComment ?? row.comment,
+    authorLabel: row.anonymous === true ? 'Anonymous' : (row.authorName || (row.verifiedVisit === false ? 'Patient feedback' : 'Verified patient')), verifiedVisit: row.verifiedVisit !== false, privacyEdited: row.publicComment != null,
     publishedAt: instant(row.publishedAt), updatedAt: instant(row.updatedAt), helpfulCount: row.helpfulCount || 0,
     reply: row.reply?.text ? { text: row.reply.text, at: instant(row.reply.at) } : null };
 };
@@ -61,14 +61,16 @@ function createReviews({ db, auth }) {
   async function submit(request) {
     const staffSubmission = Boolean(request.auth?.uid && request.auth.token?.role && request.auth.token.role !== 'patient');
     const authenticated = Boolean(request.auth?.uid) && !staffSubmission; const uid = authenticated ? await account(request, true) : null;
-    const data = input(request, ['appointmentId', 'appointmentReference', 'contactPhone', 'contactEmail', 'rating', 'comment', 'publicConsent', 'version']);
+    const data = input(request, ['appointmentId', 'contactPhone', 'contactEmail', 'name', 'anonymous', 'rating', 'comment', 'publicConsent', 'version']);
     const comment = text(data.comment, 10, 2000);
     if (!Number.isInteger(data.rating) || data.rating < 1 || data.rating > 5 || typeof data.publicConsent !== 'boolean') throw fail('invalid-argument', 'Choose 1–5 stars and your sharing preference.');
     let appointmentId = authenticated ? id(data.appointmentId) : '';
-    let consultationRequestId = null; let guestContactKey = '';
+    const anonymous = !authenticated && data.anonymous === true;
+    const authorName = !authenticated && !anonymous ? text(data.name, 1, 100) : '';
+    let guestContactKey = '';
     let verifiedVisit = authenticated;
     if (!authenticated) {
-      const reference = data.appointmentReference ? text(data.appointmentReference, 6, 120).toUpperCase() : '';
+      // Guest feedback is never classified as a verified visit.
       const phoneInput = typeof data.contactPhone === 'string' ? data.contactPhone.trim() : '';
       const phone = phoneInput ? toE164(phoneInput) : null;
       if (phoneInput && !phone) throw fail('invalid-argument', 'Enter a valid Indian phone number.');
@@ -76,41 +78,13 @@ function createReviews({ db, auth }) {
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw fail('invalid-argument', 'Enter a valid email address.');
       if (!phone && !email) throw fail('invalid-argument', 'Enter a phone number or email address for follow-up.');
       guestContactKey = `${phone || ''}|${email}`;
-      if (reference) {
-        let candidate;
-        const referenceFormat = /^(SC|CR)-[0-9A-F]{8}$/.exec(reference);
-        if (!referenceFormat) throw fail('invalid-argument', 'Enter the SC appointment reference or CR consultation reference shown by the clinic.');
-        if (referenceFormat[1] === 'SC') {
-          const matches = await db.collection('appointments').where('reference', '==', reference).limit(2).get();
-          if (matches.size === 1) candidate = matches.docs[0];
-        } else {
-          const matches = await db.collection('consultationRequests').where('reference', '==', reference).limit(2).get();
-          if (matches.size === 1 && matches.docs[0].get('status') === 'confirmed' && typeof matches.docs[0].get('appointmentId') === 'string') {
-            consultationRequestId = matches.docs[0].id;
-            appointmentId = matches.docs[0].get('appointmentId');
-            const appointment = await db.collection('appointments').doc(appointmentId).get();
-            if (appointment.exists) candidate = appointment;
-          }
-        }
-        if (!candidate) throw fail('permission-denied', 'We could not verify a completed visit. Check the SC or CR reference and contact details, or leave the reference blank for unverified feedback.');
-        const snapshot = candidate.get('patientSnapshot') || {};
-        const phoneMatch = phone && toE164(snapshot.phone) === phone;
-        const emailMatch = email && typeof snapshot.email === 'string' && snapshot.email.trim().toLowerCase() === email;
-        if (!phoneMatch && !emailMatch) throw fail('permission-denied', 'We could not verify that visit. Check the reference and contact details, or leave the reference blank for unverified feedback.');
-        if (referenceFormat[1] === 'SC') appointmentId = candidate.id;
-        verifiedVisit = true;
-      }
     }
     const ref = appointmentId ? reviews.doc(appointmentId) : reviews.doc();
-    const requestRef = consultationRequestId ? db.collection('consultationRequests').doc(consultationRequestId) : null;
     await db.runTransaction(async tx => {
-      const [appointment, existing, consultationRequest] = await Promise.all([
+      const [appointment, existing] = await Promise.all([
         appointmentId ? tx.get(db.collection('appointments').doc(appointmentId)) : Promise.resolve(null),
-        tx.get(ref), requestRef ? tx.get(requestRef) : Promise.resolve(null),
+        tx.get(ref),
       ]);
-      if (requestRef && (!consultationRequest.exists || consultationRequest.get('status') !== 'confirmed' || consultationRequest.get('appointmentId') !== appointmentId)) {
-        throw fail('permission-denied', 'We could not verify a completed visit. Check the SC or CR reference and contact details, or leave the reference blank for unverified feedback.');
-      }
       if (appointmentId && (!appointment.exists || appointment.get('status') !== 'completed' || (authenticated && appointment.get('patientId') !== uid))) throw fail('permission-denied', 'Reviews are available after a completed visit.');
       const old = existing.data();
       if (old) { if (!authenticated || old.patientId !== uid) throw fail('already-exists', 'This visit already has feedback.'); requireVersion(data.version, old); }
@@ -118,7 +92,7 @@ function createReviews({ db, auth }) {
       const quotaKey = uid || `guest_${crypto.createHash('sha256').update(guestContactKey).digest('hex').slice(0, 32)}`; const useQuota = await quota(tx, quotaKey, 'author', authenticated ? 20 : 3);
       const version = old ? versionOf(old) + 1 : 1; const now = FieldValue.serverTimestamp();
       const status = data.publicConsent === true ? 'published' : 'unpublished';
-      tx.set(ref, { appointmentId, patientId: uid, rating: data.rating, comment, publicConsent: data.publicConsent,
+      tx.set(ref, { appointmentId, patientId: uid, ...(authenticated ? {} : { authorName: anonymous ? null : authorName, anonymous }), rating: data.rating, comment, publicConsent: data.publicConsent,
         consentAt: now, status, publishedAt: status === 'published' ? now : null, version, updatedAt: now, publicComment: null, featuredRank: null,
         verifiedVisit, source: authenticated ? 'patient_portal' : 'public_feedback', searchTokens: tokens(comment), ...(old ? {} : { createdAt: now, helpfulCount: 0, reportCount: 0 }) }, { merge: true });
       record(tx, ref, request, old ? 'edited' : 'submitted', version, old ? { comment: old.comment, rating: old.rating, publicConsent: old.publicConsent === true } : null, { role: authenticated ? 'patient' : 'guest' });

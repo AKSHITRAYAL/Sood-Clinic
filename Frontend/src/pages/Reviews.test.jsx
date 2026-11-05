@@ -43,16 +43,29 @@ test('submits a public review by default for an owned completed visit', async ()
   await waitFor(() => expect(api.submit).toHaveBeenCalledWith({ appointmentId: 'completed-visit', rating: 4, comment: 'The clinic explained the next steps clearly.', publicConsent: true }));
 });
 
-test('lets a guest submit feedback with an optional reference and booking contact', async () => {
+test('lets a guest submit with a required name and phone contact', async () => {
   api.submit.mockResolvedValue({ message: 'Awaiting moderation.' });
   render(<MemoryRouter><Reviews /></MemoryRouter>);
   await screen.findByRole('heading', { name: 'Write a review' });
-  fireEvent.change(screen.getByLabelText(/Appointment reference/), { target: { value: 'SC-ABC123' } });
-  fireEvent.change(screen.getByLabelText(/Phone used for booking/), { target: { value: '9877853935' } });
+  fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'A Patient' } });
+  fireEvent.change(screen.getByLabelText('Phone number'), { target: { value: '9877853935' } });
   fireEvent.click(screen.getByRole('radio', { name: '5 stars' }));
   fireEvent.change(screen.getByLabelText(/Your experience/), { target: { value: 'The clinic explained the next steps clearly.' } });
   fireEvent.click(screen.getByText('Send feedback'));
-  await waitFor(() => expect(api.submit).toHaveBeenCalledWith(expect.objectContaining({ appointmentReference: 'SC-ABC123', contactPhone: '9877853935', rating: 5, publicConsent: true })));
+  await waitFor(() => expect(api.submit).toHaveBeenCalledWith(expect.objectContaining({ name: 'A Patient', anonymous: false, contactPhone: '9877853935', contactEmail: '' })));
+});
+
+test('anonymous checkbox disables name and email alone is sufficient', async () => {
+  api.submit.mockResolvedValue({ message: 'Thank you. Your review is now public.' });
+  render(<MemoryRouter><Reviews /></MemoryRouter>);
+  await screen.findByRole('heading', { name: 'Write a review' });
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Give an anonymous review' }));
+  expect(screen.getByLabelText(/^Name/).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'patient@example.com' } });
+  fireEvent.click(screen.getByRole('radio', { name: '5 stars' }));
+  fireEvent.change(screen.getByLabelText(/Your experience/), { target: { value: 'The clinic explained the next steps clearly.' } });
+  fireEvent.click(screen.getByText('Send feedback'));
+  await waitFor(() => expect(api.submit).toHaveBeenCalledWith(expect.objectContaining({ anonymous: true, contactPhone: '', contactEmail: 'patient@example.com' })));
 });
 
 test('lets a guest submit with email only', async () => {
@@ -61,7 +74,8 @@ test('lets a guest submit with email only', async () => {
   api.submit.mockResolvedValue({ message: 'Thank you. Your review is now public.' });
   render(<MemoryRouter><Reviews /></MemoryRouter>);
   await screen.findByRole('heading', { name: 'Write a review' });
-  fireEvent.change(screen.getByLabelText(/Email used for booking/), { target: { value: 'patient@example.com' } });
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Give an anonymous review' }));
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'patient@example.com' } });
   fireEvent.click(screen.getByRole('radio', { name: '5 stars' }));
   fireEvent.change(screen.getByLabelText(/Your experience/), { target: { value: 'The clinic explained the next steps clearly.' } });
   fireEvent.click(screen.getByText('Send feedback'));
@@ -74,9 +88,10 @@ test('lets a guest submit with email only', async () => {
 test('explains that a guest needs one contact method', async () => {
   render(<MemoryRouter><Reviews /></MemoryRouter>);
   await screen.findByRole('heading', { name: 'Write a review' });
+  fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'A Patient' } });
   fireEvent.click(screen.getByRole('radio', { name: '5 stars' }));
   fireEvent.change(screen.getByLabelText(/Your experience/), { target: { value: 'The clinic explained the next steps clearly.' } });
   fireEvent.click(screen.getByText('Send feedback'));
-  expect((await screen.findByRole('status')).textContent).toContain('Enter a phone number or email address for follow-up.');
+  expect((await screen.findByRole('status')).textContent).toContain('Enter a phone number or email address.');
   expect(api.submit).not.toHaveBeenCalled();
 });

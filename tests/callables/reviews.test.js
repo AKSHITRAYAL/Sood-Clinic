@@ -5,11 +5,9 @@ import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/
 import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 const require = createRequire(new URL('../../functions/package.json', import.meta.url));
 const admin = require('firebase-admin');
-const { randomBytes } = require('node:crypto');
 const suite = process.env.FIRESTORE_EMULATOR_HOST && process.env.FIREBASE_AUTH_EMULATOR_HOST ? describe : describe.skip;
 let app; let db; let auth; let functions;
-const ids = []; const requestIds = []; const users = [];
-const reference = prefix => `${prefix}-${randomBytes(4).toString('hex').toUpperCase()}`;
+const ids = []; const users = [];
 const call = async (name, data = {}) => (await httpsCallable(functions, name)(data)).data;
 async function login(role = 'patient') {
   const uid = `review-${role}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -34,14 +32,13 @@ beforeAll(async () => {
 afterAll(async () => {
   if (!db) return;
   await Promise.all(ids.map(async id => { await db.recursiveDelete(db.collection('patientFeedback').doc(id)); await db.collection('appointments').doc(id).delete(); }));
-  await Promise.all(requestIds.map(id => db.collection('consultationRequests').doc(id).delete()));
   await Promise.all(users.map(uid => admin.auth().deleteUser(uid))); await deleteApp(app); await admin.app().delete();
 });
 suite('verified patient reviews', () => {
-  it('accepts an anonymous public review without an account or appointment reference', async () => {
+  it('accepts a named public review without an account or appointment reference', async () => {
     await signOut(auth);
     const result = await call('submitPatientFeedback', {
-      contactPhone: '9877853935',
+      name: 'A Patient', anonymous: false, contactPhone: '9877853935',
       rating: 5,
       comment: 'A helpful and respectful consultation experience.',
       publicConsent: true,
@@ -59,7 +56,7 @@ suite('verified patient reviews', () => {
   it('accepts an anonymous public review with email only', async () => {
     await signOut(auth);
     const result = await call('submitPatientFeedback', {
-      contactEmail: 'email-only@example.com',
+      anonymous: true, contactEmail: 'email-only@example.com',
       rating: 5,
       comment: 'The clinic explained everything clearly and kindly.',
       publicConsent: true,
@@ -69,74 +66,14 @@ suite('verified patient reviews', () => {
     ids.push(result.reviewId);
   }, 30_000);
 
-  it('verifies a completed appointment by SC reference and normalized phone', async () => {
+  it('requires a name unless anonymous and accepts phone or email independently', async () => {
     await signOut(auth);
-    const appointmentId = `review-sc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const appointmentReference = reference('SC');
-    ids.push(appointmentId);
-    await db.collection('appointments').doc(appointmentId).set({
-      reference: appointmentReference, status: 'completed', patientId: null,
-      patientSnapshot: { name: 'Guest Patient', phone: '+91 98778 53935', email: null },
-    });
-    const result = await call('submitPatientFeedback', {
-      appointmentReference: appointmentReference.toLowerCase(), contactPhone: '9877853935',
-      rating: 5, comment: 'The visit was helpful and clearly explained.', publicConsent: true,
-    });
-    expect(result.status).toBe('published');
-    expect((await db.collection('patientFeedback').doc(result.reviewId).get()).data()).toMatchObject({
-      appointmentId, verifiedVisit: true, patientId: null,
-    });
-  }, 30_000);
-
-  it('verifies a completed appointment by CR reference only after its request is confirmed', async () => {
-    await signOut(auth);
-    const appointmentId = `review-cr-appt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const requestId = `review-cr-request-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const consultationReference = reference('CR');
-    ids.push(appointmentId); requestIds.push(requestId);
-    await db.collection('appointments').doc(appointmentId).set({
-      reference: reference('SC'),
-      status: 'completed', patientId: null, consultationRequestId: requestId,
-      patientSnapshot: { name: 'Guest Patient', phone: null, email: 'patient@example.com' },
-    });
-    await db.collection('consultationRequests').doc(requestId).set({
-      reference: consultationReference, status: 'confirmed', appointmentId, patient: { email: 'Patient@Example.com' },
-    });
-    const result = await call('submitPatientFeedback', {
-      appointmentReference: consultationReference, contactEmail: ' patient@example.com ',
-      rating: 5, comment: 'The visit was helpful and clearly explained.', publicConsent: true,
-    });
-    expect(result.status).toBe('published');
+    const payload = { contactEmail: 'person@example.com', rating: 5, comment: 'The visit was helpful and clearly explained.', publicConsent: true };
+    await expect(call('submitPatientFeedback', payload)).rejects.toMatchObject({ code: 'functions/invalid-argument' });
+    const result = await call('submitPatientFeedback', { ...payload, anonymous: true });
     ids.push(result.reviewId);
-    expect((await db.collection('patientFeedback').doc(result.reviewId).get()).data()).toMatchObject({
-      appointmentId, verifiedVisit: true, patientId: null,
-    });
-  }, 30_000);
-
-  it('rejects invalid references, mismatched contacts, malformed phones, pending CR requests and incomplete visits', async () => {
-    await signOut(auth);
-    const appointmentId = `review-invalid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const pendingAppointmentId = `${appointmentId}-pending`;
-    const requestId = `${appointmentId}-request`;
-    const pendingReference = reference('CR');
-    ids.push(appointmentId, pendingAppointmentId); requestIds.push(requestId);
-    await db.collection('appointments').doc(appointmentId).set({
-      reference: reference('SC'),
-      status: 'confirmed', patientSnapshot: { phone: '+91 98778 53935', email: 'patient@example.com' },
-    });
-    await db.collection('appointments').doc(pendingAppointmentId).set({ status: 'completed', patientSnapshot: { email: 'patient@example.com' } });
-    await db.collection('consultationRequests').doc(requestId).set({ reference: pendingReference, status: 'pending', appointmentId: pendingAppointmentId });
-    const attempt = (appointmentReference, extra = {}) => call('submitPatientFeedback', {
-      appointmentReference, contactPhone: '9877853935', rating: 5,
-      comment: 'The visit was helpful and clearly explained.', publicConsent: true, ...extra,
-    });
-    await expect(attempt('SC-00000000')).rejects.toMatchObject({ code: 'functions/permission-denied' });
-    await expect(attempt('SC-NOTFOUND', { contactPhone: '123' })).rejects.toMatchObject({ code: 'functions/invalid-argument' });
-    const incompleteReference = (await db.collection('appointments').doc(appointmentId).get()).get('reference');
-    await expect(attempt(incompleteReference, { contactPhone: '9877853936' })).rejects.toMatchObject({ code: 'functions/permission-denied' });
-    await expect(attempt(incompleteReference, { contactPhone: '', contactEmail: 'wrong@example.com' })).rejects.toMatchObject({ code: 'functions/permission-denied' });
-    await expect(attempt(pendingReference)).rejects.toMatchObject({ code: 'functions/permission-denied' });
-    await expect(attempt(incompleteReference)).rejects.toMatchObject({ code: 'functions/permission-denied' });
+    const saved = (await db.collection('patientFeedback').doc(result.reviewId).get()).data();
+    expect(saved).toMatchObject({ anonymous: true, authorName: null, verifiedVisit: false, patientId: null });
   }, 30_000);
 
   it('requires a completed owned appointment and rejects invalid ratings and excessive text', async () => {

@@ -1,6 +1,12 @@
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import drAkSoodProfile from '../assets/brand/dr-ak-sood-portrait.jpeg';
+import doctorPortraitOne from '../assets/clinic/dr-sood-portrait-1.png';
+import doctorPortraitTwo from '../assets/clinic/dr-sood-portrait-2.png';
+import dhawanHospital from '../assets/clinic/dhawan-hospital.png';
+import dhawanOpd from '../assets/clinic/dhawan-opd.png';
+import jindalClinic from '../assets/clinic/jindal-clinic.png';
+import jindalOpd from '../assets/clinic/jindal-opd.png';
 import { clinicLocations, doctorName } from '../lib/clinicLocations';
 import { Link } from 'react-router-dom';
 
@@ -179,6 +185,12 @@ const About = () => (
               </Link>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="mx-auto w-[min(1120px,calc(100%-2rem))] py-8" aria-label="More photos of Dr. Sood">
+        <div className="grid gap-5 sm:grid-cols-2">
+          {[doctorPortraitOne, doctorPortraitTwo].map((image, index) => <img key={image} src={image} alt={`Dr. Sood, portrait ${index + 1}`} loading="lazy" className="h-72 w-full rounded-2xl object-cover object-center shadow-sm" />)}
         </div>
       </section>
 
@@ -447,6 +459,9 @@ const About = () => (
                 </a>
               </article>
             ))}
+          </div>
+          <div className="mt-8 grid gap-5 sm:grid-cols-2" aria-label="Clinic and OPD photos">
+            {[[dhawanHospital, 'Dhawan Hospital exterior'], [dhawanOpd, 'Dhawan Hospital OPD'], [jindalClinic, 'Jindal Diagnostics exterior'], [jindalOpd, 'Jindal Diagnostics OPD']].map(([image, label]) => <figure key={label} className="overflow-hidden rounded-2xl border border-[#dce8f5] bg-white"><img src={image} alt={label} loading="lazy" className="aspect-[4/3] w-full object-cover" /><figcaption className="px-4 py-3 text-sm font-semibold text-[#31557d]">{label}</figcaption></figure>)}
           </div>
         </div>
       </section>
