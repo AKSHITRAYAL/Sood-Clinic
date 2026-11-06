@@ -8,12 +8,6 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}
 const unavailable = () => new HttpsError('unavailable', 'The staff change could not be confirmed. Refresh the directory and activity log before trying again.');
 
 function createStaffLifecycle({ auth, store, now = Date.now }) {
-  async function requireActiveDoctor(role, doctorId) {
-    if (role !== 'doctor') return;
-    let active;
-    try { active = await store.doctorActive(doctorId); } catch { throw unavailable(); }
-    if (active !== true) throw new HttpsError('invalid-argument', 'Choose an active doctor from the clinic catalogue.');
-  }
   async function ownPasswordActor(request) {
     if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in to change your password.');
     const user = await auth.getUser(request.auth.uid);
@@ -82,7 +76,6 @@ function createStaffLifecycle({ auth, store, now = Date.now }) {
       if (['provision', 'updateAccess'].includes(action) && (!isStaffRole(role) || displayName.length < 2 || displayName.length > 160 || /[\r\n]/.test(displayName) || (role === 'doctor' && !isDoctorId(doctorId)))) throw new HttpsError('invalid-argument', 'Enter a name, valid role and doctor identifier when required.');
       if (['provision', 'temporaryPassword'].includes(action) && (typeof password !== 'string' || !isStrongTemporaryPassword(password))) throw new HttpsError('invalid-argument', 'Use at least 8 characters, uppercase and lowercase letters, a number and a special character.');
       if (action === 'disable' && typeof disabled !== 'boolean') throw new HttpsError('invalid-argument', 'Choose whether to suspend or restore the account.');
-      if (['provision', 'updateAccess'].includes(action)) await requireActiveDoctor(role, doctorId);
       let target;
       try { target = await auth.getUserByEmail(email); }
       catch (error) { if (error.code !== 'auth/user-not-found') throw unavailable(); }
@@ -93,7 +86,6 @@ function createStaffLifecycle({ auth, store, now = Date.now }) {
       return change(actor, targetUid, auditAction, requestId, async (markStarted) => {
         // Re-check authority after acquiring the shared SQL lock, before touching Auth.
         await requireLiveAdmin(auth, request);
-        if (['provision', 'updateAccess'].includes(action)) await requireActiveDoctor(role, doctorId);
         if (target) {
           target = await auth.getUser(target.uid);
           if (!isStaffRole(target.customClaims?.role)) throw new HttpsError('failed-precondition', 'This account is no longer managed staff.');
@@ -146,14 +138,8 @@ function createStaffLifecycle({ auth, store, now = Date.now }) {
 }
 
 function sqlStaffLifecycleStore(dc) {
-  const { beginStaffAccessChange, finishStaffAccessChange, abortStaffAccessChange, readSqlCatalogue } = require('../generated/sql');
+  const { beginStaffAccessChange, finishStaffAccessChange, abortStaffAccessChange } = require('../generated/sql');
   return {
-    doctorActive: async doctorId => {
-      const { data } = await readSqlCatalogue(dc);
-      if (!Array.isArray(data?.doctors) || !Array.isArray(data.branches) || data.doctors.length > 1000 || data.branches.length > 1000) throw new Error('Invalid provider directory.');
-      const matches = data.doctors.filter(row => row.legacyId === doctorId);
-      return matches.length === 1 && matches[0].active === true && data.branches.some(branch => branch.id === matches[0].branchId && branch.active === true);
-    },
     begin: async (context) => { await beginStaffAccessChange(dc, context); },
     finish: async (row, context) => {
       const { targetUid, ...audit } = context;

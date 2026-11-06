@@ -189,8 +189,8 @@ const About = () => (
       </section>
 
       <section className="mx-auto w-[min(1120px,calc(100%-2rem))] py-8" aria-label="More photos of Dr. Sood">
-        <div className="grid gap-5 sm:grid-cols-2">
-          {[doctorPortraitOne, doctorPortraitTwo].map((image, index) => <img key={image} src={image} alt={`Dr. Sood, portrait ${index + 1}`} loading="lazy" className="h-72 w-full rounded-2xl object-cover object-center shadow-sm" />)}
+        <div className="mx-auto grid max-w-4xl grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-6">
+          {[doctorPortraitOne, doctorPortraitTwo].map((image, index) => <figure key={image} className="mx-auto w-full max-w-[22rem] overflow-hidden rounded-2xl border border-[#dce8f5] bg-white shadow-sm"><img src={image} alt={`Dr. Sood, portrait ${index + 1}`} loading="lazy" className="block aspect-[3/4] w-full object-cover object-[center_28%]" /></figure>)}
         </div>
       </section>
 

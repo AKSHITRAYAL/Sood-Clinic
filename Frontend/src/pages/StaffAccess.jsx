@@ -2,10 +2,9 @@ import StaffLayout from '../components/StaffLayout';
 import { useEffect, useMemo, useState } from 'react';
 import { signOut } from 'firebase/auth';
 import { useStaffAccess } from '../lib/staffSessionContext';
-import { Navigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { auth } from '../lib/firebase';
 import { getSqlStaffDirectory, manageStaffAccess, requestStaffPasswordReset } from '../services/staffDirectoryService';
-import { getAdminCatalogue } from '../services/adminCatalogueService';
 import PasswordRequirements from '../components/PasswordRequirements';
 import ConfirmDialog from '../components/ConfirmDialog';
 
@@ -27,19 +26,6 @@ const StaffAccess = () => {
   const [nextCursor, setNextCursor] = useState(null);
   const [staffTotal, setStaffTotal] = useState(0);
   const [directoryLoading, setDirectoryLoading] = useState(false);
-  const [doctors, setDoctors] = useState([]);
-  const [doctorError, setDoctorError] = useState('');
-
-  useEffect(() => {
-    if (state !== 'allowed') return undefined;
-    let active = true;
-    getAdminCatalogue().then(catalogue => {
-      if (active) setDoctors(catalogue.doctors.filter(doctor => doctor.active && catalogue.branches.some(branch => branch.id === doctor.branchId && branch.active)));
-    }).catch(() => { if (active) setDoctorError('The active provider directory could not be loaded. Doctor access cannot be assigned until it is available.'); });
-    return () => { active = false; };
-  }, [state]);
-
-
   useEffect(() => {
     if (state !== 'allowed') return undefined;
     let active = true;
@@ -113,7 +99,7 @@ const StaffAccess = () => {
   if (state === 'denied') return <main className="staff-shell"><section className="workspace-gate"><p>STAFF ACCESS</p><h1>Administrator access required</h1><span>Your account is not authorised to manage staff accounts.</span><button type="button" className="staff-secondary-button" onClick={() => signOut(auth)}>Sign out</button></section></main>;
   if (state === 'checking') return <main className="staff-shell"><p className="workspace-status">Verifying administrator access…</p></main>;
 
-  const formFields = <><label>Full name<input value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} autoComplete="name" required /></label><label>Work email<input value={profile.email} disabled={panel !== 'create'} onChange={(event) => setProfile({ ...profile, email: event.target.value })} type="email" autoComplete="email" required /></label><label>Workspace role<select value={profile.role} onChange={(event) => setProfile({ ...profile, role: event.target.value, doctorId: event.target.value === 'doctor' ? profile.doctorId : '' })}>{roles.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</select></label>{profile.role === 'doctor' && <label>Doctor<select value={profile.doctorId} onChange={event => setProfile({ ...profile, doctorId: event.target.value })} required disabled={!doctors.length}><option value="">Select an active doctor</option>{profile.doctorId && !doctors.some(doctor => doctor.id === profile.doctorId) && <option value={profile.doctorId} disabled>Unavailable doctor ({profile.doctorId})</option>}{doctors.map(doctor => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}</select><small>{doctorError || 'Only active doctors in the SQL clinic catalogue can receive doctor access.'}</small></label>}</>;
+  const formFields = <><label>Full name<input value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} autoComplete="name" required /></label><label>Work email<input value={profile.email} disabled={panel !== 'create'} onChange={(event) => setProfile({ ...profile, email: event.target.value })} type="email" autoComplete="email" required /></label><label>Workspace role<select value={profile.role} onChange={(event) => setProfile({ ...profile, role: event.target.value, doctorId: event.target.value === 'doctor' ? profile.doctorId : '' })}>{roles.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</select></label>{profile.role === 'doctor' && <label>Doctor ID<input value={profile.doctorId} onChange={event => setProfile({ ...profile, doctorId: event.target.value })} required maxLength={80} autoComplete="off" /><small>First add the doctor under <Link to="/staff/admin/catalogue">Booking setup → Doctors</Link>, then enter that doctor’s ID here. This links the staff login to the SQL doctor record.</small></label>}</>;
 
   return <>
   <StaffLayout>

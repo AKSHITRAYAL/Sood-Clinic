@@ -16,7 +16,7 @@ function fixture() {
     setCustomUserClaims: vi.fn(async (uid, claims) => { users.get(uid).customClaims = claims; }),
     revokeRefreshTokens: vi.fn(async () => {}),
   };
-  const store = { doctorActive: vi.fn(async () => true), begin: vi.fn(async () => {}), finish: vi.fn(async () => {}), abort: vi.fn(async () => {}) };
+  const store = { begin: vi.fn(async () => {}), finish: vi.fn(async () => {}), abort: vi.fn(async () => {}) };
   return { users, auth, store, lifecycle: createStaffLifecycle({ auth, store, now: () => 100000 }) };
 }
 
@@ -28,15 +28,16 @@ test('staff changes write SQL metadata/audit and preserve trusted doctor scope',
   expect(store.finish.mock.calls[0][0]).toMatchObject({ uid: 'manager', role: 'doctor', doctorLegacyId: 'brig-ak-sood' });
   expect(store.finish.mock.calls[0][1]).toMatchObject({ action: 'staff_access_updated', actorUid: 'admin' });
 });
-test('a formatted but missing/inactive SQL provider is rejected before any Auth mutation', async () => {
-  const { lifecycle, store, auth } = fixture(); store.doctorActive.mockResolvedValue(false);
-  await expect(lifecycle.manage(request({ action: 'updateAccess', email: 'manager@example.test', displayName: 'Unlisted Doctor', role: 'doctor', doctorId: 'does-not-exist' }))).rejects.toMatchObject({ code: 'invalid-argument' });
-  expect(auth.updateUser).not.toHaveBeenCalled(); expect(auth.setCustomUserClaims).not.toHaveBeenCalled(); expect(store.begin).not.toHaveBeenCalled();
+test('administrator can assign a valid doctor scope that is not in the SQL catalogue', async () => {
+  const { lifecycle, auth, store } = fixture();
+  await lifecycle.manage(request({ action: 'updateAccess', email: 'manager@example.test', displayName: 'Unlisted Doctor', role: 'doctor', doctorId: 'new-provider-2026' }));
+  expect(auth.setCustomUserClaims).toHaveBeenCalledWith('manager', { role: 'doctor', doctorId: 'new-provider-2026', forcePasswordChange: false });
+  expect(store.begin).toHaveBeenCalledTimes(1);
 });
-test('provider activity is rechecked under the lifecycle lock before granting doctor access', async () => {
-  const { lifecycle, store, auth } = fixture(); store.doctorActive.mockResolvedValueOnce(true).mockResolvedValue(false);
-  await expect(lifecycle.manage(request({ action: 'updateAccess', email: 'manager@example.test', displayName: 'Inactive Doctor', role: 'doctor', doctorId: 'brig-ak-sood' }))).rejects.toMatchObject({ code: 'invalid-argument' });
-  expect(auth.updateUser).not.toHaveBeenCalled(); expect(auth.setCustomUserClaims).not.toHaveBeenCalled();
+test('doctor scope still requires a valid identifier before any mutation', async () => {
+  const { lifecycle, auth, store } = fixture();
+  await expect(lifecycle.manage(request({ action: 'updateAccess', email: 'manager@example.test', displayName: 'Invalid Doctor', role: 'doctor', doctorId: 'bad id' }))).rejects.toMatchObject({ code: 'invalid-argument' });
+  expect(auth.updateUser).not.toHaveBeenCalled(); expect(auth.setCustomUserClaims).not.toHaveBeenCalled(); expect(store.begin).not.toHaveBeenCalled();
 });
 test('administrator can provision a separate receptionist without clinical or administrator claims', async () => {
   const { lifecycle, auth, store } = fixture();

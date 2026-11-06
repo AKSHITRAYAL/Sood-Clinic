@@ -30,21 +30,23 @@ test('shows load failures with retry instead of pretending there are no reviews'
   render(<MemoryRouter><Reviews /></MemoryRouter>); await screen.findByText('Reviews unavailable');
   fireEvent.click(screen.getByText('Try again')); await screen.findByText(row.comment);
 });
-test('submits a public review by default for an owned completed visit', async () => {
+test('submits a public review without a publish toggle for an owned completed visit', async () => {
   api.user = { getIdTokenResult: async () => ({ claims: {} }) };
   api.own.mockResolvedValue({ reviews: [], nextCursor: null, visits: [{ id: 'completed-visit', at: '2026-11-01T05:00:00Z' }] });
-  api.submit.mockResolvedValue({ message: 'Awaiting moderation.' });
+  api.submit.mockResolvedValue({ message: 'Thank you. Your review is now public.' });
   render(<MemoryRouter initialEntries={['/reviews?appointment=completed-visit']}><Reviews /></MemoryRouter>);
   await screen.findByLabelText('Completed visit');
   const submit = screen.getByText('Send feedback');
-  const consent = screen.getByRole('checkbox'); expect(consent.checked).toBe(true);
+  expect(screen.queryByText(/Publish this review/i)).toBeNull();
   fireEvent.click(screen.getByRole('radio', { name: '4 stars' })); fireEvent.change(screen.getByLabelText(/Your experience/), { target: { value: 'The clinic explained the next steps clearly.' } });
   fireEvent.click(submit);
   await waitFor(() => expect(api.submit).toHaveBeenCalledWith({ appointmentId: 'completed-visit', rating: 4, comment: 'The clinic explained the next steps clearly.', publicConsent: true }));
 });
 
-test('lets a guest submit with a required name and phone contact', async () => {
-  api.submit.mockResolvedValue({ message: 'Awaiting moderation.' });
+test('publishes a named guest review and displays the submitted author name', async () => {
+  const namedReview = { ...row, id: 'guest-review', authorLabel: 'A Patient', verifiedVisit: false };
+  api.list.mockResolvedValueOnce({ ...result, reviews: [] }).mockResolvedValueOnce({ ...result, reviews: [namedReview] });
+  api.submit.mockResolvedValue({ message: 'Thank you. Your review is now public.' });
   render(<MemoryRouter><Reviews /></MemoryRouter>);
   await screen.findByRole('heading', { name: 'Write a review' });
   fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'A Patient' } });
@@ -53,6 +55,8 @@ test('lets a guest submit with a required name and phone contact', async () => {
   fireEvent.change(screen.getByLabelText(/Your experience/), { target: { value: 'The clinic explained the next steps clearly.' } });
   fireEvent.click(screen.getByText('Send feedback'));
   await waitFor(() => expect(api.submit).toHaveBeenCalledWith(expect.objectContaining({ name: 'A Patient', anonymous: false, contactPhone: '9877853935', contactEmail: '' })));
+  expect(api.submit).toHaveBeenCalledWith(expect.objectContaining({ publicConsent: true }));
+  await screen.findByText('A Patient');
 });
 
 test('anonymous checkbox disables name and email alone is sufficient', async () => {
@@ -61,6 +65,7 @@ test('anonymous checkbox disables name and email alone is sufficient', async () 
   await screen.findByRole('heading', { name: 'Write a review' });
   fireEvent.click(screen.getByRole('checkbox', { name: 'Give an anonymous review' }));
   expect(screen.getByLabelText(/^Name/).disabled).toBe(true);
+  expect(screen.queryByText(/Publish this review/i)).toBeNull();
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'patient@example.com' } });
   fireEvent.click(screen.getByRole('radio', { name: '5 stars' }));
   fireEvent.change(screen.getByLabelText(/Your experience/), { target: { value: 'The clinic explained the next steps clearly.' } });
