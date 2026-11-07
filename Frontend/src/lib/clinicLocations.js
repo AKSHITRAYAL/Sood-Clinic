@@ -1,6 +1,11 @@
 export const doctorName = 'Brig (Dr) A.K. Sood, VSM (Retd)';
 export const appointmentPhone = '+91 89882 07797';
-export const doctorEmail = 'Atulsooddr@gmail.com';
+export const doctorEmail = 'contact@draksoodgastrocare.com';
+export const clinicPhones = [
+  { display: '+91 98778 53935', tel: '+919877853935' },
+  { display: '+91 98559 86743', tel: '+919855986743' },
+  { display: '+91 89882 07797', tel: '+918988207797' },
+];
 
 export const clinicLocations = [
   {
