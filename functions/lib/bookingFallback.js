@@ -45,7 +45,7 @@ function publishedVisitTypes(value) {
     seen.add(id);
     const label = text(row.label, 100);
     if (!label || !Number.isInteger(row.minutes) || row.minutes < 5 || row.minutes > 240 || !['in_person', 'video'].includes(row.mode)) throw unavailable();
-    return { id, label, minutes: row.minutes, mode: row.mode, active: row.active !== false };
+    return { id, label, minutes: 15, mode: row.mode, active: row.active !== false };
   });
 }
 
@@ -74,7 +74,7 @@ function firestoreConfig(published) {
   return {
     bookingWindowDays: integer(config.bookingWindowDays, 1, 90, DEFAULT_CONFIG.bookingWindowDays),
     leadMinutes: integer(config.leadMinutes, 0, 1440, DEFAULT_CONFIG.leadMinutes),
-    intervalMinutes: integer(config.intervalMinutes, 5, 240, DEFAULT_CONFIG.intervalMinutes),
+    intervalMinutes: 15,
     bufferBeforeMinutes: integer(config.bufferBeforeMinutes, 0, 120, DEFAULT_CONFIG.bufferBeforeMinutes),
     bufferAfterMinutes: integer(config.bufferAfterMinutes, 0, 120, DEFAULT_CONFIG.bufferAfterMinutes),
     cancelCutoffMinutes: cutoffHours * 60,

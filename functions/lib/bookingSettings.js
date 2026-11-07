@@ -1,7 +1,7 @@
 const { createHash } = require('node:crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { requireLiveAdmin } = require('./staffAuthorization');
-const ranges = { bookingWindowDays: [1, 90], leadMinutes: [0, 1440], intervalMinutes: [5, 240], bufferBeforeMinutes: [0, 120], bufferAfterMinutes: [0, 120], cancelCutoffMinutes: [0, 10080] };
+const ranges = { bookingWindowDays: [1, 90], leadMinutes: [0, 1440], intervalMinutes: [15, 15], bufferBeforeMinutes: [0, 120], bufferAfterMinutes: [0, 120], cancelCutoffMinutes: [0, 10080] };
 const invalid = () => new HttpsError('invalid-argument', 'Provide valid whole-number booking settings and appointment format details.');
 const incomplete = () => new HttpsError('failed-precondition', 'Booking settings need initialization or service identity/buffer review before use.');
 const stale = () => new HttpsError('aborted', 'Booking configuration changed. Reload the latest settings and formats before saving.');
@@ -40,14 +40,16 @@ function canonicalUuid(value) {
 function projectBookingSettings(raw) {
   try {
     if (!raw?.clinicSettings || raw.clinicSettings.id !== 'primary' || !Array.isArray(raw.services) || raw.services.length < 1 || raw.services.length > 12) throw incomplete();
-    const settings = validateSettings(Object.fromEntries([...Object.keys(ranges), 'autoConfirm'].map(key => [key, raw.clinicSettings[key]])));
+    if (!Number.isInteger(raw.clinicSettings.intervalMinutes) || raw.clinicSettings.intervalMinutes < 5 || raw.clinicSettings.intervalMinutes > 240) throw incomplete();
+    const settings = validateSettings(Object.fromEntries([...Object.keys(ranges), 'autoConfirm'].map(key => [key, key === 'intervalMinutes' ? 15 : raw.clinicSettings[key]])));
     version(raw.clinicSettings.updatedAt);
     const ids = new Set(); const aliases = new Set();
     const services = raw.services.map(row => {
       const id = canonicalUuid(row.id);
       if (ids.has(id) || aliases.has(row.legacyId) || row.code !== row.legacyId || row.bufferMinutes !== 0 || !Number.isInteger(row.legacySortOrder) || row.legacySortOrder < 0 || row.legacySortOrder > 2147483647) throw incomplete();
       ids.add(id); aliases.add(row.legacyId); version(row.updatedAt);
-      return { ...validateFormat({ id: row.legacyId, label: row.name, minutes: row.durationMinutes, mode: row.consultationMode, active: row.active }), order: row.legacySortOrder };
+      if (!Number.isInteger(row.durationMinutes) || row.durationMinutes < 5 || row.durationMinutes > 240) throw incomplete();
+      return { ...validateFormat({ id: row.legacyId, label: row.name, minutes: 15, mode: row.consultationMode, active: row.active }), order: row.legacySortOrder };
     }).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
     if (!services.some(row => row.active)) throw incomplete();
     return { settings, updatedAt: raw.clinicSettings.updatedAt, visitTypes: services.map(({ order, ...row }) => row) };
@@ -72,6 +74,7 @@ function createBookingSettings({ auth, store }) {
     if (typeof input.requestId !== 'string' || !uuidPattern.test(input.requestId)) throw invalid();
     const expectedUpdatedAt = version(input.expectedUpdatedAt);
     const payload = kind === 'settings' ? validateSettings(input.settings) : validateFormat(input.record);
+    if (kind === 'service' && payload.minutes !== 15) throw invalid();
     const requestId = input.requestId.toLowerCase();
     const operation = `booking_${kind}:${createHash('sha256').update(JSON.stringify({ actorUid: actor.uid, requestId, expectedUpdatedAt, payload })).digest('hex')}`;
     const intent = { actorUid: actor.uid, requestId, operation, expectedUpdatedAt };

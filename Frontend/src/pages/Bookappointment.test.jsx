@@ -64,7 +64,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 test('an in-person booking submits the chosen location, day and time and confirms it', async () => {
-  mocks.submitConsultationRequest.mockResolvedValue({ data: { reference: 'CR-TEST01', accessToken: 'token-123' } });
+  mocks.submitConsultationRequest.mockResolvedValue({ data: { reference: 'CR-TEST01', status: 'confirmed', accessToken: 'token-123' } });
   await openDetails();
   fireEvent.click(screen.getByText('Confirm appointment'));
 
@@ -90,7 +90,7 @@ test('an in-person booking submits the chosen location, day and time and confirm
 });
 
 test('a video booking uses the shared calendar and confirms the chosen time', async () => {
-  mocks.submitConsultationRequest.mockResolvedValue({ data: { reference: 'CR-VIDEO1', accessToken: 'token-video' } });
+  mocks.submitConsultationRequest.mockResolvedValue({ data: { reference: 'CR-VIDEO1', status: 'confirmed', accessToken: 'token-video' } });
   renderPage();
   await screen.findByLabelText('Consultation type');
   fireEvent.change(screen.getByLabelText('Consultation type'), { target: { value: 'video' } });
@@ -149,4 +149,13 @@ test('the availability read is retried for a different location', async () => {
   await waitFor(() => expect(mocks.getConsultationAvailability).toHaveBeenLastCalledWith(expect.objectContaining({
     locationId: 'dhawan-hospital',
   })));
+});
+
+
+test('a pending request is never presented as confirmed', async () => {
+  mocks.submitConsultationRequest.mockResolvedValue({ data: { reference: 'CR-PENDING', status: 'pending' } });
+  await openDetails();
+  fireEvent.click(screen.getByText('Confirm appointment'));
+  await screen.findByText('Request submitted.');
+  expect(screen.queryByText('Appointment confirmed.')).toBeNull();
 });

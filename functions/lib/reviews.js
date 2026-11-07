@@ -61,25 +61,22 @@ function createReviews({ db, auth }) {
   async function submit(request) {
     const staffSubmission = Boolean(request.auth?.uid && request.auth.token?.role && request.auth.token.role !== 'patient');
     const authenticated = Boolean(request.auth?.uid) && !staffSubmission; const uid = authenticated ? await account(request, true) : null;
-    const data = input(request, ['appointmentId', 'contactPhone', 'contactEmail', 'name', 'anonymous', 'rating', 'comment', 'publicConsent', 'version']);
+    const data = input(request, ['appointmentId', 'feedbackId', 'contactPhone', 'contactEmail', 'name', 'anonymous', 'rating', 'comment', 'publicConsent', 'version']);
     const comment = text(data.comment, 10, 2000);
     if (!Number.isInteger(data.rating) || data.rating < 1 || data.rating > 5 || typeof data.publicConsent !== 'boolean') throw fail('invalid-argument', 'Choose 1–5 stars and your sharing preference.');
-    let appointmentId = authenticated ? id(data.appointmentId) : '';
-    const anonymous = !authenticated && data.anonymous === true;
-    const authorName = !authenticated && !anonymous ? text(data.name, 1, 100) : '';
-    let guestContactKey = '';
-    let verifiedVisit = authenticated;
-    if (!authenticated) {
-      // Guest feedback is never classified as a verified visit.
-      const phoneInput = typeof data.contactPhone === 'string' ? data.contactPhone.trim() : '';
-      const phone = phoneInput ? toE164(phoneInput) : null;
-      if (phoneInput && !phone) throw fail('invalid-argument', 'Enter a valid Indian phone number.');
-      const email = typeof data.contactEmail === 'string' ? data.contactEmail.trim().toLowerCase() : '';
-      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw fail('invalid-argument', 'Enter a valid email address.');
-      if (!phone && !email) throw fail('invalid-argument', 'Enter a phone number or email address for follow-up.');
-      guestContactKey = `${phone || ''}|${email}`;
-    }
-    const ref = appointmentId ? reviews.doc(appointmentId) : reviews.doc();
+    const appointmentId = authenticated && data.appointmentId ? id(data.appointmentId) : '';
+    const feedbackId = authenticated && data.feedbackId ? id(data.feedbackId) : '';
+    const anonymous = data.anonymous === true;
+    const authorName = anonymous ? '' : text(data.name, 1, 100);
+    const phoneInput = typeof data.contactPhone === 'string' ? data.contactPhone.trim() : '';
+    const phone = phoneInput ? toE164(phoneInput) : null;
+    if (phoneInput && !phone) throw fail('invalid-argument', 'Enter a valid Indian phone number.');
+    const email = typeof data.contactEmail === 'string' ? data.contactEmail.trim().toLowerCase() : '';
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw fail('invalid-argument', 'Enter a valid email address.');
+    if (!phone && !email) throw fail('invalid-argument', 'Enter a phone number or email address for follow-up.');
+    const guestContactKey = `${phone || ''}|${email}`;
+    const verifiedVisit = Boolean(appointmentId);
+    const ref = appointmentId ? reviews.doc(appointmentId) : feedbackId ? reviews.doc(feedbackId) : reviews.doc();
     await db.runTransaction(async tx => {
       const [appointment, existing] = await Promise.all([
         appointmentId ? tx.get(db.collection('appointments').doc(appointmentId)) : Promise.resolve(null),
@@ -92,7 +89,7 @@ function createReviews({ db, auth }) {
       const quotaKey = uid || `guest_${crypto.createHash('sha256').update(guestContactKey).digest('hex').slice(0, 32)}`; const useQuota = await quota(tx, quotaKey, 'author', authenticated ? 20 : 3);
       const version = old ? versionOf(old) + 1 : 1; const now = FieldValue.serverTimestamp();
       const status = data.publicConsent === true ? 'published' : 'unpublished';
-      tx.set(ref, { appointmentId, patientId: uid, ...(authenticated ? {} : { authorName: anonymous ? null : authorName, anonymous }), rating: data.rating, comment, publicConsent: data.publicConsent,
+      tx.set(ref, { appointmentId: appointmentId || null, patientId: uid, authorName: anonymous ? null : authorName, anonymous, rating: data.rating, comment, publicConsent: data.publicConsent,
         consentAt: now, status, publishedAt: status === 'published' ? now : null, version, updatedAt: now, publicComment: null, featuredRank: null,
         verifiedVisit, source: authenticated ? 'patient_portal' : 'public_feedback', searchTokens: tokens(comment), ...(old ? {} : { createdAt: now, helpfulCount: 0, reportCount: 0 }) }, { merge: true });
       record(tx, ref, request, old ? 'edited' : 'submitted', version, old ? { comment: old.comment, rating: old.rating, publicConsent: old.publicConsent === true } : null, { role: authenticated ? 'patient' : 'guest' });
@@ -105,7 +102,7 @@ function createReviews({ db, auth }) {
     let query = reviews.where('patientId', '==', uid).orderBy('createdAt', 'desc').orderBy(FieldPath.documentId(), 'desc');
     if (data.cursor) { const after = await reviews.doc(id(data.cursor)).get(); if (!after.exists || after.get('patientId') !== uid) throw fail('invalid-argument', 'Reload your reviews.'); query = query.startAfter(after); }
     const [rows, visits] = await Promise.all([query.limit(21).get(), db.collection('appointments').where('patientId', '==', uid).where('status', '==', 'completed').orderBy('startsAt', 'desc').limit(30).get()]);
-    return { reviews: rows.docs.slice(0, 20).map(doc => ({ id: doc.id, rating: doc.get('rating'), comment: doc.get('comment'), publicConsent: doc.get('publicConsent') === true, status: doc.get('status'), version: versionOf(doc.data()), createdAt: instant(doc.get('createdAt')) })),
+    return { reviews: rows.docs.slice(0, 20).map(doc => ({ id: doc.id, appointmentId: doc.get('appointmentId') || '', rating: doc.get('rating'), comment: doc.get('comment'), authorName: doc.get('authorName') || '', anonymous: doc.get('anonymous') === true, publicConsent: doc.get('publicConsent') === true, status: doc.get('status'), version: versionOf(doc.data()), createdAt: instant(doc.get('createdAt')) })),
       nextCursor: rows.size > 20 ? rows.docs[19].id : null,
       visits: visits.docs.map(doc => ({ id: doc.id, at: instant(doc.get('startsAt')) })) };
   }

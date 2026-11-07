@@ -48,7 +48,7 @@ const RescheduleDialog = ({ open, appointment, onClose, onDone }) => {
     if (requestRef.current) return;
     if (!appointment?.id) { setMessage('Choose an appointment before rescheduling.'); return; }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) { setMessage('Choose a valid clinic date.'); return; }
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) { setMessage('Enter the new time as HH:mm in IST.'); return; }
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time) || Number(time.slice(-2)) % 15 !== 0) { setMessage('Choose a time on a 15-minute boundary in IST.'); return; }
     const request = {};
     requestRef.current = request;
     setBusy(true);
@@ -72,7 +72,7 @@ const RescheduleDialog = ({ open, appointment, onClose, onDone }) => {
         <p>Choose a free clinic time. The patient keeps the same reference number and does not retype their details.</p>
         <form onSubmit={submit} noValidate>
           <label>New clinic date<input ref={firstField} type="date" value={dateKey} min={istDateKey()} onChange={(event) => setDateKey(event.target.value)} /></label>
-          <label>New time (IST)<input type="time" value={time} onChange={(event) => setTime(event.target.value)} required /></label>
+          <label>New time (IST)<input type="time" step="900" value={time} onChange={(event) => setTime(event.target.value)} required /></label>
           {message && <small role="alert">{message}</small>}
           <div className="confirm-dialog__actions">
             <button type="button" className="staff-secondary-button" onClick={() => closeRef.current?.()} disabled={busy}>Keep current time</button>

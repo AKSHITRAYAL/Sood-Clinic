@@ -66,7 +66,7 @@ const buildAvailability = ({
   dateKey,
   weeklySessions,
   exception,
-  durationMinutes = 20,
+  durationMinutes = 15,
   intervalMinutes = durationMinutes,
   bufferBeforeMinutes = 0,
   bufferAfterMinutes = 0,

@@ -4,7 +4,9 @@ import { useStaffAccess } from '../lib/staffSessionContext';
 import { istDateKey, toIstParts } from '../lib/ist';
 import { patientName, patientPhone } from '../lib/time';
 import { getAppointmentActions } from '../lib/appointmentActions';
+import { canStaffRescheduleAppointment } from '../lib/appointmentState';
 import { listStaffAppointments, transitionAppointment } from '../services/appointmentService';
+import RescheduleDialog from '../components/RescheduleDialog';
 import './staffAppointments.css';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -24,7 +26,7 @@ const formatTime = (value) => new Date(value).toLocaleTimeString('en-IN', {
 });
 
 export default function StaffAppointments() {
-  const { role, state } = useStaffAccess();
+  const { role, doctorId, state } = useStaffAccess();
   const today = useMemo(() => istDateKey(), []);
   const [selectedDate, setSelectedDate] = useState(today);
   const [calendarMonth, setCalendarMonth] = useState(() => {
@@ -39,6 +41,8 @@ export default function StaffAppointments() {
   const [revision, setRevision] = useState(0);
   const [savingId, setSavingId] = useState('');
   const [actionError, setActionError] = useState('');
+  const [actionNotice, setActionNotice] = useState('');
+  const [reschedule, setReschedule] = useState(null);
 
   const cells = useMemo(() => {
     const { year, month } = calendarMonth;
@@ -174,6 +178,7 @@ export default function StaffAppointments() {
 
             {error && <p className="staff-appointments__message is-error" role="alert">{error}</p>}
             {actionError && <p className="staff-appointments__message is-error" role="alert">{actionError}</p>}
+            {actionNotice && <p className="staff-appointments__message" role="status">{actionNotice}</p>}
             {loading && <p className="staff-appointments__message" role="status">Loading appointments…</p>}
             {!loading && !error && appointments.length === 0 && <p className="staff-appointments__message" role="status">No appointments are scheduled for this date.</p>}
 
@@ -190,7 +195,7 @@ export default function StaffAppointments() {
                         <small>{appointment.reference || 'No reference'} · {appointment.visitMode === 'video' ? 'Video consultation' : 'In-clinic visit'}</small>
                       </div>
                       <span className={`staff-appointments__status staff-appointments__status--${appointment.status}`}>{appointment.status.replaceAll('_', ' ')}</span>
-                      {getAppointmentActions(appointment, role, today).length > 0 && (
+                      {(getAppointmentActions(appointment, role, today).length > 0 || canStaffRescheduleAppointment(appointment, role, doctorId)) && (
                         <div className="staff-appointments__appointment-actions" aria-label={`Actions for ${appointment.reference || 'appointment'}`}>
                           {getAppointmentActions(appointment, role, today).map((action) => (
                             <button key={action.to} type="button" disabled={savingId === appointment.id}
@@ -198,6 +203,7 @@ export default function StaffAppointments() {
                               {savingId === appointment.id ? 'Saving…' : action.label}
                             </button>
                           ))}
+                          {canStaffRescheduleAppointment(appointment, role, doctorId) && <button type="button" onClick={() => { setActionNotice(''); setReschedule(appointment); }}>Reschedule</button>}
                         </div>
                       )}
                     </article>
@@ -213,6 +219,12 @@ export default function StaffAppointments() {
           </section>
         </div>
       </main>
+      <RescheduleDialog
+        open={Boolean(reschedule)}
+        appointment={reschedule}
+        onClose={() => setReschedule(null)}
+        onDone={(message) => { setReschedule(null); setActionNotice(message); setRevision((value) => value + 1); }}
+      />
     </StaffLayout>
   );
 }

@@ -9,7 +9,7 @@ import { getBookingSettings, saveBookingSettings } from '../services/bookingSett
 const fresh = () => ({ id: '', label: '', minutes: 15, mode: 'in_person', active: true });
 const policyFields = [
   ['bookingWindowDays', 'Booking window (days)', 1, 90], ['leadMinutes', 'Minimum notice (minutes)', 0, 1440],
-  ['intervalMinutes', 'Time-slot interval (minutes)', 5, 240], ['bufferBeforeMinutes', 'Buffer before visits (minutes)', 0, 120],
+  ['bufferBeforeMinutes', 'Buffer before visits (minutes)', 0, 120],
   ['bufferAfterMinutes', 'Buffer after visits (minutes)', 0, 120], ['cancelCutoffMinutes', 'Cancellation / rescheduling cutoff (minutes)', 0, 10080],
 ];
 
@@ -47,8 +47,8 @@ const AdminVisitTypes = () => {
     } catch (caught) { setError(caught?.message || 'Save could not be confirmed. Retry unchanged details or reload.'); }
     finally { setBusy(false); }
   };
-  const saveFormat = event => { event.preventDefault(); commit('service', { ...draft, id: editingId || draft.id.trim(), minutes: Number(draft.minutes) }); };
-  const savePolicy = event => { event.preventDefault(); commit('settings', policy); };
+  const saveFormat = event => { event.preventDefault(); commit('service', { ...draft, id: editingId || draft.id.trim(), minutes: 15 }); };
+  const savePolicy = event => { event.preventDefault(); commit('settings', { ...policy, intervalMinutes: 15 }); };
   const edit = item => { setDraft({ ...item }); setEditingId(item.id); setNotice(''); setError(''); };
 
   if (access === 'signed-out') return <Navigate to="/staff/login" replace />;
@@ -63,20 +63,20 @@ const AdminVisitTypes = () => {
       {config && <>
         <form className="admin-panel admin-form catalogue-editor" onSubmit={savePolicy}>
           <h2>Booking policy</h2><p>Save or discard changes in one form before editing the other.</p>
-          <div className="patient-form__grid">{policyFields.map(([key, label, min, max]) => <label key={key}>{label}<input type="number" min={min} max={max} step="1" required disabled={unavailable || formatDirty} value={policy[key]} onChange={event => setPolicy(current => ({ ...current, [key]: event.target.value === '' ? '' : Number(event.target.value) }))} /></label>)}</div>
+          <div className="patient-form__grid"><label>Appointment slot interval<input type="number" value="15" readOnly aria-readonly="true" /></label>{policyFields.map(([key, label, min, max]) => <label key={key}>{label}<input type="number" min={min} max={max} step="1" required disabled={unavailable || formatDirty} value={policy[key]} onChange={event => setPolicy(current => ({ ...current, [key]: event.target.value === '' ? '' : Number(event.target.value) }))} /></label>)}</div>
           <p className="booking-field-hint">New public requests always remain pending until a staff member reviews and confirms them. Automatic approval is disabled.</p>
           <button type="submit" disabled={unavailable || formatDirty || !policyDirty}>{busy ? 'Saving…' : 'Save booking policy'}</button>
         </form>
         <section className="admin-catalogue__grid">
           <section className="admin-panel catalogue-directory"><div className="admin-panel__head"><div><p className="section-kicker">Available formats</p><h2>{visitTypes.length} retained format{visitTypes.length === 1 ? '' : 's'}</h2></div><button type="button" className="staff-secondary-button" disabled={unavailable || policyDirty} onClick={reset}>New format</button></div>
-            <ul>{visitTypes.map(item => <li key={item.id}><div><strong>{item.label}</strong><span>{item.mode === 'video' ? 'Online video consultation' : 'In-clinic consultation'} · {item.minutes} minutes</span><small>{item.active ? 'Available to patients' : 'Hidden from public booking'}</small></div><div className="staff-directory__actions"><button type="button" disabled={unavailable || policyDirty} onClick={() => edit(item)}>Edit</button><button type="button" className="staff-secondary-button" disabled={unavailable || policyDirty || formatDirty} onClick={() => commit('service', { ...item, active: !item.active })}>{item.active ? 'Hide' : 'Enable'}</button></div></li>)}</ul>
+            <ul>{visitTypes.map(item => <li key={item.id}><div><strong>{item.label}</strong><span>{item.mode === 'video' ? 'Online video consultation' : 'In-clinic consultation'} · 15 minutes</span><small>{item.active ? 'Available to patients' : 'Hidden from public booking'}</small></div><div className="staff-directory__actions"><button type="button" disabled={unavailable || policyDirty} onClick={() => edit({ ...item, minutes: 15 })}>Edit</button><button type="button" className="staff-secondary-button" disabled={unavailable || policyDirty || formatDirty} onClick={() => commit('service', { ...item, minutes: 15, active: !item.active })}>{item.active ? 'Hide' : 'Enable'}</button></div></li>)}</ul>
           </section>
           <form className="admin-panel admin-form catalogue-editor" onSubmit={saveFormat}>
             <div><p className="section-kicker">{editingId ? 'Edit format' : 'New format'}</p><h2>{editingId ? draft.label || editingId : 'Add an appointment format'}</h2><span>Keep at least one active format. Hide old formats instead of deleting them; use a new ID for a different delivery mode. No video room is created automatically.</span></div>
             <label>Format ID<input value={draft.id} disabled={unavailable || policyDirty || Boolean(editingId)} onChange={event => setDraft({ ...draft, id: event.target.value })} required maxLength={80} pattern="[a-z][a-z0-9_-]{1,79}" placeholder="e.g. video-consultation" /></label>
             <label>Patient-facing label<input value={draft.label} disabled={unavailable || policyDirty} onChange={event => setDraft({ ...draft, label: event.target.value })} required maxLength={100} /></label>
             <label>Appointment delivery<select value={draft.mode} disabled={unavailable || policyDirty || Boolean(editingId)} onChange={event => setDraft({ ...draft, mode: event.target.value })}><option value="in_person">In-clinic</option><option value="video">Online video</option></select></label>
-            <label>Duration (minutes)<input type="number" min="5" max="240" step="1" disabled={unavailable || policyDirty} value={draft.minutes} onChange={event => setDraft({ ...draft, minutes: event.target.value })} required /></label>
+            <label>Duration (minutes)<input type="number" value="15" readOnly aria-readonly="true" /></label>
             <label className="catalogue-check"><input type="checkbox" disabled={unavailable || policyDirty} checked={draft.active} onChange={event => setDraft({ ...draft, active: event.target.checked })} /> Available in public booking</label>
             <div className="staff-access__actions"><button type="button" className="staff-secondary-button" disabled={busy} onClick={reset}>Cancel</button><button type="submit" disabled={unavailable || policyDirty}>{busy ? 'Saving…' : 'Save format'}</button></div>
           </form>
