@@ -136,12 +136,13 @@ suite('verified patient reviews', () => {
     await expect(call('getFeedbackModerationQueue')).rejects.toMatchObject({ code: 'functions/permission-denied' });
     await login('doctor'); await expect(call('getFeedbackModerationQueue')).rejects.toMatchObject({ code: 'functions/permission-denied' });
   }, 30_000);
-  it('limits the receptionist role to operational coordination without clinical intake', async () => {
+  it('limits receptionists to feedback and account access', async () => {
     await login('receptionist');
     expect((await call('getStaffSession')).role).toBe('receptionist');
     await call('getFeedbackModerationQueue');
-    await expect(call('listStaffAppointments', { dateKey: '2026-11-03' })).resolves.toMatchObject({ appointments: [] });
-    await expect(call('listConsultationRequests', {})).resolves.toMatchObject({ requests: [] });
+    await expect(call('listStaffAppointments', { dateKey: '2026-11-03' })).rejects.toMatchObject({ code: 'functions/permission-denied' });
+    await expect(call('listConsultationRequests', {})).rejects.toMatchObject({ code: 'functions/permission-denied' });
+    await expect(call('rescheduleAppointment', { appointmentId: 'missing', dateKey: '2026-11-03', time: '10:00' })).rejects.toMatchObject({ code: 'functions/permission-denied' });
     for (const [name, data] of [['getVideoConsultationQueue', {}], ['getSqlStaffDirectory', {}], ['registerPatient', {}], ['transitionAppointment', { appointmentId: 'missing', to: 'completed' }]]) {
       await expect(call(name, data)).rejects.toMatchObject({ code: 'functions/permission-denied' });
     }

@@ -3,7 +3,7 @@ import { expect, test, vi } from 'vitest';
 const require = createRequire(import.meta.url);
 const { createBookingSettings, projectBookingSettings, selectVisitType } = require('../lib/bookingSettings');
 const at = '2026-10-20T00:00:00.123456Z';
-const settings = { bookingWindowDays: 14, leadMinutes: 30, intervalMinutes: 20, bufferBeforeMinutes: 0, bufferAfterMinutes: 0, cancelCutoffMinutes: 120, autoConfirm: false };
+const settings = { bookingWindowDays: 14, leadMinutes: 30, intervalMinutes: 15, bufferBeforeMinutes: 0, bufferAfterMinutes: 0, cancelCutoffMinutes: 120, autoConfirm: false };
 const service = { id: '00000000000040008000000000000004', legacyId: 'consultation', code: 'consultation', name: 'Clinic consultation', durationMinutes: 20, bufferMinutes: 0, consultationMode: 'in_person', active: true, legacySortOrder: 0, updatedAt: at, feePaise: null };
 const rows = () => ({ clinicSettings: { ...settings, id: 'primary', updatedAt: at }, services: [service] });
 const request = data => ({ auth: { uid: 'admin', token: { role: 'admin', auth_time: 100 } }, data });
@@ -14,7 +14,7 @@ const fixture = () => {
   return { auth, store, api: createBookingSettings({ auth, store }) };
 };
 test('SQL settings preserve minute precision and public format identities without publishing fees or SQL IDs', () => {
-  expect(projectBookingSettings(rows())).toEqual({ settings, updatedAt: at, visitTypes: [{ id: 'consultation', label: 'Clinic consultation', minutes: 20, mode: 'in_person', active: true }] });
+  expect(projectBookingSettings(rows())).toEqual({ settings, updatedAt: at, visitTypes: [{ id: 'consultation', label: 'Clinic consultation', minutes: 15, mode: 'in_person', active: true }] });
 });
 test('incomplete/unmapped/invalid settings or services fail closed without inventing runtime defaults', () => {
   for (const raw of [{ ...rows(), clinicSettings: null }, { ...rows(), clinicSettings: { ...rows().clinicSettings, intervalMinutes: null } }, { ...rows(), services: [{ ...service, legacyId: null }] }, { ...rows(), services: [{ ...service, bufferMinutes: 5 }] }, { ...rows(), services: [{ ...service, active: false }] }, { ...rows(), services: Array(13).fill(service) }]) expect(() => projectBookingSettings(raw)).toThrow();
@@ -41,7 +41,7 @@ test('settings save binds payload/actor receipt and retry reconciles lost respon
 });
 test('formats cannot remove the last active option, change delivery mode or overwrite an old config revision', async () => {
   const { api, store } = fixture();
-  const record = { id: 'consultation', label: 'Clinic consultation', minutes: 20, mode: 'in_person', active: false };
+  const record = { id: 'consultation', label: 'Clinic consultation', minutes: 15, mode: 'in_person', active: false };
   const input = { requestId: intent().requestId, expectedUpdatedAt: at, record };
   await expect(api.saveService(request(input))).rejects.toMatchObject({ code: 'failed-precondition' });
   await expect(api.saveService(request({ ...input, record: { ...record, active: true, mode: 'video' } }))).rejects.toMatchObject({ code: 'failed-precondition' });

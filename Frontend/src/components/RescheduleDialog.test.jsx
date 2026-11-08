@@ -17,20 +17,20 @@ afterEach(cleanup);
 test('a blank or malformed time never reaches the server', async () => {
   renderDialog();
   fireEvent.click(screen.getByText('Reschedule'));
-  await screen.findByText('Enter the new time as HH:mm in IST.');
+  await screen.findByText('Choose a time on a 15-minute boundary in IST.');
   expect(mocks.rescheduleStaffAppointment).not.toHaveBeenCalled();
 });
 
 test('submitting sends the appointment id, the chosen date and the IST time', async () => {
-  mocks.rescheduleStaffAppointment.mockResolvedValue({ data: { dateKey: '2026-10-25', time: '09:20', status: 'scheduled' } });
+  mocks.rescheduleStaffAppointment.mockResolvedValue({ data: { dateKey: '2026-10-25', time: '09:15', status: 'scheduled' } });
   const onDone = vi.fn();
   renderDialog({ onDone });
   fireEvent.change(screen.getByLabelText('New clinic date'), { target: { value: '2026-10-25' } });
-  fireEvent.change(screen.getByLabelText('New time (IST)'), { target: { value: '09:20' } });
+  fireEvent.change(screen.getByLabelText('New time (IST)'), { target: { value: '09:15' } });
   fireEvent.click(screen.getByText('Reschedule'));
 
-  await waitFor(() => expect(onDone).toHaveBeenCalledWith('Appointment moved to 2026-10-25 at 09:20. The patient keeps the same reference.'));
-  expect(mocks.rescheduleStaffAppointment).toHaveBeenCalledWith('apt-1', '2026-10-25', '09:20');
+  await waitFor(() => expect(onDone).toHaveBeenCalledWith('Appointment moved to 2026-10-25 at 09:15. The patient keeps the same reference.'));
+  expect(mocks.rescheduleStaffAppointment).toHaveBeenCalledWith('apt-1', '2026-10-25', '09:15');
   expect(Object.keys(mocks.rescheduleStaffAppointment.mock.calls[0])).toHaveLength(3);
 });
 

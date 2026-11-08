@@ -145,22 +145,23 @@ test('booking formats preserve legacy IDs/fees, create no doctor offerings, and 
   const offeringCount = (await sql.query('SELECT count(*)::int n FROM clinic_doctor_services')).rows[0].n;
   await sql.query("UPDATE clinic_services SET fee_paise=12345 WHERE code='consultation'");
   const initial = await read(); const consultation = initial.visitTypes[0];
-  await format({ id: 'synthetic-video', label: 'Synthetic video consultation', minutes: 30, mode: 'video', active: true });
-  await format({ ...consultation, minutes: 25, active: false });
+  await assert.rejects(format({ id: 'synthetic-video', label: 'Synthetic video consultation', minutes: 30, mode: 'video', active: true }), error => error.code === 'invalid-argument');
+  await format({ id: 'synthetic-video', label: 'Synthetic video consultation', minutes: 15, mode: 'video', active: true });
+  await format({ ...consultation, minutes: 15, active: false });
   assert.equal((await sql.query("SELECT fee_paise FROM clinic_services WHERE code='consultation'")).rows[0].fee_paise, 12345);
   const runtime = await api.runtime();
   assert.throws(() => selectVisitType(runtime, 'consultation'));
   assert.throws(() => selectVisitType(runtime));
-  assert.equal(selectVisitType(runtime, 'synthetic-video').minutes, 30);
+  assert.equal(selectVisitType(runtime, 'synthetic-video').minutes, 15);
   assert.equal((await sql.query('SELECT count(*)::int n FROM clinic_doctor_services')).rows[0].n, offeringCount);
   await assert.rejects(format({ ...consultation, mode: 'video', active: true }), error => error.code === 'failed-precondition');
   await assert.rejects(format({ ...runtime.visitTypes.find(row => row.id === 'synthetic-video'), active: false }), error => error.code === 'failed-precondition');
 }));
 
 test('booking settings and format edits share one optimistic revision and concurrent hide cannot remove all active formats', async () => bookingSettingsFixture('race', async ({ read, settings, format }) => {
-  await format({ id: 'synthetic-video', label: 'Synthetic video', minutes: 30, mode: 'video', active: true });
+  await format({ id: 'synthetic-video', label: 'Synthetic video', minutes: 15, mode: 'video', active: true });
   let current = await read();
-  const outcomes = await Promise.allSettled([settings({ leadMinutes: 50 }, current), format({ ...current.visitTypes[0], minutes: 35 }, current)]);
+  const outcomes = await Promise.allSettled([settings({ leadMinutes: 50 }, current), format({ ...current.visitTypes[0], label: 'Updated consultation' }, current)]);
   assert.equal(outcomes.filter(row => row.status === 'fulfilled').length, 1);
   assert.equal(outcomes.find(row => row.status === 'rejected').reason.code, 'aborted');
   current = await read();

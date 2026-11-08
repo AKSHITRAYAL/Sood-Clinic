@@ -896,7 +896,7 @@ exports.reschedulePatientAppointment = onCall({ ...bookingCallableOptions, timeo
 // doctor's schedule. The old slot is released and the new one reserved in the
 // same transaction, so a reschedule can never free a slot without taking one.
 exports.rescheduleAppointment = onCall({ ...callableOptions, invoker: 'public', timeoutSeconds: 30, memory: '256MiB', secrets: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_TOKEN_KEY] }, async (request) => {
-  const user = await requireLiveStaff(admin.auth(), request, { roles: ['admin', 'manager', 'doctor', 'receptionist'] });
+  const user = await requireLiveStaff(admin.auth(), request, { roles: ['admin', 'manager', 'doctor'] });
   const role = user.customClaims.role;
   const appointmentId = trimmed(request.data?.appointmentId, 200);
   const dateKey = trimmed(request.data?.dateKey, 10);

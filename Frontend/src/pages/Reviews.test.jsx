@@ -30,17 +30,21 @@ test('shows load failures with retry instead of pretending there are no reviews'
   render(<MemoryRouter><Reviews /></MemoryRouter>); await screen.findByText('Reviews unavailable');
   fireEvent.click(screen.getByText('Try again')); await screen.findByText(row.comment);
 });
-test('submits a public review without a publish toggle for an owned completed visit', async () => {
+test('submits a public review only after consent for an owned completed visit', async () => {
   api.user = { getIdTokenResult: async () => ({ claims: {} }) };
   api.own.mockResolvedValue({ reviews: [], nextCursor: null, visits: [{ id: 'completed-visit', at: '2026-11-01T05:00:00Z' }] });
   api.submit.mockResolvedValue({ message: 'Thank you. Your review is now public.' });
   render(<MemoryRouter initialEntries={['/reviews?appointment=completed-visit']}><Reviews /></MemoryRouter>);
-  await screen.findByLabelText('Completed visit');
+  await screen.findByLabelText(/Completed visit/);
+  fireEvent.change(screen.getByLabelText(/Completed visit/), { target: { value: 'completed-visit' } });
+  fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'A Patient' } });
+  fireEvent.change(screen.getByLabelText('Phone number'), { target: { value: '9877853935' } });
+  fireEvent.click(screen.getByRole('checkbox', { name: /agree to share/ }));
   const submit = screen.getByText('Send feedback');
-  expect(screen.queryByText(/Publish this review/i)).toBeNull();
+  expect(screen.getByRole('checkbox', { name: /agree to share/ }).checked).toBe(true);
   fireEvent.click(screen.getByRole('radio', { name: '4 stars' })); fireEvent.change(screen.getByLabelText(/Your experience/), { target: { value: 'The clinic explained the next steps clearly.' } });
   fireEvent.click(submit);
-  await waitFor(() => expect(api.submit).toHaveBeenCalledWith({ appointmentId: 'completed-visit', rating: 4, comment: 'The clinic explained the next steps clearly.', publicConsent: true }));
+  await waitFor(() => expect(api.submit).toHaveBeenCalledWith(expect.objectContaining({ appointmentId: 'completed-visit', rating: 4, comment: 'The clinic explained the next steps clearly.', publicConsent: true })));
 });
 
 test('publishes a named guest review and displays the submitted author name', async () => {
@@ -53,6 +57,7 @@ test('publishes a named guest review and displays the submitted author name', as
   fireEvent.change(screen.getByLabelText('Phone number'), { target: { value: '9877853935' } });
   fireEvent.click(screen.getByRole('radio', { name: '5 stars' }));
   fireEvent.change(screen.getByLabelText(/Your experience/), { target: { value: 'The clinic explained the next steps clearly.' } });
+  fireEvent.click(screen.getByRole('checkbox', { name: /agree to share/ }));
   fireEvent.click(screen.getByText('Send feedback'));
   await waitFor(() => expect(api.submit).toHaveBeenCalledWith(expect.objectContaining({ name: 'A Patient', anonymous: false, contactPhone: '9877853935', contactEmail: '' })));
   expect(api.submit).toHaveBeenCalledWith(expect.objectContaining({ publicConsent: true }));
@@ -83,6 +88,7 @@ test('lets a guest submit with email only', async () => {
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'patient@example.com' } });
   fireEvent.click(screen.getByRole('radio', { name: '5 stars' }));
   fireEvent.change(screen.getByLabelText(/Your experience/), { target: { value: 'The clinic explained the next steps clearly.' } });
+  fireEvent.click(screen.getByRole('checkbox', { name: /agree to share/ }));
   fireEvent.click(screen.getByText('Send feedback'));
   await waitFor(() => expect(api.submit).toHaveBeenCalledWith(expect.objectContaining({ contactPhone: '', contactEmail: 'patient@example.com', rating: 5, publicConsent: true })));
   await screen.findByText(submitted.comment);
@@ -99,4 +105,17 @@ test('explains that a guest needs one contact method', async () => {
   fireEvent.click(screen.getByText('Send feedback'));
   expect((await screen.findByRole('status')).textContent).toContain('Enter a phone number or email address.');
   expect(api.submit).not.toHaveBeenCalled();
+});
+
+
+test('guest feedback remains private unless the patient consents', async () => {
+  api.submit.mockResolvedValue({ message: 'Thank you. Your private feedback was saved.' });
+  render(<MemoryRouter><Reviews /></MemoryRouter>);
+  await screen.findByRole('heading', { name: 'Write a review' });
+  fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Patient' } });
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'patient@example.com' } });
+  fireEvent.click(screen.getByRole('radio', { name: '5 stars' }));
+  fireEvent.change(screen.getByLabelText(/Your experience/), { target: { value: 'My consultation was helpful.' } });
+  fireEvent.click(screen.getByText('Send feedback'));
+  await waitFor(() => expect(api.submit).toHaveBeenCalledWith(expect.objectContaining({ publicConsent: false })));
 });

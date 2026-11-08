@@ -48,3 +48,10 @@ test('cursor preserves nanoseconds and scope, and invalid dates/cursors are reje
     await expect(f.service(f.request(data))).rejects.toMatchObject({ code: 'invalid-argument' });
   }
 });
+
+
+test('receptionists cannot read the operational appointment board', async () => {
+  const f = fixture('receptionist');
+  await expect(f.service(f.request({ dateKey: day }))).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(f.store.list).not.toHaveBeenCalled();
+});

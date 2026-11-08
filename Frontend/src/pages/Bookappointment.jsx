@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
+import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
+import './bookingJourney.css';
 import { auth, authReady, firestore } from '../lib/firebase';
 import { addIstDays, istDateKey, istInstant, weekdayIst } from '../lib/ist';
 import {
@@ -25,15 +27,18 @@ const friendlyError = (error) => {
 };
 
 const Bookappointment = () => {
+  const [searchParams] = useSearchParams();
+  const requestedMode = searchParams.get('mode') === 'video' ? 'video' : 'in_person';
   const [options, setOptions] = useState(null);
   const [optionsError, setOptionsError] = useState('');
   const [selection, setSelection] = useState({ serviceId: '', locationId: '', dateKey: istDateKey() });
   const [slots, setSlots] = useState([]);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
+  const [availabilityReady, setAvailabilityReady] = useState(false);
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
-  const [step, setStep] = useState('schedule');
+  const [step, setStep] = useState('service');
   const [result, setResult] = useState(null);
   const [form, setForm] = useState({ name: '', phone: '', email: '', reason: '', consent: false });
   const [calendarMonth, setCalendarMonth] = useState(istDateKey().slice(0, 7));
@@ -42,13 +47,29 @@ const Bookappointment = () => {
   const inPerson = service?.mode === 'in_person';
   const location = options?.locations?.find((item) => item.id === selection.locationId) || null;
   const slotGroups = useMemo(() => {
+    if (!availabilityReady) return [];
+    const windows = inPerson ? location?.windows : options?.videoWindows;
+    const increment = options?.slotMinutes;
+    const duration = service?.minutes;
+    const offered = new Map(slots.map((slot) => [slot.time, slot]));
+    const candidates = new Map(offered);
+    if (Array.isArray(windows) && Number.isInteger(increment) && increment >= 5 && increment <= 240 && Number.isInteger(duration) && duration >= 5 && duration <= 480) {
+      windows.forEach(({ start, end }) => {
+        if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(start || '') || !/^([01]\d|2[0-3]):[0-5]\d$/.test(end || '')) return;
+        const mins = (value) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
+        for (let at = mins(start); at + duration <= mins(end); at += increment) {
+          const time = `${String(Math.floor(at / 60)).padStart(2, '0')}:${String(at % 60).padStart(2, '0')}`;
+          if (!candidates.has(time)) candidates.set(time, { time, unavailable: true });
+        }
+      });
+    }
     const groups = { Morning: [], Afternoon: [], Evening: [] };
-    slots.forEach((slot) => {
-      const hour = Number(String(slot.time).slice(0, 2));
+    [...candidates.values()].sort((a, b) => a.time.localeCompare(b.time)).forEach((slot) => {
+      const hour = Number(slot.time.slice(0, 2));
       groups[hour < 12 ? 'Morning' : hour < 17 ? 'Afternoon' : 'Evening'].push(slot);
     });
     return Object.entries(groups).filter(([, items]) => items.length);
-  }, [slots]);
+  }, [slots, availabilityReady, inPerson, location?.windows, options?.videoWindows, options?.slotMinutes, service?.minutes]);
   const days = useMemo(() => {
     const today = istDateKey();
     return Array.from({ length: options?.bookingWindowDays || 0 }, (_, index) => addIstDays(today, index));
@@ -74,13 +95,13 @@ const Bookappointment = () => {
     let active = true;
     getConsultationOptions().then(({ data }) => {
       if (!active) return;
-      const firstService = data.services?.find((item) => item.mode === 'in_person') || data.services?.[0];
+      const firstService = data.services?.find((item) => item.mode === requestedMode) || data.services?.[0];
       if (!firstService || !data.doctor) { setOptionsError('Online requests are not available right now. Please call the clinic.'); return; }
       setOptions(data);
       setSelection({ serviceId: firstService.id, locationId: firstService.mode === 'in_person' ? data.locations?.[0]?.id || '' : '', dateKey: istDateKey() });
     }).catch(() => active && setOptionsError('Online requests are temporarily unavailable. Please call the clinic or try again shortly.'));
     return () => { active = false; };
-  }, []);
+  }, [requestedMode]);
 
   // Signed-in patients should not retype details already held in their profile.
   useEffect(() => {
@@ -104,6 +125,8 @@ const Bookappointment = () => {
     let active = true;
     setSelectedSlot(null);
     setMessage('');
+    setSlots([]);
+    setAvailabilityReady(false);
     if (!selection.serviceId || (inPerson && !selection.locationId) || !options?.doctor?.id) { setSlots([]); return undefined; }
     setLoadingSlots(true);
     getConsultationAvailability({
@@ -112,7 +135,7 @@ const Bookappointment = () => {
       locationId: inPerson ? selection.locationId : null,
       dateKey: selection.dateKey,
     })
-      .then(({ data }) => { if (active) setSlots(data.slots || []); })
+      .then(({ data }) => { if (active) { setSlots(data.slots || []); setAvailabilityReady(true); } })
       .catch((error) => active && setMessage(friendlyError(error)))
       .finally(() => active && setLoadingSlots(false));
     return () => { active = false; };
@@ -144,12 +167,12 @@ const Bookappointment = () => {
       setResult({ reference: data.reference, status: data.status, mode: service.mode, link: data.accessToken ? consultationStatusLink({ reference: data.reference, token: data.accessToken }) : '' });
       setForm({ name: '', phone: '', email: '', reason: '', consent: false });
       setSelectedSlot(null);
-      setStep('schedule');
+      setStep('result');
       // The selected slot is confirmed and removed from availability by the server.
     } catch (error) {
       setMessage(friendlyError(error));
       if (errorCode(error) === 'already-exists') setSlots((current) => current.filter((slot) => slot.slotId !== selectedSlot?.slotId));
-      if (errorCode(error) === 'failed-precondition' || errorCode(error) === 'already-exists') setStep('schedule');
+      if (errorCode(error) === 'failed-precondition' || errorCode(error) === 'already-exists') setStep('service');
     } finally {
       setSaving(false);
     }
@@ -170,13 +193,37 @@ const Bookappointment = () => {
     <aside className="booking-calendar" aria-label="Choose an appointment date">
       <div className="booking-calendar__header"><button type="button" aria-label="Previous month" disabled={calendarMonth <= firstCalendarMonth} onClick={() => shiftCalendarMonth(-1)}>‹</button><strong>{calendarMonthLabel}</strong><button type="button" aria-label="Next month" disabled={calendarMonth >= lastCalendarMonth} onClick={() => shiftCalendarMonth(1)}>›</button></div>
       <div className="booking-calendar__weekdays">{['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
-      <div className="booking-calendar__grid">{calendarCells.map((dateKey, index) => { const enabled = dateKey && days.includes(dateKey); return dateKey ? <button key={dateKey} type="button" disabled={!enabled} aria-label={labelDate(dateKey)} onClick={() => setSelection({ ...selection, dateKey })} className={dateKey === selection.dateKey ? 'booking-calendar__day booking-calendar__day--selected' : 'booking-calendar__day'}><span>{Number(dateKey.slice(-2))}</span>{enabled && <i aria-hidden="true" />}</button> : <span key={`blank-${index}`} />; })}</div>
+      <div className="booking-calendar__grid">{calendarCells.map((dateKey, index) => { const enabled = dateKey && days.includes(dateKey); return dateKey ? <button key={dateKey} type="button" disabled={!enabled} aria-label={labelDate(dateKey)} aria-pressed={dateKey === selection.dateKey} onClick={() => setSelection({ ...selection, dateKey })} className={dateKey === selection.dateKey ? 'booking-calendar__day booking-calendar__day--selected' : 'booking-calendar__day'}><span>{Number(dateKey.slice(-2))}</span></button> : <span key={`blank-${index}`} />; })}</div>
       <p className="booking-timezone">Times shown in Indian Standard Time (IST).</p>
     </aside>
-    <div className="slot-picker"><label>Available times for {labelDate(selection.dateKey)}</label>{loadingSlots ? <p className="slot-empty">Loading available times…</p> : slots.length ? <div className="booking-session-list">{slotGroups.map(([name, group]) => <section className="booking-session" key={name}><div><strong>{name}</strong><span>{group.length} available times · 15-minute slots</span></div><div className="slot-grid">{group.map((slot) => <button key={slot.slotId} type="button" onClick={() => setSelectedSlot(slot)} className={`slot-option ${selectedSlot?.slotId === slot.slotId ? 'slot-option--selected' : ''}`}>{slot.time}</button>)}</div></section>)}</div> : <p className="slot-empty">No consultations are available on this day. Choose another day or call the clinic.</p>}</div>
+    <div className="slot-picker"><label>Times for {labelDate(selection.dateKey)}</label>{loadingSlots ? <p className="slot-empty" role="status">Loading available times…</p> : availabilityReady && slotGroups.length ? <><p className="booking-slot-key">Faded times are unavailable.</p><div className="booking-session-list">{slotGroups.map(([name, group]) => <section className="booking-session" key={name}><div><strong>{name}</strong><span>{group.filter(slot => !slot.unavailable).length} available · {service?.minutes} minutes</span></div><div className="slot-grid">{group.map((slot) => <button key={slot.slotId || slot.time} type="button" disabled={slot.unavailable} aria-label={`${slot.time}${slot.unavailable ? ' unavailable' : ''}`} aria-pressed={!slot.unavailable && selectedSlot?.slotId === slot.slotId} onClick={() => setSelectedSlot(slot)} className={`slot-option ${selectedSlot?.slotId && selectedSlot.slotId === slot.slotId ? 'slot-option--selected' : ''}`}>{slot.time}</button>)}</div></section>)}</div></> : availabilityReady ? <p className="slot-empty">No consultation times are configured for this selection.</p> : null}</div>
   </div>;
 
-  return <><Navbar /><main className="booking-page"><section className="booking-page__intro"><p>SOOD CLINIC · PANCHKULA</p><h1>Book a consultation</h1><span>Choose a service and time. We will show your booking status after you submit.</span></section><section className="booking-card appointment-booking">{optionsError ? <p className="booking-message" role="alert">{optionsError}</p> : !options ? <p className="slot-empty">Loading consultation options…</p> : <><div className="booking-doctor"><span>{options.services.find((item) => item.id === selection.serviceId)?.label || 'Consultation'}</span><strong>{options.doctor.name}</strong><small>{step === 'schedule' ? '1 of 2 · Choose a service and time' : '2 of 2 · Your details'}</small></div>{notice}<form onSubmit={submit} className="booking-form">{step === 'schedule' && <><div className="booking-form__full"><label>Consultation type<select value={selection.serviceId} onChange={(event) => chooseService(event.target.value)}>{options.services.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}</select></label></div>{inPerson && <div className="booking-form__full"><label>Clinic location<select value={selection.locationId} onChange={(event) => { setSelectedSlot(null); setSelection({ ...selection, locationId: event.target.value }); }}>{options.locations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>{location && <small className="booking-field-hint">{location.address}{location.landmark ? ` · ${location.landmark}` : ''}</small>}</div>}{scheduleMarkup}<div className="text-center"><button type="button" disabled={!selectedSlot || loadingSlots} onClick={() => setStep('details')}>Continue</button></div></>}{step === 'details' && <><div className="booking-selection"><strong>{labelDate(selection.dateKey)} · {selectedSlot?.time}</strong><span>{inPerson ? location?.name : 'Online video consultation'}</span><button className="booking-selection__change" type="button" onClick={() => setStep('schedule')}>Change time</button></div><div><label htmlFor="patient-name">Full name</label><input id="patient-name" required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Enter full name" /></div><div><label htmlFor="patient-phone">Phone number <em>Optional</em></label><input id="patient-phone" type="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="Enter phone number" /></div><div><label htmlFor="patient-email">Email address <em>Optional</em></label><input id="patient-email" type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="name@example.com" /><small className="booking-field-hint">Provide a phone number or an email address so the clinic can confirm your appointment.</small></div><div className="booking-form__full"><label htmlFor="reason">Reason for visit <em>Optional</em></label><input id="reason" value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} placeholder="A brief note helps the clinic prepare" /></div><label className="booking-consent"><input type="checkbox" checked={form.consent} onChange={(event) => setForm({ ...form, consent: event.target.checked })} /> <span>I consent to Sood Clinic recording these details to arrange this appointment.</span></label><div className="text-center"><button disabled={saving} type="submit">{saving ? 'Confirming your appointment…' : 'Confirm appointment'}</button></div><p className="booking-field-hint">Your appointment is confirmed after the slot is reserved. Keep the reference for changes or cancellation.</p></>}{message && <p className="booking-message" role="status">{message}</p>}</form></>}</section></main><Footer /></>;
+  const stages = ['service', 'details'];
+  const activeStage = step === 'review' ? 'details' : step;
+  const stageIndex = stages.indexOf(activeStage);
+  const go = (next) => { setMessage(''); setStep(next); };
+  const reviewDetails = (event) => {
+    event.preventDefault();
+    if (!form.phone.trim() && !form.email.trim()) { setMessage('Enter a phone number or email address.'); return; }
+    const phone = form.phone.trim();
+    if (phone && (!/^\+?[0-9][0-9\s-]{6,18}$/.test(phone) || !parsePhoneNumberFromString(phone, 'IN')?.isValid())) { setMessage('Phone number is invalid.'); return; }
+    if (!form.consent) { setMessage('Please provide consent before continuing.'); return; }
+    go('review');
+  };
+
+  return <><Navbar /><main className="booking-page booking-journey">
+    <header className="booking-journey__intro"><p>SOOD CLINIC · PANCHKULA</p><h1>Book your consultation</h1><span>Choose the care you need and a time that suits you.</span></header>
+    <section className="booking-journey__shell">
+      {optionsError ? <p role="alert">{optionsError}</p> : !options ? <p role="status">Loading consultation options…</p> : <>
+        {step !== 'result' && <nav aria-label="Booking progress" className="booking-journey__progress">{['Choose a time', 'Your details'].map((label, i) => <div key={label} aria-current={stageIndex === i ? 'step' : undefined} className={stageIndex >= i ? 'is-active' : ''}><span>{i + 1}</span><strong>{label}</strong></div>)}</nav>}
+        {notice && step === 'result' && <div className="booking-journey__result">{notice}<button type="button" onClick={() => { setResult(null); go('service'); }}>Book another consultation</button></div>}
+        {step === 'service' && <div className="booking-journey__stage booking-journey__scheduler"><p className="booking-journey__eyebrow">STEP 1 OF 2</p><h2>Choose your consultation</h2><p>Select a consultation type, location and available time.</p><div className="booking-journey__switch" role="group" aria-label="Consultation type">{options.services.map(item => <button type="button" key={item.id} aria-pressed={selection.serviceId === item.id} onClick={() => chooseService(item.id)}>{item.mode === 'video' ? 'Online video' : item.label}</button>)}</div>{inPerson && <div className="booking-journey__location"><h3>Choose a location</h3><div className="booking-journey__switch booking-journey__switch--locations" role="group" aria-label="Clinic location">{options.locations.map(item => <button type="button" key={item.id} aria-pressed={selection.locationId === item.id} onClick={() => { setSelectedSlot(null); setSelection({ ...selection, locationId: item.id }); }}>{item.name}</button>)}</div>{location && <p>{location.address}{location.landmark ? ` · ${location.landmark}` : ''}</p>}</div>}{!inPerson && <p className="booking-journey__online-note">Online video consultation with {options.doctor.name}.</p>}{scheduleMarkup}{message && <p className="booking-message" role="alert">{message}</p>}<div className="booking-journey__actions booking-journey__actions--end"><button type="button" disabled={!selectedSlot || loadingSlots || (inPerson && !location)} onClick={() => go('details')}>Continue →</button></div></div>}
+        {step === 'details' && <form className="booking-journey__stage booking-form" onSubmit={reviewDetails}><div className="booking-form__full"><p className="booking-journey__eyebrow">STEP 2 OF 2</p><h2>Tell us about yourself</h2><p>We use your contact details to manage your consultation.</p></div><div><label htmlFor="patient-name">Full name *</label><input id="patient-name" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} autoComplete="name" /></div><div><label htmlFor="patient-phone">Phone number</label><input id="patient-phone" type="tel" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} autoComplete="tel" /></div><div><label htmlFor="patient-email">Email address</label><input id="patient-email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} autoComplete="email" /><small className="booking-field-hint">Provide a phone number or an email address.</small></div><div className="booking-form__full"><label htmlFor="reason">Reason for visit (optional)</label><input id="reason" value={form.reason} onChange={e => setForm({ ...form, reason: e.target.value })} /></div><label className="booking-consent"><input type="checkbox" checked={form.consent} onChange={e => setForm({ ...form, consent: e.target.checked })} /> <span>I consent to Sood Clinic recording these details to arrange this appointment.</span></label>{message && <p className="booking-message" role="alert">{message}</p>}<div className="booking-journey__actions booking-form__full"><button className="booking-journey__back" type="button" onClick={() => go('service')}>Back</button><button type="submit">Review details →</button></div></form>}
+        {step === 'review' && <form className="booking-journey__stage" onSubmit={submit}><p className="booking-journey__eyebrow">REVIEW YOUR BOOKING</p><h2>Check your details</h2><p>Your time is reserved only after the clinic confirms your booking.</p><dl className="booking-journey__summary"><div><dt>Consultation</dt><dd>{service?.label} · {service?.minutes} min</dd></div><div><dt>Doctor</dt><dd>{options.doctor.name}</dd></div><div><dt>Location</dt><dd>{inPerson ? location?.name : 'Online video consultation'}</dd></div><div><dt>Date and time</dt><dd>{labelDate(selection.dateKey)} · {selectedSlot?.time} IST</dd></div><div><dt>Patient</dt><dd>{form.name}</dd></div><div><dt>Contact</dt><dd>{[form.phone, form.email].filter(Boolean).join(' · ')}</dd></div></dl>{message && <p className="booking-message" role="alert">{message}</p>}<div className="booking-journey__actions"><button className="booking-journey__back" type="button" onClick={() => go('details')}>Edit details</button><button type="submit" disabled={saving}>{saving ? 'Submitting…' : 'Submit booking'}</button></div></form>}
+      </>}
+    </section>
+  </main><Footer /></>;
 };
 
 export default Bookappointment;

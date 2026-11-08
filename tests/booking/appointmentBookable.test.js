@@ -163,16 +163,16 @@ suite('getAvailability', () => {
   it('returns ordered IST slots for a published open day', async () => {
     const { data } = await getAvailability({ doctorId: DOCTOR, dateKey: openDay, visitTypeId: VISIT_TYPE });
     expect(data.timezone).toBe('Asia/Kolkata');
-    expect(data.visitType).toMatchObject({ id: VISIT_TYPE, minutes: 20 });
+    expect(data.visitType).toMatchObject({ id: VISIT_TYPE, minutes: 15 });
     expect(data.calendar).toEqual({ connected: false });
     expect(data.slots.length).toBeGreaterThan(0);
     const times = data.slots.map((slot) => slot.time);
     expect(times).toEqual([...times].sort());
     expect(times[0]).toBe('09:00');
-    expect(times.at(-1)).toBe('11:40');
+    expect(times.at(-1)).toBe('11:45');
     expect(data.slots[0].slotId).toBe(`${DOCTOR}_${openDay.replaceAll('-', '')}_0900`);
     expect(new Date(data.slots[0].startsAt).toISOString()).toBe(`${openDay}T03:30:00.000Z`);
-    expect(new Date(data.slots[0].endsAt).getTime() - new Date(data.slots[0].startsAt).getTime()).toBe(20 * 60 * 1000);
+    expect(new Date(data.slots[0].endsAt).getTime() - new Date(data.slots[0].startsAt).getTime()).toBe(15 * 60 * 1000);
   }, 60_000);
 
   it('returns no slots for a closed exception day or a date outside the booking window', async () => {
@@ -190,16 +190,16 @@ suite('getAvailability', () => {
 
 suite('createBooking', () => {
   it('writes the appointment, slot lock, event, audit row and receipt together', async () => {
-    const payload = submission({ time: '09:20' });
+    const payload = submission({ time: '09:15' });
     const { data } = await createBooking(payload);
-    expect(data.status).toBe('scheduled');
+    expect(data.status).toBe('confirmed');
     expect(data.idempotent).toBe(false);
     expect(data.reference).toMatch(/^SC-[0-9A-F]{8}$/);
 
     const appointment = (await db.collection('appointments').doc(data.appointmentId).get()).data();
     expect(appointment).toMatchObject({
       reference: data.reference,
-      status: 'scheduled',
+      status: 'confirmed',
       doctorId: DOCTOR,
       branchId: BRANCH,
       departmentId: DEPARTMENT,
@@ -214,31 +214,31 @@ suite('createBooking', () => {
     expect(appointment.patientSnapshot).toMatchObject({ name: payload.patient.name, phone: payload.patient.phone });
     expect(appointment.consent).toMatchObject({ version: 'booking-v1' });
 
-    const slot = (await slotDoc(openDay, '09:20').get()).data();
+    const slot = (await slotDoc(openDay, '09:15').get()).data();
     expect(slot).toMatchObject({ status: 'booked', appointmentId: data.appointmentId, doctorId: DOCTOR, dateKey: openDay });
 
     const events = await db.collection('appointments').doc(data.appointmentId).collection('events').get();
     expect(events.docs.map((doc) => ({ from: doc.get('from'), to: doc.get('to'), byRole: doc.get('byRole') })))
-      .toEqual([{ from: null, to: 'scheduled', byRole: 'public' }]);
+      .toEqual([{ from: null, to: 'confirmed', byRole: 'public' }]);
     const audits = await db.collection('auditLogs').where('action', '==', 'appointment_created').get();
     expect(audits.size).toBe(1);
     expect(audits.docs[0].get('resource')).toEqual({ type: 'appointment', id: data.appointmentId });
     expect((await db.collection('bookingRequests').doc(payload.clientRequestId).get()).data())
-      .toMatchObject({ appointmentId: data.appointmentId, reference: data.reference, status: 'scheduled' });
+      .toMatchObject({ appointmentId: data.appointmentId, reference: data.reference, status: 'confirmed' });
 
     // The booked slot disappears from the next availability read.
     const after = await getAvailability({ doctorId: DOCTOR, dateKey: openDay });
-    expect(after.data.slots.map((item) => item.time)).not.toContain('09:20');
+    expect(after.data.slots.map((item) => item.time)).not.toContain('09:15');
   }, 90_000);
 
   it('replays the same clientRequestId without a second appointment', async () => {
-    const payload = submission({ time: '09:40' });
+    const payload = submission({ time: '09:30' });
     const first = await createBooking(payload);
     const again = await createBooking(payload);
     expect(again.data).toEqual({ ...first.data, idempotent: true });
     expect(await appointmentCount()).toBe(1);
     expect((await db.collection('auditLogs').get()).size).toBe(1);
-    expect((await slotDoc(openDay, '09:40').get()).get('appointmentId')).toBe(first.data.appointmentId);
+    expect((await slotDoc(openDay, '09:30').get()).get('appointmentId')).toBe(first.data.appointmentId);
   }, 90_000);
 
   it('lets exactly one of two parallel bookings win the slot', async () => {
@@ -284,19 +284,19 @@ suite('createBooking', () => {
   }, 60_000);
 
   it('books, cancels staff-side releasing the slot, then rebooks the same time', async () => {
-    const booked = await createBooking(submission({ time: '10:20' }));
-    expect((await slotDoc(openDay, '10:20').get()).exists).toBe(true);
+    const booked = await createBooking(submission({ time: '10:15' }));
+    expect((await slotDoc(openDay, '10:15').get()).exists).toBe(true);
 
     await signInStaff('admin-booking', { role: 'admin' });
     await transitionAppointment({ appointmentId: booked.data.appointmentId, to: 'cancelled', reason: 'Synthetic cancellation' });
     expect((await db.collection('appointments').doc(booked.data.appointmentId).get()).get('status')).toBe('cancelled');
-    expect((await slotDoc(openDay, '10:20').get()).exists).toBe(false);
+    expect((await slotDoc(openDay, '10:15').get()).exists).toBe(false);
 
-    const rebooked = await createBooking(submission({ time: '10:20' }));
+    const rebooked = await createBooking(submission({ time: '10:15' }));
     expect(rebooked.data.idempotent).toBe(false);
     expect(rebooked.data.reference).not.toBe(booked.data.reference);
-    expect(rebooked.data.status).toBe('scheduled');
-    expect((await slotDoc(openDay, '10:20').get()).get('appointmentId')).toBe(rebooked.data.appointmentId);
+    expect(rebooked.data.status).toBe('confirmed');
+    expect((await slotDoc(openDay, '10:15').get()).get('appointmentId')).toBe(rebooked.data.appointmentId);
   }, 120_000);
 
   it('enforces the two-active-appointments-per-phone cap', async () => {
@@ -304,7 +304,7 @@ suite('createBooking', () => {
     for (const offset of [30, 60]) {
       await db.collection('appointments').doc().set({
         doctorId: DOCTOR,
-        status: 'scheduled',
+        status: 'confirmed',
         phoneKey: phone,
         startsAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() + offset * 60_000)),
         dateKey: openDay,
@@ -325,7 +325,7 @@ suite('createBooking', () => {
   }, 180_000);
   it('links an authenticated patient booking to that patient and never to the guest path', async () => {
     await signInPatient('patient-booker');
-    const payload = submission({ time: '10:20' });
+    const payload = submission({ time: '10:15' });
     const { data } = await createBooking(payload);
 
     const appointment = (await db.collection('appointments').doc(data.appointmentId).get()).data();
@@ -357,7 +357,7 @@ suite('createBooking', () => {
 
   it('classifies a guest who gave only a phone number as a phone contact', async () => {
     await signOut(config.auth);
-    const phoneOnly = submission({ time: '11:20' });
+    const phoneOnly = submission({ time: '11:15' });
     phoneOnly.patient = { ...phoneOnly.patient, email: '' };
     const { data } = await createBooking(phoneOnly);
 
@@ -376,45 +376,45 @@ suite('rescheduleAppointment success path', () => {
   it('moves an appointment to a free slot, releasing the old one atomically', async () => {
     const booked = await bookAt('09:00');
     await signInStaff('admin-reschedule', { role: 'admin' });
-    const moved = await moveTo(booked.appointmentId, '10:40');
-    expect(moved.data).toEqual({ ok: true, appointmentId: booked.appointmentId, dateKey: openDay, time: '10:40', status: 'scheduled' });
+    const moved = await moveTo(booked.appointmentId, '10:45');
+    expect(moved.data).toEqual({ ok: true, appointmentId: booked.appointmentId, dateKey: openDay, time: '10:45', status: 'confirmed' });
 
     const appointment = (await db.collection('appointments').doc(booked.appointmentId).get()).data();
     expect(appointment.dateKey).toBe(openDay);
-    expect(appointment.slotIds).toEqual([`${DOCTOR}_${openDay.replaceAll('-', '')}_1040`]);
+    expect(appointment.slotIds).toEqual([`${DOCTOR}_${openDay.replaceAll('-', '')}_1045`]);
     expect(appointment.reference).toBe(booked.reference);
-    expect(new Date(appointment.startsAt.toDate()).toISOString()).toBe(`${openDay}T05:10:00.000Z`);
+    expect(new Date(appointment.startsAt.toDate()).toISOString()).toBe(`${openDay}T05:15:00.000Z`);
     expect((await slotDoc(openDay, '09:00').get()).exists).toBe(false);
-    expect((await slotDoc(openDay, '10:40').get()).get('appointmentId')).toBe(booked.appointmentId);
+    expect((await slotDoc(openDay, '10:45').get()).get('appointmentId')).toBe(booked.appointmentId);
 
     const events = await db.collection('appointments').doc(booked.appointmentId).collection('events').get();
     expect(events.docs.map((doc) => doc.get('meta')).filter((meta) => meta?.action === 'rescheduled'))
-      .toEqual([{ action: 'rescheduled', fromDateKey: openDay, toDateKey: openDay, toTime: '10:40' }]);
+      .toEqual([{ action: 'rescheduled', fromDateKey: openDay, toDateKey: openDay, toTime: '10:45' }]);
     const audits = await db.collection('auditLogs').where('action', '==', 'appointment_rescheduled').get();
     expect(audits.size).toBe(1);
 
     const availability = await getAvailability({ doctorId: DOCTOR, dateKey: openDay });
     const times = availability.data.slots.map((slot) => slot.time);
-    expect(times).not.toContain('10:40');
+    expect(times).not.toContain('10:45');
     expect(times).toContain('09:00');
   }, 120_000);
 
   it('lets the own doctor move it and refuses a write that is not a free slot', async () => {
-    const booked = await bookAt('09:20');
+    const booked = await bookAt('09:15');
     await signInStaff('doctor-reschedule', { role: 'doctor', doctorId: DOCTOR });
     await expect(moveTo(booked.appointmentId, '08:00')).rejects.toMatchObject({ code: 'functions/failed-precondition' });
-    await expect(moveTo(booked.appointmentId, '09:20')).rejects.toMatchObject({ code: 'functions/failed-precondition' });
-    expect((await slotDoc(openDay, '09:20').get()).get('appointmentId')).toBe(booked.appointmentId);
+    await expect(moveTo(booked.appointmentId, '09:15')).rejects.toMatchObject({ code: 'functions/failed-precondition' });
+    expect((await slotDoc(openDay, '09:15').get()).get('appointmentId')).toBe(booked.appointmentId);
     await expect(moveTo(booked.appointmentId, '11:00')).resolves.toMatchObject({ data: { time: '11:00' } });
   }, 120_000);
 
   it('refuses a slot another booking already holds and keeps the original slot', async () => {
-    const first = await bookAt('09:40');
+    const first = await bookAt('09:30');
     const second = await bookAt('10:00');
     await signInStaff('admin-reschedule', { role: 'admin' });
-    await expect(moveTo(second.appointmentId, '09:40')).rejects.toMatchObject({ code: 'functions/failed-precondition' });
+    await expect(moveTo(second.appointmentId, '09:30')).rejects.toMatchObject({ code: 'functions/failed-precondition' });
     expect((await db.collection('appointments').doc(second.appointmentId).get()).get('slotIds'))
       .toEqual([`${DOCTOR}_${openDay.replaceAll('-', '')}_1000`]);
-    expect((await slotDoc(openDay, '09:40').get()).get('appointmentId')).toBe(first.appointmentId);
+    expect((await slotDoc(openDay, '09:30').get()).get('appointmentId')).toBe(first.appointmentId);
   }, 120_000);
 });

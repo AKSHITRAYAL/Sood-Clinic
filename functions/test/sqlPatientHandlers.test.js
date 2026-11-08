@@ -77,9 +77,11 @@ test('live patient auth runs before any attempt is consumed', async () => {
   expect(linkingApi.accept).not.toHaveBeenCalled();
 });
 
-test('every staged handler is exported only through the frozen callable options', () => {
+test('only approved patient-link handlers are exported with the frozen callable options', () => {
   const lines = readFileSync(require.resolve('../index.js'), 'utf8').split('\n').map(line => line.trim());
   for (const name of handlerNames) {
-    expect(lines).toContain(`exports.${name} = onCall(sqlPatientCallableOptions, sqlPatientHandler('${name}'));`);
+    const declaration = `exports.${name} = onCall(sqlPatientCallableOptions, sqlPatientHandler('${name}'));`;
+    if (['issueSqlPatientLink', 'revokeSqlPatientLink', 'acceptSqlPatientLink'].includes(name)) expect(lines).toContain(declaration);
+    else expect(lines.some(line => line.startsWith(`exports.${name} =`))).toBe(false);
   }
 });

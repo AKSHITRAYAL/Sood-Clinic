@@ -1,0 +1,43 @@
+.booking-journey { color: #152a4b; background: #f7fbff; }
+.booking-journey__intro { max-width: 1080px; margin: 0 auto 2rem; }
+.booking-journey__intro p, .booking-journey__eyebrow { color: #176dcc; font-size: .72rem; font-weight: 800; letter-spacing: .12em; }
+.booking-journey__intro h1 { margin: .55rem 0; font-size: clamp(2rem, 4vw, 3rem); line-height: 1.1; letter-spacing: -.04em; color: #173f76; }
+.booking-journey__intro span, .booking-journey__stage > p { color: #60748d; line-height: 1.6; }
+.booking-journey__shell { max-width: 1080px; margin: auto; background: #fff; border: 1px solid #dce8f5; border-radius: 1.25rem; box-shadow: 0 16px 48px rgb(23 63 118 / 8%); overflow: hidden; }
+.booking-journey__progress { display: grid; grid-template-columns: repeat(4, 1fr); gap: .6rem; padding: 1.25rem clamp(1rem, 3vw, 2rem); border-bottom: 1px solid #e5eff8; background: #fbfdff; }
+.booking-journey__progress div { display: flex; align-items: center; gap: .6rem; color: #8091a7; font-size: .78rem; }
+.booking-journey__progress div span { display: grid; place-items: center; width: 2rem; height: 2rem; border: 1px solid #dce8f5; border-radius: 50%; flex: none; }
+.booking-journey__progress .is-active { color: #173f76; }.booking-journey__progress .is-active span { background: #176dcc; color: white; border-color: #176dcc; }
+.booking-journey__stage, .booking-journey__result { padding: clamp(1.25rem, 4vw, 2.75rem); }
+.booking-journey__stage h2 { margin: .5rem 0; color: #173f76; font-size: clamp(1.45rem, 3vw, 1.9rem); letter-spacing: -.03em; }.booking-journey__stage h3 { margin: 1.8rem 0 .8rem; color: #173f76; }
+.booking-journey__choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 1rem; margin-top: 1.5rem; }
+.booking-journey .booking-journey__choice { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: .5rem; min-height: 125px; padding: 1.25rem; border: 1px solid #dce8f5; background: #fff; color: #173f76; border-radius: .9rem; box-shadow: none; }
+.booking-journey .booking-journey__choice[aria-pressed='true'] { border-color: #176dcc; background: #f0f7ff; box-shadow: 0 0 0 1px #176dcc; }.booking-journey__choice small, .booking-journey__doctor small { display: block; color: #61758e; font-size: .85rem; line-height: 1.5; }
+.booking-journey__doctor { display: flex; align-items: center; gap: 1rem; padding: 1.2rem; border: 1px solid #dce8f5; border-radius: .9rem; background: #f7fbff; margin-top: 1.5rem; }.booking-journey__doctor > span { display: grid; place-items: center; width: 3rem; height: 3rem; border-radius: 50%; color: #176dcc; background: #e5f0fa; }
+.booking-journey__actions { display: flex; justify-content: space-between; gap: .75rem; margin-top: 2rem; }.booking-journey__actions button, .booking-journey__result > button { padding: .8rem 1.3rem; border-radius: .65rem; background: #176dcc; color: white; border: 1px solid #176dcc; font-weight: 700; }.booking-journey__actions button:hover { background: #0f5bad; }.booking-journey__actions button:disabled { opacity: .5; cursor: not-allowed; }.booking-journey__actions .booking-journey__back { color: #176dcc; background: #fff; border-color: #dce8f5; }
+.booking-journey__summary { margin: 1.5rem 0; border: 1px solid #dce8f5; border-radius: .8rem; overflow: hidden; }.booking-journey__summary div { display: grid; grid-template-columns: 150px 1fr; gap: 1rem; padding: .8rem 1rem; border-bottom: 1px solid #edf3f9; }.booking-journey__summary div:last-child { border: 0; }.booking-journey__summary dt { color: #647a94; }.booking-journey__summary dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+.booking-journey button:focus-visible, .booking-journey input:focus-visible { outline: 3px solid #83b8ec; outline-offset: 2px; }
+@media (max-width: 600px) { .booking-journey__progress { gap: .25rem; }.booking-journey__progress div { flex-direction: column; text-align: center; font-size: .62rem; }.booking-journey__summary div { grid-template-columns: 1fr; gap: .2rem; }.booking-journey__actions > button { flex: 1; } }
+.booking-status-timeline { padding: 1.25rem; border: 1px solid #dce8f5; border-radius: .9rem; background: #f7fbff; }
+.booking-status-timeline h2 { margin: 0 0 1rem; color: #173f76; font-size: 1.1rem; }
+.booking-status-timeline ol { margin: 0 0 0 .5rem; padding: 0 0 0 1.2rem; border-left: 2px solid #b9d8f3; list-style: none; }
+.booking-status-timeline li { position: relative; padding: 0 0 1rem .5rem; color: #173f76; }.booking-status-timeline li:last-child { padding-bottom: 0; }.booking-status-timeline li::before { content: ''; position: absolute; top: .35rem; left: -1.58rem; width: .65rem; height: .65rem; border-radius: 50%; background: #176dcc; }.booking-status-timeline li span { display: block; color: #61758e; font-size: .8rem; }
+.booking-journey__progress { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.booking-journey__switch { display: flex; width: fit-content; max-width: 100%; margin: 1.5rem auto 0; padding: .3rem; gap: .25rem; border: 1px solid #dce8f5; border-radius: .8rem; background: #edf5fc; }
+.booking-journey .booking-journey__switch button { flex: 1; min-width: 150px; min-height: 44px; padding: .65rem 1.1rem; color: #42607f; background: transparent; border: 0; border-radius: .6rem; box-shadow: none; font-weight: 700; transition: background .2s, color .2s, box-shadow .2s; }
+.booking-journey .booking-journey__switch button[aria-pressed='true'] { color: #176dcc; background: white; box-shadow: 0 3px 12px rgb(23 63 118 / 12%); }
+.booking-journey__location { margin: 1.8rem 0; text-align: center; }.booking-journey__location h3 { margin: 0; font-size: 1rem; }.booking-journey__location .booking-journey__switch { margin-top: .8rem; }.booking-journey__location p, .booking-journey__online-note { margin: .7rem 0 0; color: #61758e; font-size: .85rem; }.booking-journey__online-note { text-align: center; padding: 1.5rem; }
+.booking-journey__scheduler .booking-scheduler { grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 1.5rem; margin-top: 1.8rem; }.booking-journey__scheduler .booking-calendar__grid { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.booking-journey__scheduler .booking-calendar__day { width: 2.1rem; height: 2.1rem; min-height: 2.1rem; padding: 0; border-radius: 50%; box-shadow: none; }
+.booking-journey__actions--end { justify-content: flex-end; }
+@media (max-width: 760px) { .booking-journey__scheduler .booking-scheduler { grid-template-columns: minmax(0, 1fr); }.booking-journey__scheduler .booking-calendar { width: min(100%, 350px); margin: 0 auto; }.booking-journey__switch { width: 100%; }.booking-journey .booking-journey__switch button { min-width: 0; }.booking-journey__actions--end button { flex: 1; } }
+.booking-journey__scheduler .booking-calendar__header { display: flex; align-items: center; justify-content: space-between; }
+.booking-journey__scheduler .booking-calendar__weekdays, .booking-journey__scheduler .booking-calendar__grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); align-items: center; text-align: center; }
+.booking-journey__scheduler .booking-scheduler { display: grid; }
+.booking-journey__scheduler .booking-scheduler .slot-picker { grid-column: auto; }
+.booking-journey__scheduler .booking-scheduler .slot-option { border: 1px solid #bcd9f2; background: #fff !important; border-radius: .55rem; color: #176dcc; cursor: pointer; }
+.booking-journey__scheduler .booking-scheduler .slot-option--selected { background: #176dcc !important; color: #fff; }
+.booking-journey__scheduler .booking-scheduler .slot-option:disabled { background: #f3f6f9 !important; color: #aab8c8; border-color: #e5ebf0; box-shadow: none; cursor: not-allowed; }
+.booking-journey__scheduler .booking-slot-key { color: #7388a0; font-size: .76rem; margin: .35rem 0 .75rem; }
+.booking-journey .booking-journey__switch:not(.booking-journey__switch--locations) button { min-width: 125px; padding: .5rem .85rem; font-size: .82rem; }
+@media (max-width: 760px) { .booking-journey__scheduler .booking-scheduler .slot-picker { grid-column: auto; } .booking-journey .booking-journey__switch:not(.booking-journey__switch--locations) button { min-width: 0; } }

@@ -24,7 +24,7 @@ const NoticeSlider = () => {
         <p className="notice-carousel__description">Compassionate specialist care, built around you.</p>
         <div className="notice-carousel__actions">
           <Link to="/book" className="hero-appointment-button">Schedule a consultation</Link>
-          <Link to="/book" className="hero-appointment-button">Request a video consultation</Link>
+          <Link to="/book?mode=video" className="hero-appointment-button">Request a video consultation</Link>
         </div>
       </div>
       <div className="notice-carousel__dots" role="tablist" aria-label="Hospital highlights">

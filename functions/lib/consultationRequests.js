@@ -248,9 +248,6 @@ function createConsultationWorkflow({
       const dateKey = text(input.dateKey, 10);
       const time = text(input.time, 5);
       if (!DATE_KEY.test(dateKey) || !TIME.test(time)) throw fail('invalid-argument', 'Choose a valid appointment date and time.');
-      // Immediate confirmation requires a currently offered time for every mode.
-      const slots = await daySlotsFor({ doctorId, dateKey, mode, locationId, service });
-      if (!slots.some((slot) => slot.time === time)) throw fail('failed-precondition', 'That time is not currently available. Please choose another time.');
       requested = { dateKey, time };
     }
 
@@ -269,6 +266,9 @@ function createConsultationWorkflow({
         idempotent: true,
       };
     }
+    // Replays must be resolved first: the original confirmation occupies its slot.
+    const slots = await daySlotsFor({ doctorId, dateKey: requested.dateKey, mode, locationId, service });
+    if (!slots.some((slot) => slot.time === requested.time)) throw fail('failed-precondition', 'That time is not currently available. Please choose another time.');
     await enforceRateLimit(request);
     if (phoneKey) await assertPhoneCapacity(phoneKey, { allowRequest: true });
 
@@ -365,7 +365,7 @@ function createConsultationWorkflow({
   }
 
   // --- Staff queue --------------------------------------------------------
-  async function staffActor(request, roles = ['admin', 'doctor', 'manager', 'receptionist']) {
+  async function staffActor(request, roles = ['admin', 'doctor', 'manager']) {
     const user = await requireLiveStaff(auth, request, { roles });
     return { uid: request.auth.uid, role: user.customClaims.role, doctorId: user.customClaims.doctorId || null };
   }
@@ -465,7 +465,7 @@ function createConsultationWorkflow({
     };
     const blocked = busy.some((row) => {
       if (row.proposalId && allowProposalId && row.proposalId === allowProposalId) return false;
-      return overlaps(buffered.start, buffered.end, row.startsAt, row.endsAt);
+      return overlaps(buffered.start, buffered.end, row.startsAt, row.endsAt) || overlaps(startsAt, endsAt, row.startsAt - settings.bufferBeforeMinutes * 60 * 1000, row.endsAt + settings.bufferAfterMinutes * 60 * 1000);
     }) || claimed.some((range) => overlaps(buffered.start, buffered.end, range.start, range.end));
     if (blocked) return conflict('SLOT_TAKEN');
     return { ok: true, startsAt: new Date(startsAt), endsAt: new Date(endsAt), unitIds: unitSlotIds({ doctorId, dateKey, startsAt, endsAt }), time, dateKey };
@@ -999,7 +999,7 @@ function createConsultationWorkflow({
 
   // Expiry sweep. Bounded, deterministic by expiry, one audit trail per proposal.
   async function expireProposals(request) {
-    const actor = await staffActor(request, ['admin', 'doctor', 'manager', 'receptionist']);
+    const actor = await staffActor(request, ['admin', 'doctor', 'manager']);
     const limitInput = Number(request.data?.limit);
     const limit = Number.isInteger(limitInput) ? Math.min(Math.max(limitInput, 1), 50) : 25;
     const due = await collection(PROPOSALS)

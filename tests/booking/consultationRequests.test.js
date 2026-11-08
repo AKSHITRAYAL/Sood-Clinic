@@ -70,6 +70,8 @@ const inPerson = (overrides = {}) => ({
 });
 const video = (overrides = {}) => ({
   mode: 'video',
+  dateKey: openDay,
+  time: '09:30',
   serviceId: VIDEO,
   doctorId: DOCTOR,
   patient: patient(),
@@ -80,6 +82,24 @@ const video = (overrides = {}) => ({
 });
 
 const count = async (name) => (await db.collection(name).get()).size;
+// Historical requests can remain pending after the switch to immediate confirmation.
+// Seed them directly so approval and proposal tests cover those retained records.
+const seedPending = async (payload) => {
+  const id = payload.clientRequestId;
+  const reference = `CR-${id.slice(-8).toUpperCase()}`;
+  const at = admin.firestore.Timestamp.now();
+  await db.collection('consultationRequests').doc(id).set({
+    reference, clientRequestId: id, mode: payload.mode, locationId: payload.locationId || null,
+    serviceId: payload.serviceId, serviceLabel: 'Synthetic consultation', durationMinutes: 15,
+    doctorId: payload.doctorId, requested: { dateKey: payload.dateKey, time: payload.time },
+    patient: payload.patient, phoneKey: payload.patient.phone || null, reason: payload.reason || null,
+    accountUid: null, guest: true, status: 'pending', appointmentId: null, acceptedProposalId: null,
+    declineCode: null, declineReason: null, consent: { version: 'test', actor: 'guest', acceptedAt: at },
+    version: 1, createdBy: { uid: null, role: 'public' }, createdAt: at, updatedAt: at,
+  });
+  return { requestId: id, reference };
+};
+
 const signInStaff = async (uid, claims) => {
   await config.authAdmin.createUser({ uid, email: `${uid}@synthetic.test`, password: PASSWORD });
   createdUsers.push(uid);
@@ -178,24 +198,24 @@ suite('consultation options and availability', () => {
   it('publishes the location contract, video windows, Sunday closure and service kinds', async () => {
     const { data } = await api.options();
     expect(data.timezone).toBe('Asia/Kolkata');
-    expect(data.slotMinutes).toBe(30);
+    expect(data.slotMinutes).toBe(15);
     expect(data.locations.map((row) => row.id)).toEqual(['dhawan-hospital', 'jindal-diagnostics']);
     expect(data.videoWindows).toEqual([{ start: '09:30', end: '10:30' }, { start: '17:30', end: '18:30' }]);
     expect(data.closedWeekdays).toEqual([0]);
-    expect(data.services.find((row) => row.id === PROCEDURE)).toMatchObject({ kind: 'procedure', minutes: 60 });
+    expect(data.services.find((row) => row.id === PROCEDURE)).toMatchObject({ kind: 'procedure', minutes: 15 });
     expect(data.services.find((row) => row.id === CONSULT)).toMatchObject({ kind: 'consultation', mode: 'in_person' });
     expect(data.notifications).toEqual({ portal: true, email: false });
     expect(JSON.stringify(data)).not.toMatch(/Synthetic Patient|@synthetic/i);
   }, 90_000);
 
-  it('returns a 30-minute grid inside each location window, shared with the video mode', async () => {
+  it('returns a 15-minute grid inside each location window, shared with the video mode', async () => {
     const dhawan = await api.availability({ doctorId: DOCTOR, dateKey: openDay, serviceId: CONSULT, locationId: 'dhawan-hospital' });
-    expect(dhawan.data.slots.map((slot) => slot.time)).toEqual(['11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30']);
+    expect(dhawan.data.slots.map((slot) => slot.time)).toEqual(['11:00', '11:15', '11:30', '11:45', '12:00', '12:15', '12:30', '12:45', '13:00', '13:15', '13:30', '13:45', '14:00', '14:15', '14:30', '14:45']);
     const jindal = await api.availability({ doctorId: DOCTOR, dateKey: openDay, serviceId: CONSULT, locationId: 'jindal-diagnostics' });
-    expect(jindal.data.slots.map((slot) => slot.time)).toEqual(['09:00', '09:30', '10:00', '10:30', '17:00', '17:30', '18:00', '18:30']);
+    expect(jindal.data.slots.map((slot) => slot.time)).toEqual(['09:00', '09:15', '09:30', '09:45', '10:00', '10:15', '10:30', '10:45', '17:00', '17:15', '17:30', '17:45', '18:00', '18:15', '18:30', '18:45']);
     const online = await api.availability({ doctorId: DOCTOR, dateKey: openDay, serviceId: VIDEO });
-    expect(online.data.slots.map((slot) => slot.time)).toEqual(['09:30', '10:00', '17:30', '18:00']);
-    expect(online.data.slots[0].endsAt).toBe(`${openDay}T04:30:00.000Z`);
+    expect(online.data.slots.map((slot) => slot.time)).toEqual(['09:30', '09:45', '10:00', '10:15', '17:30', '17:45', '18:00', '18:15']);
+    expect(online.data.slots[0].endsAt).toBe(`${openDay}T04:15:00.000Z`);
     let sundayOffset = 1;
     while (weekdayOf(istKey(sundayOffset)) !== 0) sundayOffset += 1;
     expect((await api.availability({ doctorId: DOCTOR, dateKey: istKey(sundayOffset), serviceId: CONSULT, locationId: 'dhawan-hospital' })).data.slots).toEqual([]);
@@ -207,34 +227,34 @@ suite('consultation options and availability', () => {
     await expect(api.submit(inPerson({ serviceId: PROCEDURE })))
       .rejects.toMatchObject({ code: 'functions/failed-precondition' });
     const dhawan = await api.availability({ doctorId: DOCTOR, dateKey: openDay, serviceId: PROCEDURE, locationId: 'dhawan-hospital' });
-    expect(dhawan.data.slots.map((slot) => slot.time)).toEqual(['11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00']);
+    expect(dhawan.data.slots.map((slot) => slot.time)).toEqual(['11:00', '11:15', '11:30', '11:45', '12:00', '12:15', '12:30', '12:45', '13:00', '13:15', '13:30', '13:45', '14:00', '14:15', '14:30', '14:45']);
     expect(await count('consultationRequests')).toBe(0);
   }, 120_000);
 });
 
 suite('submitting a request', () => {
-  it('stores a pending request without reserving capacity, and replays idempotently', async () => {
+  it('confirms a request, reserves capacity, and replays idempotently', async () => {
     const payload = inPerson({ time: '10:00' });
     const { data } = await api.submit(payload);
-    expect(data).toMatchObject({ status: 'pending', approvalPending: true, mode: 'in_person', idempotent: false });
+    expect(data).toMatchObject({ status: 'confirmed', approvalPending: false, mode: 'in_person', idempotent: false });
     expect(data.reference).toMatch(/^CR-[0-9A-F]{8}$/);
     expect(data.accessToken).toMatch(/^[A-Za-z0-9_-]{20,}$/);
 
     const stored = (await db.collection('consultationRequests').doc(data.requestId).get()).data();
     expect(stored).toMatchObject({
-      reference: data.reference, status: 'pending', mode: 'in_person', locationId: 'jindal-diagnostics',
-      serviceId: CONSULT, doctorId: DOCTOR, requested: { dateKey: openDay, time: '10:00' }, appointmentId: null,
+      reference: data.reference, status: 'confirmed', mode: 'in_person', locationId: 'jindal-diagnostics',
+      serviceId: CONSULT, doctorId: DOCTOR, requested: { dateKey: openDay, time: '10:00' }, appointmentId: data.appointmentId,
     });
     expect(stored.patient).toMatchObject({ name: 'Synthetic Patient', email: EMAIL });
     expect(stored.accessTokenHash).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(stored)).not.toContain(data.accessToken);
-    expect(await count('appointments')).toBe(0);
-    expect(await count('appointmentSlots')).toBe(0);
+    expect(await count('appointments')).toBe(1);
+    expect(await count('appointmentSlots')).toBe(1);
     expect((await db.collection('auditLogs').where('action', '==', 'consultation_request_submitted').get()).size).toBe(1);
     expect((await db.collection('notifications').get()).docs[0].data()).toMatchObject({ status: 'queued', channel: 'clinic_console' });
 
     const again = await api.submit(payload);
-    expect(again.data).toMatchObject({ idempotent: true, reference: data.reference, status: 'pending' });
+    expect(again.data).toMatchObject({ idempotent: true, reference: data.reference, status: 'confirmed' });
     expect(await count('consultationRequests')).toBe(1);
     await expect(api.submit({ ...payload, patient: patient({ name: 'Different Person' }) }))
       .rejects.toMatchObject({ code: 'functions/already-exists' });
@@ -242,7 +262,7 @@ suite('submitting a request', () => {
 
   it('accepts an email-only guest and rejects malformed contact or consent', async () => {
     const { data } = await api.submit(inPerson({ patient: patient({ phone: '', email: 'guest@example.test' }) }));
-    expect(data.status).toBe('pending');
+    expect(data.status).toBe('confirmed');
     expect((await db.collection('consultationRequests').doc(data.requestId).get()).get('phoneKey')).toBeNull();
 
     for (const patch of [
@@ -252,16 +272,16 @@ suite('submitting a request', () => {
       { clientRequestId: 'short' },
     ]) await expect(api.submit(inPerson(patch))).rejects.toMatchObject({ code: 'functions/invalid-argument' });
     // Times that are not currently offered are refused, not stored for later approval.
-    for (const time of ['08:00', '09:15', '10:45']) {
+    for (const time of ['08:00', '09:10', '11:00']) {
       await expect(api.submit(inPerson({ time }))).rejects.toMatchObject({ code: 'functions/failed-precondition' });
     }
-    expect(await count('appointments')).toBe(0);
+    expect(await count('appointments')).toBe(1);
   }, 120_000);
 });
 
 suite('staff approval', () => {
   it('confirms the requested time atomically and is idempotent on retry', async () => {
-    const submitted = (await api.submit(inPerson({ time: '10:00' }))).data;
+    const submitted = await seedPending(inPerson({ time: '10:00' }));
     await signInStaff('admin-approve', { role: 'admin' });
 
     const { data } = await api.approve({ requestId: submitted.requestId });
@@ -288,8 +308,8 @@ suite('staff approval', () => {
   }, 180_000);
 
   it('lets exactly one of two competing approvals take the slot', async () => {
-    const first = (await api.submit(inPerson({ time: '10:30' }))).data;
-    const second = (await api.submit(inPerson({ time: '10:30' }))).data;
+    const first = await seedPending(inPerson({ time: '10:30' }));
+    const second = await seedPending(inPerson({ time: '10:30' }));
     await signInStaff('admin-compete', { role: 'admin' });
 
     const outcomes = await Promise.allSettled([
@@ -306,7 +326,7 @@ suite('staff approval', () => {
   }, 180_000);
 
   it('rejects an anonymous or non-owning doctor approval', async () => {
-    const submitted = (await api.submit(inPerson({ time: '09:30' }))).data;
+    const submitted = await seedPending(inPerson({ time: '09:30' }));
     await expect(api.approve({ requestId: submitted.requestId })).rejects.toMatchObject({ code: 'functions/permission-denied' });
     await signInStaff('doctor-other', { role: 'doctor', doctorId: 'another-doctor' });
     await expect(api.approve({ requestId: submitted.requestId })).rejects.toMatchObject({ code: 'functions/permission-denied' });
@@ -314,7 +334,7 @@ suite('staff approval', () => {
   }, 120_000);
 
   it('records a decline with a reason and an audit event', async () => {
-    const submitted = (await api.submit(inPerson({ time: '09:00' }))).data;
+    const submitted = await seedPending(inPerson({ time: '09:00' }));
     await signInStaff('admin-decline', { role: 'admin' });
     await expect(api.decline({ requestId: submitted.requestId })).rejects.toMatchObject({ code: 'functions/invalid-argument' });
     await api.decline({ requestId: submitted.requestId, reason: 'Doctor unavailable that morning.' });
@@ -327,7 +347,7 @@ suite('staff approval', () => {
 
 suite('shared doctor capacity across modes and locations', () => {
   it('blocks Jindal and Dhawan times already taken by a video confirmation', async () => {
-    const remote = (await api.submit(video())).data;
+    const remote = await seedPending(video());
     await signInStaff('admin-video', { role: 'admin' });
     const confirmed = await api.approve({ requestId: remote.requestId, dateKey: openDay, time: '09:30' });
     expect(confirmed.data.status).toBe('confirmed');
@@ -338,7 +358,7 @@ suite('shared doctor capacity across modes and locations', () => {
     expect(jindal.data.slots.map((slot) => slot.time)).toContain('10:00');
     await expect(api.submit(inPerson({ time: '09:30' }))).rejects.toMatchObject({ code: 'functions/failed-precondition' });
 
-    const second = (await api.submit(video())).data;
+    const second = await seedPending(video());
     await signInStaff('admin-video-2', { role: 'admin' });
     await expect(api.approve({ requestId: second.requestId, dateKey: openDay, time: '09:30' }))
       .rejects.toMatchObject({ code: 'functions/failed-precondition' });
@@ -348,23 +368,24 @@ suite('shared doctor capacity across modes and locations', () => {
   }, 180_000);
 
   it('blocks a video time already taken in person and honours the configured buffer', async () => {
-    const inPersonRequest = (await api.submit(inPerson({ time: '10:00' }))).data;
+    const inPersonRequest = await seedPending(inPerson({ time: '10:00' }));
     await signInStaff('admin-buffer', { role: 'admin' });
     await api.approve({ requestId: inPersonRequest.requestId });
     const online = await api.availability({ doctorId: DOCTOR, dateKey: openDay, serviceId: VIDEO });
-    expect(online.data.slots.map((slot) => slot.time)).toEqual(['09:30', '17:30', '18:00']);
+    expect(online.data.slots.map((slot) => slot.time)).toEqual(['09:30', '09:45', '10:15', '17:30', '17:45', '18:00', '18:15']);
 
     // A 15-minute buffer policy removes the adjacent video slot as well.
     await sql.query("UPDATE clinic_settings SET buffer_after_minutes=15, updated_at=now() WHERE id='primary'");
     const buffered = await api.availability({ doctorId: DOCTOR, dateKey: openDay, serviceId: VIDEO });
-    expect(buffered.data.slots.map((slot) => slot.time)).toEqual(['17:30', '18:00']);
+    expect(buffered.data.slots.map((slot) => slot.time)).not.toContain('10:15');
+    expect(buffered.data.slots.map((slot) => slot.time)).toContain('17:30');
     await sql.query("UPDATE clinic_settings SET buffer_after_minutes=0, updated_at=now() WHERE id='primary'");
   }, 180_000);
 });
 
 suite('appointment proposals', () => {
   it('holds capacity, accepts with the one-time token and releases nothing on retry', async () => {
-    const submitted = (await api.submit(video())).data;
+    const submitted = await seedPending(video());
     await signInStaff('admin-propose', { role: 'admin' });
     const offered = (await api.propose({ requestId: submitted.requestId, dateKey: openDay, time: '17:30' })).data;
     expect(offered.proposalId).toBeTruthy();
@@ -392,7 +413,7 @@ suite('appointment proposals', () => {
   }, 180_000);
 
   it('expires a proposal, releases the hold and audits the transition before refusing acceptance', async () => {
-    const submitted = (await api.submit(video())).data;
+    const submitted = await seedPending(video());
     await signInStaff('admin-expire', { role: 'admin' });
     const offered = (await api.propose({ requestId: submitted.requestId, dateKey: openDay, time: '10:00' })).data;
     await db.collection('appointmentProposals').doc(offered.proposalId)
@@ -411,7 +432,7 @@ suite('appointment proposals', () => {
     expect(online.data.slots.map((slot) => slot.time)).toContain('10:00');
 
     // The sweep records expiry for the proposal a patient never opened.
-    const second = (await api.submit(video())).data;
+    const second = await seedPending(video());
     await signInStaff('admin-expire-sweep', { role: 'admin' });
     const later = (await api.propose({ requestId: second.requestId, dateKey: openDay, time: '17:30' })).data;
     await db.collection('appointmentProposals').doc(later.proposalId)
@@ -422,7 +443,7 @@ suite('appointment proposals', () => {
   }, 180_000);
 
   it('lets exactly one of two parallel proposal acceptances confirm the request', async () => {
-    const submitted = (await api.submit(video())).data;
+    const submitted = await seedPending(video());
     await signInStaff('admin-race', { role: 'admin' });
     const first = (await api.propose({ requestId: submitted.requestId, dateKey: openDay, time: '09:30' })).data;
     const second = (await api.propose({ requestId: submitted.requestId, dateKey: openDay, time: '10:00' })).data;
@@ -443,7 +464,7 @@ suite('appointment proposals', () => {
   }, 180_000);
 
   it('releases a declined proposal and returns the request to the queue', async () => {
-    const submitted = (await api.submit(video())).data;
+    const submitted = await seedPending(video());
     await signInStaff('admin-decline-proposal', { role: 'admin' });
     const offered = (await api.propose({ requestId: submitted.requestId, dateKey: openDay, time: '18:00' })).data;
     await signOut(auth);
@@ -457,8 +478,8 @@ suite('appointment proposals', () => {
 
 suite('request queue privacy and pagination', () => {
   it('keeps in-person and video clinical intake out of the manager projection', async () => {
-    await api.submit(inPerson({ reason: 'PRIVATE_CLINICAL_INTAKE' }));
-    await api.submit(video({ reason: 'PRIVATE_VIDEO_INTAKE' }));
+    await seedPending(inPerson({ reason: 'PRIVATE_CLINICAL_INTAKE' }));
+    await seedPending(video({ reason: 'PRIVATE_VIDEO_INTAKE' }));
     await signInStaff('manager-intake', { role: 'manager' });
     const { data } = await api.list({ status: 'pending' });
     expect(data.requests).toHaveLength(2);
@@ -468,7 +489,7 @@ suite('request queue privacy and pagination', () => {
 
   it('pages through tied submission instants and binds cursors to filter and doctor scope', async () => {
     const ids = [];
-    for (let index = 0; index < 3; index++) ids.push((await api.submit(inPerson())).data.requestId);
+    for (let index = 0; index < 3; index++) ids.push((await seedPending(inPerson())).requestId);
     const at = new admin.firestore.Timestamp(2051497800, 123456789);
     for (const id of ids) await db.collection('consultationRequests').doc(id).update({ createdAt: at });
     await signInStaff('manager-request-pages', { role: 'manager' });
@@ -489,9 +510,9 @@ suite('request queue privacy and pagination', () => {
 
 suite('bulk approval', () => {
   it('approves a deterministic bounded batch, records conflicts and keeps eligible rows', async () => {
-    const first = (await api.submit(inPerson({ time: '10:00' }))).data;
-    const conflict = (await api.submit(inPerson({ time: '10:00' }))).data;
-    const later = (await api.submit(inPerson({ time: '10:30' }))).data;
+    const first = await seedPending(inPerson({ time: '10:00' }));
+    const conflict = await seedPending(inPerson({ time: '10:00' }));
+    const later = await seedPending(inPerson({ time: '10:30' }));
     // Control submission order deterministically; server timestamps can tie.
     const base = Date.now() - 60_000;
     await db.collection('consultationRequests').doc(first.requestId)
@@ -535,8 +556,8 @@ suite('bulk approval', () => {
   }, 120_000);
 
   it('returns exactly one outcome per request after concurrent batch retries', async () => {
-    const first = (await api.submit(inPerson({ time: '09:30' }))).data;
-    const second = (await api.submit(inPerson({ time: '10:00' }))).data;
+    const first = await seedPending(inPerson({ time: '09:30' }));
+    const second = await seedPending(inPerson({ time: '10:00' }));
     await signInStaff('admin-bulk-retry', { role: 'admin' });
     const ids = [first.requestId, second.requestId];
     const results = await Promise.all([api.bulk({ requestIds: ids }), api.bulk({ requestIds: ids })]);
@@ -553,7 +574,7 @@ suite('request status and cancellation link', () => {
   it('shows the requester their own status without exposing private contact details', async () => {
     const submitted = (await api.submit(inPerson({ time: '09:00' }))).data;
     const status = (await api.status({ reference: submitted.reference, token: submitted.accessToken })).data;
-    expect(status).toMatchObject({ reference: submitted.reference, status: 'pending', mode: 'in_person' });
+    expect(status).toMatchObject({ reference: submitted.reference, status: 'confirmed', mode: 'in_person' });
     expect(status.location.id).toBe('jindal-diagnostics');
     expect(JSON.stringify(status)).not.toMatch(/Synthetic Patient|@synthetic|phone/i);
     await expect(api.status({ reference: submitted.reference, token: 'wrong-token' }))
@@ -571,7 +592,7 @@ suite('request status and cancellation link', () => {
     await signOut(auth);
 
     const status = (await api.status({ reference: submitted.reference, token: submitted.accessToken })).data;
-    expect(status.appointment).toMatchObject({ reference: approved.data.reference, status: 'confirmed', canCancel: true });
+    expect(status.appointment).toMatchObject({ reference: submitted.appointmentReference, status: 'confirmed', canCancel: true });
     await api.cancel({ reference: submitted.reference, token: submitted.accessToken, reason: 'Cannot travel' });
 
     const appointment = (await db.collection('appointments').doc(approved.data.appointmentId).get()).data();

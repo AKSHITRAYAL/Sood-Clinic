@@ -23,7 +23,7 @@ describe('staff reschedule policy', () => {
     for (const status of ['checked_in', 'in_consultation', 'completed', 'cancelled', 'no_show', undefined]) {
       expect(canStaffReschedule({ appointment: appointment({ status }), role: 'admin' })).toBe(false);
     }
-    for (const role of ['patient', 'guest', undefined, null]) expect(canStaffReschedule({ appointment: appointment(), role })).toBe(false);
+    for (const role of ['patient', 'guest', 'receptionist', undefined, null]) expect(canStaffReschedule({ appointment: appointment(), role })).toBe(false);
     expect(canStaffReschedule({ role: 'admin' })).toBe(false);
     expect([...RESCHEDULABLE_STATUSES]).toEqual(['scheduled', 'confirmed']);
   });
@@ -33,7 +33,7 @@ describe('frontend mirror parity', () => {
   it('presents rescheduling exactly when the server policy allows it', async () => {
     const frontend = await import('../../Frontend/src/lib/appointmentState.js');
     expect([...frontend.RESCHEDULABLE_STATUSES]).toEqual([...RESCHEDULABLE_STATUSES]);
-    for (const role of ['admin', 'manager', 'doctor', 'patient']) {
+    for (const role of ['admin', 'manager', 'doctor', 'receptionist', 'patient']) {
       for (const status of ['scheduled', 'confirmed', 'checked_in', 'completed', 'cancelled']) {
         for (const doctorId of ['brig-ak-sood', 'other-doctor', undefined]) {
           expect(frontend.canStaffRescheduleAppointment(appointment({ status }), role, doctorId))
@@ -58,7 +58,7 @@ describe('rescheduleAppointment wiring', () => {
   it('requires current staff access, a doctor-owned appointment and an upcoming status', () => {
     const source = body();
     expect(source).not.toHaveLength(0);
-    expect(source).toContain('await requireLiveStaff(admin.auth(), request)');
+    expect(source).toContain("await requireLiveStaff(admin.auth(), request, { roles: ['admin', 'manager', 'doctor'] })");
     expect(source).toContain("if (role === 'doctor' && appointment.doctorId !== request.auth.token.doctorId)");
     expect(source).toContain("if (role === 'doctor' && current.doctorId !== request.auth.token.doctorId)");
     expect(source.match(/canStaffReschedule\(/g)).toHaveLength(2);

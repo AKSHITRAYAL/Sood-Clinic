@@ -251,7 +251,7 @@ const buildSlots = ({
       if (startsAt.getTime() < leadBoundary) continue;
       const bufferedStart = startsAt.getTime() - bufferBeforeMinutes * 60 * 1000;
       const bufferedEnd = endsAt.getTime() + bufferAfterMinutes * 60 * 1000;
-      if (occupied.some((range) => overlaps(bufferedStart, bufferedEnd, range.start, range.end))) continue;
+      if (occupied.some((range) => overlaps(bufferedStart, bufferedEnd, range.start, range.end) || overlaps(startsAt.getTime(), endsAt.getTime(), range.start - bufferBeforeMinutes * 60 * 1000, range.end + bufferAfterMinutes * 60 * 1000))) continue;
       const slotId = makeSlotId(doctorId, dateKey, time);
       if (seen.has(slotId)) continue;
       seen.add(slotId);

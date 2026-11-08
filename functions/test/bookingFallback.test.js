@@ -43,15 +43,15 @@ test('an unusable SQL read falls back to the legacy Firestore catalogue and publ
     expect(await reads.doctor('brig-ak-sood')).toMatchObject({ id: 'brig-ak-sood', departmentIds: ['gastroenterology'] });
     // Booking preflight reads these fields directly; they must stay whole numbers.
     expect(await reads.config()).toEqual({
-      bookingWindowDays: 14, leadMinutes: 30, intervalMinutes: 20, bufferBeforeMinutes: 0, bufferAfterMinutes: 0,
+      bookingWindowDays: 14, leadMinutes: 30, intervalMinutes: 15, bufferBeforeMinutes: 0, bufferAfterMinutes: 0,
       cancelCutoffMinutes: 120, autoConfirm: false, timezone: 'Asia/Kolkata', patientCancellationCutoffHours: 2,
-      visitTypes: [{ id: 'consultation', label: 'In-clinic consultation', minutes: 20, mode: 'in_person', active: true }, { id: 'video-consultation', label: 'Online video consultation', minutes: 20, mode: 'video', active: true }],
+      visitTypes: [{ id: 'consultation', label: 'In-clinic consultation', minutes: 15, mode: 'in_person', active: true }, { id: 'video-consultation', label: 'Online video consultation', minutes: 15, mode: 'video', active: true }],
     });
   }
 });
 
 test('published Firestore settings win over the defaults', async () => {
-  expect(firestoreConfig({ bookingWindowDays: 21, intervalMinutes: 30, patientCancellationCutoffHours: 6, autoConfirm: true, visitTypes: [{ id: 'follow-up', label: 'Follow up', minutes: 10, mode: 'video', active: true }] })).toMatchObject({ bookingWindowDays: 21, intervalMinutes: 30, cancelCutoffMinutes: 360, patientCancellationCutoffHours: 6, autoConfirm: true, visitTypes: [{ id: 'follow-up', label: 'Follow up', minutes: 10, mode: 'video', active: true }] });
+  expect(firestoreConfig({ bookingWindowDays: 21, intervalMinutes: 30, patientCancellationCutoffHours: 6, autoConfirm: true, visitTypes: [{ id: 'follow-up', label: 'Follow up', minutes: 10, mode: 'video', active: true }] })).toMatchObject({ bookingWindowDays: 21, intervalMinutes: 15, cancelCutoffMinutes: 360, patientCancellationCutoffHours: 6, autoConfirm: true, visitTypes: [{ id: 'follow-up', label: 'Follow up', minutes: 15, mode: 'video', active: true }] });
 });
 
 test('unpublished or inactive legacy records never become bookable', () => {

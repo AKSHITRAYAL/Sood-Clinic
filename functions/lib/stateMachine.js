@@ -1,4 +1,4 @@
-const ROLE = Object.freeze({ manager: 'manager', admin: 'admin', doctor: 'doctor', receptionist: 'receptionist' });
+const ROLE = Object.freeze({ manager: 'manager', admin: 'admin', doctor: 'doctor' });
 
 const TRANSITIONS = Object.freeze({
   scheduled: Object.freeze({ confirmed: ['manager', 'admin', 'doctor'], checked_in: ['manager', 'admin'], cancelled: ['manager', 'admin', 'doctor'], no_show: ['manager', 'admin'] }),

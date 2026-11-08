@@ -32,7 +32,7 @@ export const RESCHEDULABLE_STATUSES = Object.freeze(['scheduled', 'confirmed']);
 
 export const canStaffRescheduleAppointment = (appointment, role, actorDoctorId) => {
   if (!appointment || !RESCHEDULABLE_STATUSES.includes(appointment.status)) return false;
-  if (!['admin', 'manager', 'doctor', 'receptionist'].includes(role)) return false;
+  if (!['admin', 'manager', 'doctor'].includes(role)) return false;
   if (role === 'doctor' && (!actorDoctorId || appointment.doctorId !== actorDoctorId)) return false;
   return true;
 };

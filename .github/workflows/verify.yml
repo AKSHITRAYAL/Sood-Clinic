@@ -14,7 +14,7 @@ jobs:
   # the booking + reschedule callable suites against the *source* schema/connectors,
   # so a Functions change that depends on unreleased SQL fails before it can merge.
   # It does not compare the deployed connector; that stays a manual preflight
-  # (`npx firebase-tools dataconnect:services:list`, see AI_STATE.md).
+  # (`npx firebase-tools dataconnect:services:list`, see README.md).
   booking-sql:
     name: Booking callables against the SQL source
     runs-on: ubuntu-latest
@@ -33,7 +33,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Install root tooling
         run: npm ci
@@ -63,7 +63,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Install root tooling
         run: npm ci
@@ -89,7 +89,7 @@ jobs:
           npm run test:time
           npm run test:schedule
           npx vitest run functions/test
-          npx vitest run Frontend/src/services
+          npm --prefix Frontend test -- --maxWorkers=2
 
       - name: Run Firestore rules tests
         run: npm run test:rules

@@ -8,7 +8,7 @@ const { createSchedulerHoldHandler } = require('../lib/schedulerHoldsCallable');
 const { createSqlSchedulerHolds, HOLD_MINUTES } = require('../lib/sqlSchedulerHolds');
 const { istInstant } = require('../lib/ist');
 
-// B030: the public hold callable. It is exported as `holdAppointment`, but no client
+// B030: the staged hold handler. It is not exported to the public runtime; no client
 // calls it yet and nothing is deployed: App Check is enforced and maxInstances is 1.
 const DOCTOR_LEGACY = 'brig-ak-sood';
 const DOCTOR_UUID = '7f1c2f44-9f3a-4d0b-8b8e-2f6a5c1d3e21';
@@ -107,12 +107,9 @@ test('passes refusals through and hides infrastructure failures', async () => {
   expect(error.message).not.toMatch(/SQL|clinic_appointment_units|permission/i);
 });
 
-test('functions/index.js exports the callable with the guarded public-write options', () => {
-  // Source inspection only: importing index.js would boot admin and the whole module.
+test('the staged hold callable is not exported in the live Functions entry point', () => {
   const source = readFileSync(new URL('../index.js', import.meta.url), 'utf8');
-  expect(source).toMatch(/exports\.holdAppointment\s*=\s*onCall\(\{\s*\.\.\.bookingCallableOptions, enforceAppCheck: true, maxInstances: 1,/);
-  expect(source).toMatch(/createSchedulerHoldHandler\(\{/);
-  expect(source).toMatch(/resolveDoctor: schedulerDoctorIdentity/);
+  expect(source).not.toMatch(/exports\.holdAppointment\s*=/);
 });
 
 test('rejects an incomplete factory instead of failing at request time', () => {

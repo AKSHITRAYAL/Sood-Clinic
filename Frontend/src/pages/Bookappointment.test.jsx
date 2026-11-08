@@ -31,6 +31,8 @@ import Bookappointment from './Bookappointment';
 const options = {
   doctor: { id: 'doc-1', name: 'Synthetic Doctor' },
   bookingWindowDays: 2,
+  slotMinutes: 15,
+  videoWindows: [{ start: '09:00', end: '11:00' }],
   locations: [
     { id: 'jindal-diagnostics', name: 'Jindal Diagnostics', address: 'Plot No. 195, Sector 10, Panchkula', landmark: 'Opposite Sindhi Sweets', windows: [{ start: '09:00', end: '11:00' }] },
     { id: 'dhawan-hospital', name: 'Dhawan Hospital', address: 'Plot No. 1-SP, Sector 7, Panchkula', landmark: '', windows: [{ start: '11:00', end: '15:00' }] },
@@ -47,10 +49,11 @@ const renderPage = () => render(<MemoryRouter><Bookappointment /></MemoryRouter>
 
 const openDetails = async () => {
   renderPage();
+  await screen.findByText('Choose your consultation');
   await screen.findByText('09:00');
   fireEvent.click(screen.getByText('09:00'));
-  fireEvent.click(screen.getByText('Continue'));
-  fireEvent.change(await screen.findByLabelText('Full name'), { target: { value: 'Synthetic Patient' } });
+  fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+  fireEvent.change(await screen.findByLabelText(/Full name/), { target: { value: 'Synthetic Patient' } });
   fireEvent.change(screen.getByLabelText(/Phone number/), { target: { value: '+919000000001' } });
   fireEvent.change(screen.getByLabelText(/Reason for visit/), { target: { value: 'Synthetic reason' } });
   fireEvent.click(screen.getByRole('checkbox'));
@@ -66,7 +69,8 @@ afterEach(cleanup);
 test('an in-person booking submits the chosen location, day and time and confirms it', async () => {
   mocks.submitConsultationRequest.mockResolvedValue({ data: { reference: 'CR-TEST01', status: 'confirmed', accessToken: 'token-123' } });
   await openDetails();
-  fireEvent.click(screen.getByText('Confirm appointment'));
+  fireEvent.click(screen.getByText('Review details →'));
+  fireEvent.click(screen.getByText('Submit booking'));
 
   await screen.findByText(/Appointment confirmed/);
   expect(screen.getByText(/CR-TEST01/)).toBeTruthy();
@@ -92,15 +96,18 @@ test('an in-person booking submits the chosen location, day and time and confirm
 test('a video booking uses the shared calendar and confirms the chosen time', async () => {
   mocks.submitConsultationRequest.mockResolvedValue({ data: { reference: 'CR-VIDEO1', status: 'confirmed', accessToken: 'token-video' } });
   renderPage();
-  await screen.findByLabelText('Consultation type');
-  fireEvent.change(screen.getByLabelText('Consultation type'), { target: { value: 'video' } });
+  await screen.findByText('Choose your consultation');
+  fireEvent.click(screen.getByRole('button', { name: /Online video/ }));
+  expect(screen.getByLabelText('Choose an appointment date')).toBeTruthy();
+  expect(screen.queryByLabelText('Clinic location')).toBeNull();
   await screen.findByText('09:00');
   fireEvent.click(screen.getByText('09:00'));
-  fireEvent.click(screen.getByText('Continue'));
-  fireEvent.change(await screen.findByLabelText('Full name'), { target: { value: 'Synthetic Patient' } });
+  fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+  fireEvent.change(await screen.findByLabelText(/Full name/), { target: { value: 'Synthetic Patient' } });
   fireEvent.change(screen.getByLabelText(/Email address/), { target: { value: 'guest@example.com' } });
   fireEvent.click(screen.getByRole('checkbox'));
-  fireEvent.click(screen.getByText('Confirm appointment'));
+  fireEvent.click(screen.getByText('Review details →'));
+  fireEvent.click(screen.getByText('Submit booking'));
 
   await screen.findByText(/Online consultation confirmed/);
   const payload = mocks.submitConsultationRequest.mock.calls[0][0];
@@ -113,7 +120,8 @@ test('a video booking uses the shared calendar and confirms the chosen time', as
 test('an unavailable time explains itself without mutating the slot grid', async () => {
   mocks.submitConsultationRequest.mockRejectedValueOnce(failure('failed-precondition', 'That time was just taken. Please choose another time.'));
   await openDetails();
-  fireEvent.click(screen.getByText('Confirm appointment'));
+  fireEvent.click(screen.getByText('Review details →'));
+  fireEvent.click(screen.getByText('Submit booking'));
 
   await screen.findByText('That time was just taken. Please choose another time.');
   expect(screen.getByText('09:00')).toBeTruthy();
@@ -123,29 +131,31 @@ test('an unavailable time explains itself without mutating the slot grid', async
 test('the contact cap uses the server copy, or a call-the-clinic fallback when stripped', async () => {
   mocks.submitConsultationRequest.mockRejectedValueOnce(failure('resource-exhausted', 'You already have several requests awaiting clinic review.'));
   await openDetails();
-  fireEvent.click(screen.getByText('Confirm appointment'));
+  fireEvent.click(screen.getByText('Review details →'));
+  fireEvent.click(screen.getByText('Submit booking'));
   await screen.findByText('You already have several requests awaiting clinic review.');
 
   cleanup();
   await openDetails();
   mocks.submitConsultationRequest.mockRejectedValueOnce(failure('resource-exhausted'));
-  fireEvent.click(screen.getByText('Confirm appointment'));
+  fireEvent.click(screen.getByText('Review details →'));
+  fireEvent.click(screen.getByText('Submit booking'));
   await screen.findByText('You have reached the online request limit. Please call the clinic.');
 });
 
 test('a guest with neither phone nor email is stopped before the callable', async () => {
   await openDetails();
   fireEvent.change(screen.getByLabelText(/Phone number/), { target: { value: '' } });
-  fireEvent.click(screen.getByText('Confirm appointment'));
+  fireEvent.click(screen.getByText('Review details →'));
 
-  await screen.findByText('Enter a phone number or email address so the clinic can confirm your request.');
+  await screen.findByText('Enter a phone number or email address.');
   expect(mocks.submitConsultationRequest).not.toHaveBeenCalled();
 });
 
 test('the availability read is retried for a different location', async () => {
   renderPage();
-  await screen.findByText('09:00');
-  fireEvent.change(screen.getByLabelText('Clinic location'), { target: { value: 'dhawan-hospital' } });
+  await screen.findByText('Choose your consultation');
+  fireEvent.click(screen.getByRole('button', { name: /Dhawan Hospital/ }));
   await waitFor(() => expect(mocks.getConsultationAvailability).toHaveBeenLastCalledWith(expect.objectContaining({
     locationId: 'dhawan-hospital',
   })));
@@ -155,7 +165,47 @@ test('the availability read is retried for a different location', async () => {
 test('a pending request is never presented as confirmed', async () => {
   mocks.submitConsultationRequest.mockResolvedValue({ data: { reference: 'CR-PENDING', status: 'pending' } });
   await openDetails();
-  fireEvent.click(screen.getByText('Confirm appointment'));
+  fireEvent.click(screen.getByText('Review details →'));
+  fireEvent.click(screen.getByText('Submit booking'));
   await screen.findByText('Request submitted.');
   expect(screen.queryByText('Appointment confirmed.')).toBeNull();
+});
+
+
+test('an interrupted submission preserves patient details for retry', async () => {
+  mocks.submitConsultationRequest.mockRejectedValueOnce(failure('unavailable'));
+  await openDetails();
+  fireEvent.click(screen.getByText('Review details →'));
+  fireEvent.click(screen.getByText('Submit booking'));
+  await screen.findByText(/temporarily unavailable/);
+  fireEvent.click(screen.getByText('Edit details'));
+  expect(screen.getByLabelText(/Full name/).value).toBe('Synthetic Patient');
+  expect(screen.getByLabelText(/Phone number/).value).toBe('+919000000001');
+});
+
+
+test('rejects a short phone number before the review screen', async () => {
+  await openDetails();
+  fireEvent.change(screen.getByLabelText(/Phone number/), { target: { value: '91' } });
+  fireEvent.click(screen.getByText('Review details →'));
+  await screen.findByText('Phone number is invalid.');
+  expect(screen.queryByText('Check your details')).toBeNull();
+  expect(mocks.submitConsultationRequest).not.toHaveBeenCalled();
+});
+
+
+test('configured times not returned by availability are disabled', async () => {
+  mocks.getConsultationAvailability.mockResolvedValue({ data: { slots: [] } });
+  renderPage();
+  const time = await screen.findByRole('button', { name: '09:00 unavailable' });
+  expect(time.disabled).toBe(true);
+  expect(screen.getByText('Faded times are unavailable.')).toBeTruthy();
+  expect(screen.getByRole('button', { name: /Continue/ }).disabled).toBe(true);
+});
+
+test('availability failures do not display configured times as known unavailable', async () => {
+  mocks.getConsultationAvailability.mockRejectedValue(failure('unavailable'));
+  renderPage();
+  await screen.findByText(/temporarily unavailable/);
+  expect(screen.queryByRole('button', { name: '09:00 unavailable' })).toBeNull();
 });
